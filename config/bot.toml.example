@@ -1,0 +1,51 @@
+# Lolo IRC Bot Configuration
+# Copy this file to config/bot.toml and customize for your setup
+# The bot will create a default config if this file doesn't exist
+
+[server]
+  address = "irc.libera.chat"
+  port = 6697
+  tls = true
+  nickname = "YourBotName"
+  alt_nicknames = ["YourBotName_", "YourBotName__"]
+  username = "yourbot"
+  realname = "Your IRC Bot"
+  max_message_length = 400
+
+[auth]
+  # SASL authentication (recommended for registered nicks)
+  sasl_username = "YourBotName"
+  sasl_password = ""  # Leave empty if not using SASL
+  
+  # NickServ authentication (alternative to SASL)
+  nickserv_password = ""  # Leave empty if not using NickServ
+
+[bot]
+  command_prefix = "!"
+  channels = ["#yourchannel"]  # Channels to join on startup
+  api_endpoint = "http://localhost:8000"  # Python API endpoint
+  api_timeout = 120
+  test_mode = false  # Set to true to use mock API for testing
+
+[limits]
+  rate_limit_messages = 1      # Messages per window
+  rate_limit_window = 1        # Window in seconds
+  max_message_queue = 100      # Max queued messages
+  reconnect_delay_min = 5      # Min reconnect delay (seconds)
+  reconnect_delay_max = 300    # Max reconnect delay (seconds)
+  command_cooldown = 3         # Cooldown between commands (seconds)
+
+[database]
+  wal_mode = true              # Use WAL mode for better concurrency
+  vacuum_interval = 86400      # Auto-vacuum interval (seconds)
+  message_retention_days = 90  # How long to keep messages
+
+[logging]
+  max_log_size_mb = 10        # Max log file size before rotation
+  max_log_files = 5           # Number of log files to keep
+
+[api]
+  circuit_breaker_threshold = 5  # Failures before circuit opens
+  circuit_breaker_timeout = 30   # Circuit timeout (seconds)
+  max_retries = 3                # Max API retry attempts
+  retry_backoff_ms = 100         # Retry backoff (milliseconds)

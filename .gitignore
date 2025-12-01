@@ -1,0 +1,130 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+lolo
+
+# Go build artifacts
+/bin/
+/pkg/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Data and logs - exclude all runtime data
+data/
+*.log
+*.log.*
+logs/
+
+# User data and sensitive files
+data/user_rules.json
+data/error.log
+data/bot.db*
+
+# Config files with potential secrets
+config/bot.toml
+
+# API keys and environment files
+.env
+.env.local
+.env.production
+.env.staging
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Testing
+*.test
+coverage.txt
+coverage.html
+
+# Temporary files
+*.tmp
+*.bak
+*.temp
+tmp/
+temp/
+
+# Image files (generated/uploaded images)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+uploads/
+images/
+
+# Backup files
+*.backup
+*.old
+*~
+.#*
+
+# OS generated files
+Thumbs.db
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# Runtime and cache
+*.pid
+*.sock
+cache/
+.cache/
+
+# Documentation (development docs)
+docs/
+
+# Kiro files
+.kiro/
+*.kiro
+
+# Docs
+.docs/

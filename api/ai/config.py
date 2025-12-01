@@ -1,0 +1,93 @@
+"""
+AI configuration loader.
+
+Loads and validates AI settings from TOML configuration file.
+"""
+
+import os
+from pathlib import Path
+from typing import Optional, List
+import tomli
+from dotenv import load_dotenv
+
+# Load .env file
+load_dotenv()
+
+
+class AIConfig:
+    """AI configuration settings."""
+    
+    def __init__(self, config_path: Optional[str] = None):
+        """
+        Load AI configuration from TOML file.
+        
+        Args:
+            config_path: Path to config file. If None, uses default location.
+        """
+        if config_path is None:
+            # Default to api/config/ai_settings.toml
+            config_path = Path(__file__).parent.parent / "config" / "ai_settings.toml"
+        
+        with open(config_path, "rb") as f:
+            config = tomli.load(f)
+        
+        # Model settings
+        self.model_name: str = config["model"]["name"]
+        self.reasoning_effort: str = config["model"]["reasoning_effort"]
+        self.verbosity: str = config["model"]["verbosity"]
+        
+        # Limits
+        self.max_output_tokens: int = config["limits"]["max_output_tokens"]
+        self.timeout: int = config["limits"]["timeout"]
+        
+        # System prompt
+        self.system_prompt: str = config["system_prompt"]["text"]
+        
+        # Tools
+        self.web_search_enabled: bool = config["tools"]["web_search_enabled"]
+        self.python_exec_enabled: bool = config["tools"]["python_exec_enabled"]
+        self.flux_create_enabled: bool = config["tools"]["flux_create_enabled"]
+        self.flux_edit_enabled: bool = config["tools"]["flux_edit_enabled"]
+        self.image_analysis_enabled: bool = config["tools"]["image_analysis_enabled"]
+        self.fetch_url_enabled: bool = config["tools"].get("fetch_url_enabled", True)
+        self.user_rules_enabled: bool = config["tools"].get("user_rules_enabled", True)
+        
+        self.chat_history_enabled: bool = config["tools"].get("chat_history_enabled", True)
+        self.paste_enabled: bool = config["tools"].get("paste_enabled", True)
+        
+        # Web search settings
+        self.web_search_external_access: bool = config["web_search"]["external_web_access"]
+        self.web_search_allowed_domains: List[str] = config["web_search"]["allowed_domains"]
+        
+        # Python execution settings
+        self.python_exec_timeout: int = config["python_exec"]["execution_timeout"]
+        self.python_exec_max_memory: int = config["python_exec"]["max_memory_mb"]
+        self.python_exec_allowed_modules: List[str] = config["python_exec"]["allowed_modules"]
+        
+        # OpenAI API key from environment
+        self.openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+        if not self.openai_api_key:
+            raise ValueError("OPENAI_API_KEY environment variable not set")
+    
+    def get_enabled_tools(self) -> List[str]:
+        """Get list of enabled tool names."""
+        tools = []
+        if self.web_search_enabled:
+            tools.append("web_search")
+        if self.python_exec_enabled:
+            tools.append("python_exec")
+        if self.flux_create_enabled:
+            tools.append("flux_create_image")
+        if self.flux_edit_enabled:
+            tools.append("flux_edit_image")
+        if self.image_analysis_enabled:
+            tools.append("analyze_image")
+        if self.fetch_url_enabled:
+            tools.append("fetch_url")
+        if self.user_rules_enabled:
+            tools.append("manage_user_rules")
+        if self.chat_history_enabled:
+            tools.append("query_chat_history")
+        if self.paste_enabled:
+            tools.append("create_paste")
+        return tools

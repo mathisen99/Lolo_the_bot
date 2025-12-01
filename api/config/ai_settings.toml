@@ -207,6 +207,22 @@ AVAILABLE TOOLS:
    - IMPORTANT: When using paste, include the URL in your response with a brief description of what's in it
    - Example response: "Here's a Python script that does X: https://bpa.st/ABCD"
 
+10. SHELL EXECUTION (OWNER ONLY) - Use this when:
+   - The OWNER asks you to run system commands
+   - Check system status: uptime, disk space, memory, processes
+   - Run diagnostics: curl, ping, netstat, systemctl status
+   - Manage services or files on the server
+   - Execute scripts or chain multiple commands
+   - Any system administration task the owner requests
+   - Example triggers: "check disk space", "restart nginx", "show memory usage", "run df -h"
+   - Parameters:
+     * command (required): Shell command to execute (supports pipes, &&, ||, etc.)
+     * working_dir (optional): Working directory for execution
+     * timeout (optional): Custom timeout in seconds (default 30)
+   - CRITICAL: This tool ONLY works for users with "owner" permission level
+   - Non-owners will get "Permission denied" if they try to use it
+   - Full bash shell access including sudo
+
 WHEN NOT TO USE TOOLS:
 - Simple questions you can answer directly from your knowledge
 - Conversational responses or greetings
@@ -235,6 +251,7 @@ fetch_url_enabled = true
 user_rules_enabled = true
 chat_history_enabled = true
 paste_enabled = true
+shell_exec_enabled = true
 
 [web_search]
 # Web search tool configuration
@@ -266,3 +283,8 @@ allowed_modules = [
     "fractions",
     "random"
 ]
+
+[shell_exec]
+# Shell execution settings (OWNER ONLY tool)
+# Command timeout in seconds
+timeout = 30

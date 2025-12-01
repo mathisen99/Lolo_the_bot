@@ -14,9 +14,10 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **Python Code Execution** - Run Python code snippets safely
 - **Text Pasting** - Create pastes for long code/text (bpa.st integration)
 - **Chat History** - Access conversation context and history
+- **Shell Execution** - Run system commands (owner only)
 
 ### Bot Management
-- **User Rules** - Per-user custom personas that persist across conversations
+- **User Memories** - Per-user memories and custom personas that persist across conversations
 - **User Management** - Permission levels (owner, admin, normal, ignored)
 - **IRC Formatting** - AI can use colors, bold, italic, and other IRC formatting
 - **Moderation** - Kick, ban, mute, and channel management commands
@@ -136,7 +137,8 @@ The bot has access to these tools when mentioned:
 | **Image Analysis** | Analyze, describe, or extract text from images | "what's in this image?" |
 | **Python Execution** | Run Python code snippets | "calculate fibonacci sequence in python" |
 | **Text Pasting** | Create pastes for long content | "paste this code snippet" |
-| **User Rules** | Manage personal AI behavior rules | "roleplay as a pirate" |
+| **User Memories** | Store personal facts and preferences | "remember I like cats" |
+| **Shell Execution** | Run system commands (owner only) | "check disk space" |
 
 ### IRC Formatting
 
@@ -153,28 +155,50 @@ Supported formatting:
 - `<COLOR fg="04" bg="01">red on black</COLOR>`
 - Nesting supported: `<BOLD><COLOR fg="04">bold red</COLOR></BOLD>`
 
-### User Rules (Custom Personas)
+### User Memories
 
-Set personal rules that change how the bot responds to you:
+Store multiple personal facts, preferences, and personas that persist across conversations:
 ```
+<you>  lolo: remember that I like cats
+<lolo> Got it! Added memory #1: "User likes cats"
+
+<you>  lolo: remember my favorite color is blue
+<lolo> Added memory #2: "User's favorite color is blue"
+
 <you>  lolo: roleplay as a pirate
-<lolo> Aye aye! I'll be speakin' like a pirate for ye from now on!
+<lolo> Added memory #3: "Roleplay as a pirate"
 
-<you>  lolo: what rules do I have?
-<lolo> Yer rules: Always speak as a friendly pirate...
+<you>  lolo: list my memories
+<lolo> [1] ✓ User likes cats | [2] ✓ Favorite color is blue | [3] ✓ Roleplay as pirate
 
-<you>  lolo: turn off my roleplay
-<lolo> Rules disabled, but saved for later.
+<you>  lolo: forget that I like cats
+<lolo> Deleted memory #1
 
-<you>  lolo: clear my rules
-<lolo> Your rules have been cleared.
+<you>  lolo: disable entry 3
+<lolo> Disabled memory #3. It's saved but won't be applied.
 ```
 
-Owners/admins can manage rules for other users:
+Owners/admins can manage memories for other users:
 ```
-<admin> lolo: set rules for bob to respond in French
-<lolo>  Done, bob will now receive responses in French.
+<admin> lolo: add memory for bob that he speaks French
+<lolo>  Done, added memory for bob.
 ```
+
+### Shell Execution (Owner Only)
+
+The bot owner can run system commands:
+```
+<owner> lolo: check disk space
+<lolo>  /dev/sda1  50G  25G  25G  50% /
+
+<owner> lolo: show memory usage
+<lolo>  Mem: 16Gi total, 8Gi used, 8Gi free...
+
+<owner> lolo: run uptime && free -h
+<lolo>  up 5 days, 3:42, load: 0.5 | Mem: 16Gi...
+```
+
+Non-owners attempting shell commands will be denied.
 
 ### Commands
 
@@ -265,8 +289,9 @@ flux_edit_enabled = true       # Image editing (requires BFL_API_KEY)
 image_analysis_enabled = true  # Image analysis/OCR
 python_exec_enabled = true     # Python code execution
 paste_enabled = true           # Text pasting to bpa.st
-user_rules_enabled = true      # Per-user custom rules
+user_rules_enabled = true      # Per-user memories and rules
 chat_history_enabled = true    # Conversation history access
+shell_exec_enabled = true      # Shell command execution (owner only)
 ```
 
 **Note:** Tools requiring missing API keys will be automatically disabled.

@@ -7,7 +7,7 @@ Handles communication with OpenAI API and tool execution.
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
 from .config import AIConfig
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -56,6 +56,8 @@ class AIClient:
                         tools_used.append('CHAT_HISTORY')
                     elif func_name == 'create_paste':
                         tools_used.append('PASTE')
+                    elif func_name == 'execute_shell':
+                        tools_used.append('SHELL_EXEC')
         
         if tools_used:
             tools_str = ', '.join(tools_used)
@@ -110,6 +112,11 @@ class AIClient:
             paste = PasteTool()
             self.tools[paste.name] = paste
             log_info("Paste tool enabled")
+        
+        if self.config.shell_exec_enabled:
+            shell_exec = ShellExecTool(timeout=self.config.shell_exec_timeout)
+            self.tools[shell_exec.name] = shell_exec
+            log_info("Shell execution tool enabled (OWNER ONLY)")
     
     def generate_response(self, user_message: str, request_id: str) -> str:
         """
@@ -311,8 +318,8 @@ class AIClient:
                 log_info(f"[{request_id}] Executing {func_name} with args: {func_args}")
                 
                 try:
-                    # Inject permission_level for user_rules tool
-                    if func_name == 'manage_user_rules':
+                    # Inject permission_level for tools that need it
+                    if func_name in ('manage_user_rules', 'execute_shell'):
                         func_args['permission_level'] = permission_level
                     
                     # Execute the tool

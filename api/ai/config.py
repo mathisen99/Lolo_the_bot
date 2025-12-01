@@ -54,6 +54,10 @@ class AIConfig:
         
         self.chat_history_enabled: bool = config["tools"].get("chat_history_enabled", True)
         self.paste_enabled: bool = config["tools"].get("paste_enabled", True)
+        self.shell_exec_enabled: bool = config["tools"].get("shell_exec_enabled", True)
+        
+        # Shell execution settings
+        self.shell_exec_timeout: int = config.get("shell_exec", {}).get("timeout", 30)
         
         # Web search settings
         self.web_search_external_access: bool = config["web_search"]["external_web_access"]
@@ -90,4 +94,6 @@ class AIConfig:
             tools.append("query_chat_history")
         if self.paste_enabled:
             tools.append("create_paste")
+        if self.shell_exec_enabled:
+            tools.append("execute_shell")
         return tools

@@ -153,16 +153,27 @@ AVAILABLE TOOLS:
    - TIP: For mailing lists/forums, fetch the thread index first, then follow links to specific posts
    - Use WEB SEARCH for general queries, use FETCH URL when you have a specific URL to read
 
-7. USER RULES - Use this when:
-   - User wants to set custom rules/persona for how you respond to them
-   - User asks you to roleplay as a character or adopt a specific personality
-   - User wants to view, update, enable, disable, or clear their rules
-   - Example triggers: "roleplay as X", "pretend to be", "act like", "what rules do I have", "turn off my roleplay", "clear my rules"
-   - Actions: get (view), set (create/update), clear (remove), enable, disable
-   - Rules persist across conversations and are automatically applied
-   - Owners and admins can manage rules for other users
-   - IMPORTANT: Always pass the requesting user's nick (from the conversation) as requesting_user
-   - If a user has active rules, they will appear in the CUSTOM RULES section above
+7. USER MEMORIES/RULES - Use this when:
+   - User asks you to REMEMBER something: "remember I like cats", "remember my name is Bob", "remember I'm allergic to peanuts"
+   - User wants to add a roleplay/persona: "roleplay as a pirate", "act like a helpful butler"
+   - User wants to see what you remember: "what do you remember about me?", "list my memories", "what are my rules?"
+   - User wants to FORGET something specific: "forget that I like cats", "delete entry 2", "remove the one about my name"
+   - User wants to update a specific memory: "update entry 1 to say I love cats", "change the cat one to dogs"
+   - User wants to clear everything: "forget everything about me", "clear all my memories"
+   - User wants to enable/disable entries: "disable entry 3", "turn off my roleplay", "enable all"
+   - Each user can have MULTIPLE separate memories/rules (not just one!)
+   - Actions: list (view all), add (new entry), update (modify), delete (remove one), clear (remove all), enable, disable
+   - Parameters:
+     * action (required): list, add, update, delete, clear, enable, disable
+     * requesting_user (required): The nick making the request
+     * target_user (optional): For admins to manage other users
+     * content (for add/update): The memory text
+     * entry_id (optional): Specific entry number to operate on
+     * search_term (optional): Find entry by content match instead of ID
+   - Memories persist across conversations and enabled ones are automatically applied
+   - Owners and admins can manage memories for other users
+   - IMPORTANT: Use 'add' for NEW memories, 'update' only to MODIFY existing ones
+   - If a user has active memories, they will appear in the CUSTOM RULES section above
 
 8. CHAT HISTORY - Use this when:
    - User asks about past conversations beyond the recent 20 messages shown

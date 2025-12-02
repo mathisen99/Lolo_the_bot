@@ -252,6 +252,7 @@ class AIClient:
         
         Uses previous_response_id to maintain reasoning chain across turns.
         Loops until the model stops requesting function calls or max iterations reached.
+        All tools are treated uniformly - outputs feed back into the loop for potential chaining.
         
         Args:
             response: Initial API response
@@ -326,7 +327,7 @@ class AIClient:
                     result = tool.execute(**func_args)
                     log_success(f"[{request_id}] {func_name} executed successfully: {result[:100] if len(result) > 100 else result}")
                     
-                    # Handle image analysis differently - needs special input format
+                    # Handle image analysis - needs vision API call but continues the chain
                     if func_name == 'analyze_image':
                         result_data = json.loads(result)
                         
@@ -337,21 +338,20 @@ class AIClient:
                                 "output": f"Error: {result_data.get('error', 'Unknown error')}"
                             })
                         else:
-                            # For image analysis, we need to make a special call with the image
-                            # This breaks the chain but is necessary for vision
+                            # Make vision API call to analyze the image
                             image_data = result_data.get('image_data', {})
                             question = result_data.get('question', '')
                             
                             question_text = f" Question: {question}" if question else ""
-                            simple_input = f"User asked about an image.{question_text}\n\nPlease analyze the image and respond to the user's request."
+                            vision_prompt = f"Analyze this image in detail.{question_text} Provide a comprehensive description that could be used to recreate or understand the image."
                             
-                            response = self.client.responses.create(
+                            vision_response = self.client.responses.create(
                                 model=self.config.model_name,
                                 input=[
                                     {
                                         "role": "user",
                                         "content": [
-                                            {"type": "input_text", "text": simple_input},
+                                            {"type": "input_text", "text": vision_prompt},
                                             image_data
                                         ]
                                     }
@@ -361,10 +361,18 @@ class AIClient:
                                 max_output_tokens=5000,
                                 timeout=self.config.timeout
                             )
-                            # Image analysis returns directly, no more iterations
-                            return response
+                            
+                            # Extract the analysis text and feed it back as tool output
+                            analysis_text = self._extract_output(vision_response, request_id)
+                            log_info(f"[{request_id}] Image analysis complete, feeding back to chain")
+                            
+                            function_outputs.append({
+                                "type": "function_call_output",
+                                "call_id": call_id,
+                                "output": analysis_text
+                            })
                     else:
-                        # Standard function output
+                        # Standard function output - all tools treated the same
                         function_outputs.append({
                             "type": "function_call_output",
                             "call_id": call_id,

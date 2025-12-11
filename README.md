@@ -11,6 +11,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **Image Generation** - Create images from text prompts (Flux AI)
 - **Image Editing** - Modify existing images with text instructions
 - **Image Analysis** - Describe images, solve visual puzzles, OCR text recognition
+- **Image Archiving** - Auto-download images from configured channels to local `img/` folder
 - **Python Code Execution** - Run Python code snippets safely
 - **Text Pasting** - Create pastes for long code/text (bpa.st integration)
 - **Chat History** - Access conversation context and history
@@ -257,6 +258,9 @@ nickserv_password = ""          # NickServ password (optional)
 [bot]
 command_prefix = "!"            # Command prefix (e.g., !help)
 channels = ["#yourchannel"]     # Channels to join on startup
+
+[images]
+download_channels = ["#yourchannel"]  # Channels to auto-download images from
 ```
 
 ### Step 4: Customize AI Personality (api/config/ai_settings.toml)

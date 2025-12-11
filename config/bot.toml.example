@@ -49,3 +49,8 @@
   circuit_breaker_timeout = 30   # Circuit timeout (seconds)
   max_retries = 3                # Max API retry attempts
   retry_backoff_ms = 100         # Retry backoff (milliseconds)
+
+[images]
+  # Channels to auto-download images from (user-posted images)
+  # Bot-generated images (flux create/edit) are always saved to img/
+  download_channels = ["#yourchannel"]

@@ -11,6 +11,12 @@ type Config struct {
 	Database DatabaseConfig `toml:"database"`
 	Logging  LoggingConfig  `toml:"logging"`
 	API      APIConfig      `toml:"api"`
+	Images   ImagesConfig   `toml:"images"`
+}
+
+// ImagesConfig contains image download settings
+type ImagesConfig struct {
+	DownloadChannels []string `toml:"download_channels"`
 }
 
 // ServerConfig contains IRC server connection settings

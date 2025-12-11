@@ -23,32 +23,34 @@ import (
 
 // MessageHandler handles all incoming IRC messages and routes them appropriately
 type MessageHandler struct {
-	dispatcher      *commands.Dispatcher
-	mentionHandler  *MentionHandler
-	apiClient       APIClientInterface
-	userManager     *user.Manager
-	db              *database.DB
-	logger          output.Logger
-	errorHandler    *errors.ErrorHandler
-	splitter        *splitter.Splitter
-	splitTracker    *splitter.StateTracker // Tracks split message state for error recovery
-	commandPrefix   string
-	testMode        bool
-	commandMetadata map[string]*CommandMetadata // Cache of API command metadata
+	dispatcher            *commands.Dispatcher
+	mentionHandler        *MentionHandler
+	apiClient             APIClientInterface
+	userManager           *user.Manager
+	db                    *database.DB
+	logger                output.Logger
+	errorHandler          *errors.ErrorHandler
+	splitter              *splitter.Splitter
+	splitTracker          *splitter.StateTracker // Tracks split message state for error recovery
+	commandPrefix         string
+	testMode              bool
+	commandMetadata       map[string]*CommandMetadata // Cache of API command metadata
+	imageDownloadChannels []string                    // Channels to auto-download images from
 }
 
 // MessageHandlerConfig contains configuration for the message handler
 type MessageHandlerConfig struct {
-	Dispatcher    *commands.Dispatcher
-	APIClient     APIClientInterface
-	UserManager   *user.Manager
-	DB            *database.DB
-	Logger        output.Logger
-	ErrorHandler  *errors.ErrorHandler
-	Splitter      *splitter.Splitter
-	BotNick       string
-	CommandPrefix string
-	TestMode      bool
+	Dispatcher            *commands.Dispatcher
+	APIClient             APIClientInterface
+	UserManager           *user.Manager
+	DB                    *database.DB
+	Logger                output.Logger
+	ErrorHandler          *errors.ErrorHandler
+	Splitter              *splitter.Splitter
+	BotNick               string
+	CommandPrefix         string
+	TestMode              bool
+	ImageDownloadChannels []string
 }
 
 // NewMessageHandler creates a new message handler
@@ -62,18 +64,19 @@ func NewMessageHandler(config *MessageHandlerConfig) *MessageHandler {
 	)
 
 	return &MessageHandler{
-		dispatcher:      config.Dispatcher,
-		mentionHandler:  mentionHandler,
-		apiClient:       config.APIClient,
-		userManager:     config.UserManager,
-		db:              config.DB,
-		logger:          config.Logger,
-		errorHandler:    config.ErrorHandler,
-		splitter:        config.Splitter,
-		splitTracker:    splitter.NewStateTracker(),
-		commandPrefix:   config.CommandPrefix,
-		testMode:        config.TestMode,
-		commandMetadata: make(map[string]*CommandMetadata),
+		dispatcher:            config.Dispatcher,
+		mentionHandler:        mentionHandler,
+		apiClient:             config.APIClient,
+		userManager:           config.UserManager,
+		db:                    config.DB,
+		logger:                config.Logger,
+		errorHandler:          config.ErrorHandler,
+		splitter:              config.Splitter,
+		splitTracker:          splitter.NewStateTracker(),
+		commandPrefix:         config.CommandPrefix,
+		testMode:              config.TestMode,
+		commandMetadata:       make(map[string]*CommandMetadata),
+		imageDownloadChannels: config.ImageDownloadChannels,
 	}
 }
 
@@ -121,10 +124,12 @@ func (h *MessageHandler) HandleMessage(ctx context.Context, nick, hostmask, chan
 		// Continue processing even if logging fails
 	}
 
-	// Check if message contains an image URL and download it
+	// Check if message contains an image URL and download it (only for configured channels)
 	if imageURL := ExtractImageURL(message); imageURL != "" {
-		if err := h.downloadImage(imageURL); err != nil {
-			h.logger.Warning("Failed to download image: %v", err)
+		if h.shouldDownloadFromChannel(channel) {
+			if err := h.downloadImage(imageURL); err != nil {
+				h.logger.Warning("Failed to download image: %v", err)
+			}
 		}
 	}
 
@@ -325,6 +330,13 @@ func (h *MessageHandler) handleAPICommand(ctx context.Context, command string, a
 		}
 	}
 
+	// Download any images in the API response (flux create/edit)
+	if imageURL := ExtractImageURL(apiResp.Message); imageURL != "" {
+		if err := h.downloadImage(imageURL); err != nil {
+			h.logger.Warning("Failed to download API-generated image: %v", err)
+		}
+	}
+
 	// Return the API response
 	return h.splitMessage(apiResp.Message), nil
 }
@@ -392,6 +404,15 @@ func (h *MessageHandler) handleStreamingAPICommand(ctx context.Context, command 
 		return []string{lastError}, nil
 	}
 
+	// Download any images in streaming responses (flux create/edit)
+	for _, resp := range responses {
+		if imageURL := ExtractImageURL(resp); imageURL != "" {
+			if err := h.downloadImage(imageURL); err != nil {
+				h.logger.Warning("Failed to download streaming API-generated image: %v", err)
+			}
+		}
+	}
+
 	// Return all collected responses
 	return responses, nil
 }
@@ -408,6 +429,13 @@ func (h *MessageHandler) handleMention(ctx context.Context, nick, hostmask, chan
 
 	if response == "" {
 		return nil, nil
+	}
+
+	// Download any images the bot generated (flux create/edit)
+	if imageURL := ExtractImageURL(response); imageURL != "" {
+		if err := h.downloadImage(imageURL); err != nil {
+			h.logger.Warning("Failed to download bot-generated image: %v", err)
+		}
 	}
 
 	// Convert custom formatting tags to IRC control codes
@@ -521,6 +549,16 @@ func (h *MessageHandler) logMessage(nick, hostmask, channel, content string, isB
 // UpdateBotNick updates the bot's current nickname
 func (h *MessageHandler) UpdateBotNick(nick string) {
 	h.mentionHandler.UpdateBotNick(nick)
+}
+
+// shouldDownloadFromChannel checks if images should be downloaded from a channel
+func (h *MessageHandler) shouldDownloadFromChannel(channel string) bool {
+	for _, ch := range h.imageDownloadChannels {
+		if strings.EqualFold(ch, channel) {
+			return true
+		}
+	}
+	return false
 }
 
 // parsePermissionLevel converts a string permission level to database.PermissionLevel

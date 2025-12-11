@@ -133,3 +133,6 @@ docs/
 # Binaries
 Lolo
 lolo
+
+# Test scripts and random stuff
+download_images.py

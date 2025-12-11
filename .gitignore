@@ -97,6 +97,7 @@ temp/
 *.webp
 uploads/
 images/
+img/
 
 # Backup files
 *.backup
@@ -128,3 +129,7 @@ docs/
 
 # Docs
 .docs/
+
+# Binaries
+Lolo
+lolo

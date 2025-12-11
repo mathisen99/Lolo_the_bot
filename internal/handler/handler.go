@@ -3,6 +3,11 @@ package handler
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -114,6 +119,13 @@ func (h *MessageHandler) HandleMessage(ctx context.Context, nick, hostmask, chan
 		// Log error but don't stop processing
 		h.errorHandler.LogError(errors.NewDatabaseError("log message", err), "message logging")
 		// Continue processing even if logging fails
+	}
+
+	// Check if message contains an image URL and download it
+	if imageURL := ExtractImageURL(message); imageURL != "" {
+		if err := h.downloadImage(imageURL); err != nil {
+			h.logger.Warning("Failed to download image: %v", err)
+		}
 	}
 
 	// Check if this is a command
@@ -627,4 +639,79 @@ func (h *MessageHandler) CleanupOldSplits(maxAge time.Duration) int {
 		h.logger.Warning("Cleaned up %d old split operations", cleaned)
 	}
 	return cleaned
+}
+
+// imageURLRegex matches common image file extensions in URLs
+var imageURLRegex = regexp.MustCompile(`https?://\S+\.(?:png|jpg|jpeg|gif|webp|bmp|tiff|svg|ico|heic|heif|jfif|pjpeg|pjp|avif|apng|jxl|jpe|jif|jfi)`)
+
+// downloadImage downloads an image from a URL to the img/ folder in the project root
+// downloadImage downloads an image from a URL to the img/ folder
+func (h *MessageHandler) downloadImage(imageURL string) error {
+	// Ensure img directory exists (relative to where bot runs)
+	imgDir := "img"
+	if err := os.MkdirAll(imgDir, 0755); err != nil {
+		return fmt.Errorf("failed to create img directory: %w", err)
+	}
+
+	// Create request with browser-like headers to bypass bot protection
+	req, err := http.NewRequest("GET", imageURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers to mimic a real browser request
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Accept-Encoding", "identity") // Don't request compression for images
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Sec-Fetch-Dest", "image")
+	req.Header.Set("Sec-Fetch-Mode", "no-cors")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	req.Header.Set("Referer", imageURL) // Some hosts check referer
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to fetch image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad status code: %d", resp.StatusCode)
+	}
+
+	// Extract filename from URL and add timestamp to avoid duplicates
+	originalName := filepath.Base(imageURL)
+	ext := filepath.Ext(originalName)
+	baseName := strings.TrimSuffix(originalName, ext)
+	timestamp := time.Now().UnixNano()
+	filename := fmt.Sprintf("%s_%d%s", baseName, timestamp, ext)
+	destPath := filepath.Join(imgDir, filename)
+
+	// Create the destination file directly
+	outFile, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer outFile.Close()
+
+	// Copy response body to file
+	_, err = io.Copy(outFile, resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to write image: %w", err)
+	}
+
+	h.logger.Success("Downloaded image: %s", destPath)
+	return nil
+}
+
+// ContainsImageURL checks if a message contains an image URL
+func ContainsImageURL(message string) bool {
+	return imageURLRegex.MatchString(message)
+}
+
+// ExtractImageURL extracts the first image URL from a message
+func ExtractImageURL(message string) string {
+	return imageURLRegex.FindString(message)
 }

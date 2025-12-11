@@ -3,6 +3,7 @@ package irc
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/yourusername/lolo/internal/database"
 	"github.com/yourusername/lolo/internal/output"
@@ -122,15 +123,18 @@ func (cm *ChannelManager) PartChannel(channel, message string) error {
 }
 
 // JoinAutoJoinChannels joins all configured auto-join channels that are enabled
+// Joins are staggered to avoid excess flood disconnects
 func (cm *ChannelManager) JoinAutoJoinChannels() error {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	// Wait before starting to join channels (let connection settle)
+	time.Sleep(3 * time.Second)
 
-	for _, channel := range cm.autoJoinList {
+	for i, channel := range cm.autoJoinList {
+		cm.mu.Lock()
 		// Check if channel is enabled
 		enabled := cm.getChannelEnabledLocked(channel)
 		if !enabled {
 			cm.logger.Warning("Skipping auto-join for disabled channel: %s", channel)
+			cm.mu.Unlock()
 			continue
 		}
 
@@ -138,25 +142,43 @@ func (cm *ChannelManager) JoinAutoJoinChannels() error {
 		err := cm.client.JoinChannel(channel)
 		if err != nil {
 			cm.logger.Error("Failed to join channel %s: %v", channel, err)
+			cm.mu.Unlock()
 			continue
 		}
 
 		cm.logger.Info("Auto-joining channel: %s", channel)
+		cm.mu.Unlock()
+
+		// Delay between joins to avoid flood (except after last channel)
+		if i < len(cm.autoJoinList)-1 {
+			time.Sleep(1 * time.Second)
+		}
 	}
 
 	return nil
 }
 
 // RejoinChannels rejoins all previously joined channels that are enabled
+// Joins are staggered to avoid excess flood disconnects
 func (cm *ChannelManager) RejoinChannels() error {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	// Wait before starting to rejoin channels (let connection settle)
+	time.Sleep(3 * time.Second)
 
+	// Get list of channels to rejoin
+	cm.mu.RLock()
+	channels := make([]string, 0, len(cm.joinedChannels))
 	for channel := range cm.joinedChannels {
+		channels = append(channels, channel)
+	}
+	cm.mu.RUnlock()
+
+	for i, channel := range channels {
+		cm.mu.Lock()
 		// Check if channel is still enabled
 		enabled := cm.getChannelEnabledLocked(channel)
 		if !enabled {
 			cm.logger.Warning("Skipping rejoin for disabled channel: %s", channel)
+			cm.mu.Unlock()
 			continue
 		}
 
@@ -164,10 +186,17 @@ func (cm *ChannelManager) RejoinChannels() error {
 		err := cm.client.JoinChannel(channel)
 		if err != nil {
 			cm.logger.Error("Failed to rejoin channel %s: %v", channel, err)
+			cm.mu.Unlock()
 			continue
 		}
 
 		cm.logger.Info("Rejoining channel: %s", channel)
+		cm.mu.Unlock()
+
+		// Delay between joins to avoid flood (except after last channel)
+		if i < len(channels)-1 {
+			time.Sleep(1 * time.Second)
+		}
 	}
 
 	return nil

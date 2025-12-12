@@ -16,6 +16,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **Text Pasting** - Create pastes for long code/text (bpa.st integration)
 - **Chat History** - Access conversation context and history
 - **Shell Execution** - Run system commands (owner only)
+- **Voice Cloning** - Clone voices from audio samples or YouTube clips (CosyVoice2)
 
 ### Bot Management
 - **User Memories** - Per-user memories and custom personas that persist across conversations
@@ -140,6 +141,7 @@ The bot has access to these tools when mentioned:
 | **Text Pasting** | Create pastes for long content | "paste this code snippet" |
 | **User Memories** | Store personal facts and preferences | "remember I like cats" |
 | **Shell Execution** | Run system commands (owner only) | "check disk space" |
+| **Voice Cloning** | Clone voices and generate speech | "clone this voice and say hello" |
 
 ### IRC Formatting
 
@@ -200,6 +202,24 @@ The bot owner can run system commands:
 ```
 
 Non-owners attempting shell commands will be denied.
+
+### Voice Cloning
+
+Clone voices from audio samples or YouTube videos:
+```
+<you>  lolo: clone this voice https://example.com/voice.mp3 and say "Hello world"
+<lolo> https://0x0.st/abc123.mp3
+
+<you>  lolo: use this youtube video https://youtube.com/watch?v=xxx from 1:00 to 1:15 to clone the voice and say "Testing voice clone"
+<lolo> https://0x0.st/def456.mp3
+```
+
+For YouTube clips, the bot automatically:
+1. Downloads the specified time range
+2. Isolates vocals (removes music/background using Demucs)
+3. Uses the clean voice for cloning
+
+Best results with 5-15 seconds of clear speech. Max YouTube clip: 30 seconds.
 
 ### Commands
 
@@ -296,6 +316,7 @@ paste_enabled = true           # Text pasting to bpa.st
 user_rules_enabled = true      # Per-user memories and rules
 chat_history_enabled = true    # Conversation history access
 shell_exec_enabled = true      # Shell command execution (owner only)
+voice_clone_enabled = true     # Voice cloning (requires CosyVoice setup)
 ```
 
 **Note:** Tools requiring missing API keys will be automatically disabled.
@@ -348,6 +369,8 @@ lolo/
 │   ├── bot.toml.example         # IRC config template (copy to bot.toml)
 │   └── bot.toml                 # Your IRC configuration (create this)
 ├── data/                        # Database & logs (auto-created)
+├── CosyVoice/                   # Voice cloning engine (CosyVoice2)
+├── IsolateVoice/                # Vocal isolation (Demucs)
 ├── .env.example                 # API keys template
 ├── .env                         # Your API keys (create this)
 └── requirements.txt             # Python dependencies

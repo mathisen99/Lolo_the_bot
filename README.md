@@ -33,6 +33,9 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - Go 1.21+
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) (Python package manager)
+- ffmpeg (for audio/video processing)
+- yt-dlp (optional, for voice cloning from YouTube)
+- NVIDIA GPU with CUDA (optional, for voice cloning)
 
 **API Keys Required:**
 - **OpenAI API key** - For AI conversations and reasoning ([platform.openai.com](https://platform.openai.com))
@@ -58,13 +61,7 @@ uv pip install -r requirements.txt
 
 ### Voice Cloning Setup (Optional)
 
-Voice cloning requires additional setup for CosyVoice2 and vocal isolation:
-
-**System Dependencies:**
-```bash
-# Required for voice processing
-sudo apt install ffmpeg yt-dlp
-```
+Voice cloning requires additional setup for CosyVoice2 and vocal isolation.
 
 **CosyVoice2 Setup:**
 ```bash
@@ -85,8 +82,6 @@ uv venv
 source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
-
-**Note:** Voice cloning requires a CUDA-capable GPU for reasonable performance. CPU-only mode works but is very slow.
 
 ### API Key Setup
 
@@ -387,8 +382,9 @@ voice_clone_enabled = true     # Voice cloning (requires CosyVoice setup)
 
 **Voice cloning not working**
 - Ensure CosyVoice and IsolateVoice venvs are set up (see Voice Cloning Setup)
-- Check `ffmpeg` and `yt-dlp` are installed
-- Verify CUDA is available for GPU acceleration
+- Check `ffmpeg` is installed: `sudo apt install ffmpeg`
+- Check `yt-dlp` is installed for YouTube: `sudo apt install yt-dlp`
+- Verify CUDA is available for GPU acceleration (CPU works but is slow)
 - Check CosyVoice pretrained models are downloaded
 
 ## Project Structure

@@ -209,12 +209,12 @@ AVAILABLE TOOLS:
    - IMPORTANT: When using paste, include the URL in your response with a brief description of what's in it
    - Example response: "Here's a Python script that does X: https://bpa.st/ABCD"
 
-11. VOICE CLONING - Use this when:
+11. VOICE - Use this when:
    - User shares a voice/audio URL and wants you to speak as that person
-   - User shares a YouTube URL with timestamps and wants to clone that voice
-   - Asked to clone a voice and say something specific
+   - User shares a YouTube URL with timestamps and wants to speak that voice
+   - Asked to speak a voice and say something specific
    - User wants text-to-speech in a celebrity or character voice
-   - Example triggers: "use this voice [URL] and say...", "clone this voice", "use the voice from this youtube video"
+   - Example triggers: "use this voice [URL] and say...", "speak this voice", "use the voice from this youtube video"
    - TWO MODES:
      A) Direct audio: voice_url + text
      B) YouTube: youtube_url + start_time + end_time + text (extracts and isolates vocals automatically)
@@ -223,7 +223,7 @@ AVAILABLE TOOLS:
      * youtube_url (optional): YouTube video URL to extract voice from
      * start_time (required with youtube_url): Start time for clip (e.g., "1:00" or "0:01:00")
      * end_time (required with youtube_url): End time for clip (e.g., "1:15")
-     * text (required): What to say in the cloned voice (1-2 paragraphs max)
+     * text (required): What to say in the speaked voice (1-2 paragraphs max)
    - Use voice_url OR youtube_url, not both
    - YouTube mode REQUIRES start_time and end_time (max 30 seconds duration)
    - YouTube mode automatically isolates vocals (removes music/background noise)

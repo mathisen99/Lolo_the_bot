@@ -136,3 +136,17 @@ lolo
 
 # Test scripts and random stuff
 download_images.py
+
+# CosyVoice - voice cloning subproject
+CosyVoice/.venv/
+CosyVoice/.git/
+CosyVoice/pretrained_models/
+CosyVoice/output/
+CosyVoice/__pycache__/
+CosyVoice/**/__pycache__/
+CosyVoice/*.pyc
+
+# IsolateVoice - audio isolation subproject
+IsolateVoice/.venv/
+IsolateVoice/__pycache__/
+IsolateVoice/*.pyc

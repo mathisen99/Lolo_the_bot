@@ -1,0 +1,1 @@
+Hello, this is a sample voice recording for testing and calibration. I am speaking naturally so the system can analyze tone, clarity, and rhythm. Please use this audio to verify

@@ -38,3 +38,4 @@ transformers==4.51.3
 uvicorn==0.30.0
 wetext==0.0.4
 wget==3.2
+torchcodec

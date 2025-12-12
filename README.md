@@ -56,6 +56,43 @@ source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
+### Voice Cloning Setup (Optional)
+
+Voice cloning requires additional setup for CosyVoice2 and vocal isolation:
+
+**System Dependencies:**
+```bash
+# Required for voice processing
+sudo apt install ffmpeg
+
+# Required for YouTube downloads
+pip install yt-dlp
+# or
+sudo apt install yt-dlp
+```
+
+**CosyVoice2 Setup:**
+```bash
+cd CosyVoice
+uv venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
+
+# Download pretrained models (required, ~2GB)
+# Models are downloaded automatically on first use, or manually:
+python -c "from modelscope import snapshot_download; snapshot_download('iic/CosyVoice2-0.5B', local_dir='pretrained_models/CosyVoice2-0.5B')"
+```
+
+**IsolateVoice Setup (for YouTube vocal extraction):**
+```bash
+cd IsolateVoice
+uv venv
+source .venv/bin/activate
+uv pip install demucs yt-dlp
+```
+
+**Note:** Voice cloning requires a CUDA-capable GPU for reasonable performance. CPU-only mode works but is very slow.
+
 ### API Key Setup
 
 Create a `.env` file in the project root with your API keys:
@@ -352,6 +389,12 @@ voice_clone_enabled = true     # Voice cloning (requires CosyVoice setup)
 - Use `!verify PASSWORD` via PM (not in channel)
 - Check user permission level with `!user list`
 - Only owners can add/remove admins
+
+**Voice cloning not working**
+- Ensure CosyVoice and IsolateVoice venvs are set up (see Voice Cloning Setup)
+- Check `ffmpeg` and `yt-dlp` are installed
+- Verify CUDA is available for GPU acceleration
+- Check CosyVoice pretrained models are downloaded
 
 ## Project Structure
 

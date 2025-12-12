@@ -63,12 +63,7 @@ Voice cloning requires additional setup for CosyVoice2 and vocal isolation:
 **System Dependencies:**
 ```bash
 # Required for voice processing
-sudo apt install ffmpeg
-
-# Required for YouTube downloads
-pip install yt-dlp
-# or
-sudo apt install yt-dlp
+sudo apt install ffmpeg yt-dlp
 ```
 
 **CosyVoice2 Setup:**

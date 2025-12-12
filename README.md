@@ -88,7 +88,7 @@ python -c "from modelscope import snapshot_download; snapshot_download('iic/Cosy
 cd IsolateVoice
 uv venv
 source .venv/bin/activate
-uv pip install demucs yt-dlp
+uv pip install -r requirements.txt
 ```
 
 **Note:** Voice cloning requires a CUDA-capable GPU for reasonable performance. CPU-only mode works but is very slow.

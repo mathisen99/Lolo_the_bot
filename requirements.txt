@@ -1,12 +1,34 @@
+# Lolo Bot Python API Dependencies
+# Updated December 2025 for security
+
+# Web framework
 fastapi>=0.115.0
-uvicorn[standard]>=0.30.0
-pydantic>=2.0.0
-rich>=13.0.0
-openai>=1.0.0
-tomli>=2.0.0
-python-dotenv>=1.0.0
-Pillow>=10.0.0
-requests>=2.31.0
-beautifulsoup4>=4.12.0
+uvicorn[standard]>=0.34.0
+starlette>=0.45.0
+
+# Data validation
+pydantic>=2.10.0
+
+# Output formatting
+rich>=13.9.0
+
+# OpenAI API
+openai>=1.60.0
+
+# Configuration
+tomli>=2.2.0
+python-dotenv>=1.0.1
+
+# Image processing
+Pillow>=11.0.0
+
+# HTTP requests
+requests>=2.32.0
+urllib3>=2.2.0
+
+# Web scraping
+beautifulsoup4>=4.12.3
 cloudscraper>=1.2.71
-pypdf>=4.0.0
+
+# PDF processing
+pypdf>=5.1.0

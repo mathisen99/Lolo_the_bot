@@ -1,3 +1,6 @@
-demucs
-yt-dlp
+# IsolateVoice Dependencies
+# Updated December 2025 for security
+
+demucs>=4.0.0
+yt-dlp>=2024.12.0
 torchcodec

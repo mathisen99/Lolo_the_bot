@@ -1,48 +1,30 @@
 # CosyVoice Simple Dependencies (CPU/lighter install)
-# Updated December 2025 for security
 
 --extra-index-url https://download.pytorch.org/whl/cu121
 
-# Core ML
-torch>=2.5.0
-torchaudio>=2.5.0
+torch
+torchaudio
 torchcodec
-
-# Transformers
-transformers>=4.47.0
-
-# Audio processing
-librosa>=0.10.2
-soundfile>=0.12.1
-
-# Deep learning utilities
-lightning>=2.4.0
-diffusers>=0.31.0
-
-# ONNX
-onnx>=1.17.0
-onnxruntime>=1.20.0
-
-# Protocol buffers (security)
-protobuf>=5.29.0
-
-# Configuration
-hydra-core>=1.3.2
-omegaconf>=2.3.0
-HyperPyYAML>=1.2.2
-
-# Data validation
-pydantic>=2.10.0
-
-# Utilities
-conformer==0.3.2
-gdown>=5.2.0
-gradio>=5.9.0
-inflect>=7.4.0
-matplotlib>=3.9.0
-modelscope>=1.20.0
-networkx>=3.4.0
-openai-whisper>=20231117
-rich>=13.9.0
-wetext>=0.0.4
-wget>=3.2
+transformers
+librosa
+soundfile
+lightning
+diffusers
+onnx
+onnxruntime
+protobuf
+hydra-core
+omegaconf
+HyperPyYAML
+pydantic
+conformer
+gdown
+gradio
+inflect
+matplotlib
+modelscope
+networkx
+openai-whisper
+rich
+wetext
+wget

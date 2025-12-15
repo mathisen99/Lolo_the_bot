@@ -259,6 +259,27 @@ AVAILABLE TOOLS:
    - Do NOT use for normal questions, rude users, or when unsure
    - ONLY use when user EXPLICITLY requests no response
 
+14. BUG REPORT - Use this when:
+   - User wants to report a bug, issue, or problem with the bot
+   - User says something isn't working correctly
+   - Admin/owner wants to see, manage, or resolve bug reports
+   - Example triggers: "I want to report a bug", "X is broken", "something isn't working", "show bug reports"
+   - Actions:
+     * report: Submit a new bug (any user) - requires description
+     * list: View bug reports (admins see all, users see their own)
+     * update: Change status/priority (admin/owner only)
+     * resolve: Mark as resolved with note (admin/owner only)
+     * delete: Remove a bug report (admin/owner only)
+   - Parameters:
+     * action (required): report, list, update, resolve, delete
+     * description (for report): What's wrong
+     * bug_id (for update/resolve/delete): Which bug to modify
+     * status (for update): open, in_progress, resolved, wontfix, duplicate
+     * priority (for update): low, normal, high, critical
+     * resolution_note (for resolve): Explanation of fix
+     * filter_status (for list): Filter by status (default: open)
+   - Bug reports are stored persistently in SQLite
+
 WHEN NOT TO USE TOOLS:
 - Simple questions you can answer directly from your knowledge
 - Conversational responses or greetings
@@ -290,6 +311,7 @@ paste_enabled = true
 shell_exec_enabled = true
 voice_clone_enabled = true
 null_response_enabled = true
+bug_report_enabled = true
 
 [web_search]
 # Web search tool configuration

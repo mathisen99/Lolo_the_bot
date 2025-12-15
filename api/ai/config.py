@@ -57,6 +57,7 @@ class AIConfig:
         self.shell_exec_enabled: bool = config["tools"].get("shell_exec_enabled", True)
         self.voice_clone_enabled: bool = config["tools"].get("voice_clone_enabled", True)
         self.null_response_enabled: bool = config["tools"].get("null_response_enabled", True)
+        self.bug_report_enabled: bool = config["tools"].get("bug_report_enabled", True)
         
         # Shell execution settings
         self.shell_exec_timeout: int = config.get("shell_exec", {}).get("timeout", 30)
@@ -102,4 +103,6 @@ class AIConfig:
             tools.append("clone_voice")
         if self.null_response_enabled:
             tools.append("null_response")
+        if self.bug_report_enabled:
+            tools.append("bug_report")
         return tools

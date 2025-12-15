@@ -7,7 +7,7 @@ Handles communication with OpenAI API and tool execution.
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
 from .config import AIConfig
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceCloneTool, NullResponseTool, NULL_RESPONSE_MARKER
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceCloneTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -62,6 +62,8 @@ class AIClient:
                         tools_used.append('VOICE_CLONE')
                     elif func_name == 'null_response':
                         tools_used.append('NULL_RESPONSE')
+                    elif func_name == 'bug_report':
+                        tools_used.append('BUG_REPORT')
         
         if tools_used:
             tools_str = ', '.join(tools_used)
@@ -131,6 +133,11 @@ class AIClient:
             null_response = NullResponseTool()
             self.tools[null_response.name] = null_response
             log_info("Null response tool enabled")
+        
+        if self.config.bug_report_enabled:
+            bug_report = BugReportTool()
+            self.tools[bug_report.name] = bug_report
+            log_info("Bug report tool enabled")
     
     def generate_response(self, user_message: str, request_id: str) -> str:
         """
@@ -238,7 +245,7 @@ class AIClient:
             self._check_tools_used(response, request_id)
             
             # Handle function calls if present
-            response, null_response_triggered = self._handle_function_calls(response, full_input, request_id, permission_level)
+            response, null_response_triggered = self._handle_function_calls(response, full_input, request_id, permission_level, nick, channel)
             
             # Check if null response was triggered (user asked for silence)
             # Return special marker that tells Go bot to stay silent
@@ -266,7 +273,7 @@ class AIClient:
             log_error(f"[{request_id}] Traceback: {traceback.format_exc()}")
             return "Sorry, I encountered an error generating a response."
     
-    def _handle_function_calls(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal") -> tuple[Any, bool]:
+    def _handle_function_calls(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal", nick: str = "", channel: str = "") -> tuple[Any, bool]:
         """
         Handle function calls in the response using multi-turn tool calling.
         
@@ -279,6 +286,8 @@ class AIClient:
             original_input: Original input prompt
             request_id: Request ID for logging
             permission_level: User's permission level for tool authorization
+            nick: User's nickname for context
+            channel: Channel name for context
             
         Returns:
             Tuple of (final response, null_response_triggered)
@@ -343,6 +352,12 @@ class AIClient:
                     # Inject permission_level for tools that need it
                     if func_name in ('manage_user_rules', 'execute_shell'):
                         func_args['permission_level'] = permission_level
+                    
+                    # Inject full context for bug_report tool
+                    if func_name == 'bug_report':
+                        func_args['permission_level'] = permission_level
+                        func_args['requesting_user'] = nick
+                        func_args['channel'] = channel
                     
                     # Execute the tool
                     result = tool.execute(**func_args)

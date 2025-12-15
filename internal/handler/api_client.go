@@ -534,6 +534,10 @@ func (c *APIClient) WaitForInflightRequests(timeout time.Duration) bool {
 	}
 }
 
+// NullResponseMarker is a special marker that indicates the bot should not respond
+// Used by the null_response tool when users explicitly request silence
+const NullResponseMarker = "<<NULL_RESPONSE>>"
+
 // validateAPIResponse validates that an API response contains all required fields
 // and that the values are valid according to the API contract
 func validateAPIResponse(resp *APIResponse) error {
@@ -542,13 +546,14 @@ func validateAPIResponse(resp *APIResponse) error {
 		return fmt.Errorf("missing required field: status")
 	}
 
-	if resp.Message == "" {
+	// Allow empty message if it's a null response (user requested silence)
+	if resp.Message == "" && resp.Status != "null" {
 		return fmt.Errorf("missing required field: message")
 	}
 
 	// Validate status field values
-	if resp.Status != "success" && resp.Status != "error" {
-		return fmt.Errorf("invalid status value: %q (must be 'success' or 'error')", resp.Status)
+	if resp.Status != "success" && resp.Status != "error" && resp.Status != "null" {
+		return fmt.Errorf("invalid status value: %q (must be 'success', 'error', or 'null')", resp.Status)
 	}
 
 	// Validate optional required_level field if present

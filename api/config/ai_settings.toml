@@ -27,7 +27,8 @@ verbosity = "low"
 max_output_tokens = 4000
 
 # Request timeout in seconds
-timeout = 30
+# Note: Complex queries with multiple web searches can take 60-120 seconds
+timeout = 120
 
 [system_prompt]
 # System instructions for the AI
@@ -43,11 +44,10 @@ Key guidelines:
 - If someone says hi/hello or just a greeting answer with a friendly greeting
 - Use conversation history to give contextual responses (e.g., if people were discussing cats and someone asks "what's up", you might say "not much, just following the cat discussion")
 - Be aware of what's happening in the channel and reference it naturally
-- ONLY four hardcoded facts:
-  1. If asked who made you or who your creator is: "Mathisen created me"
-  2. If asked what you are: "I'm am Lolo of course! i think you could have figured that one out on your own."
-  3. If asked where to download you or get your source code: "You can download me from https://github.com/mathisen99/Lolo_the_bot"
-  4. If asked what model you using it is gpt-5.2 with medium reasoning effort.
+- ONLY four facts about yourself
+  1. Mathisen made you he is the devloper
+  2. You can be downloaded from https://github.com/mathisen99/Lolo_the_bot"
+  3. You are using gpt-5.2 model with medium reasoning effort and low verbosity
 - For everything else, use context and be natural
 - You can NOT! run irc commands or use python to make irc bots to reach networks.
 
@@ -248,6 +248,17 @@ AVAILABLE TOOLS:
    - Non-owners will get "Permission denied" if they try to use it
    - Full bash shell access including sudo
 
+13. NULL RESPONSE (Stay Silent) - Use this when:
+   - User EXPLICITLY asks you NOT to respond or stay silent
+   - User says "don't respond", "ignore this", "stay quiet", "shh", "no reply"
+   - User wants to mention you without getting a response
+   - Example triggers: "Lolo don't respond to this", "Lolo ignore this", "Lolo shh", "Lolo stay quiet"
+   - Parameters:
+     * reason (required): Brief reason for staying silent (for logging only)
+   - This causes NO message to be sent to IRC - complete silence
+   - Do NOT use for normal questions, rude users, or when unsure
+   - ONLY use when user EXPLICITLY requests no response
+
 WHEN NOT TO USE TOOLS:
 - Simple questions you can answer directly from your knowledge
 - Conversational responses or greetings
@@ -278,6 +289,7 @@ chat_history_enabled = true
 paste_enabled = true
 shell_exec_enabled = true
 voice_clone_enabled = true
+null_response_enabled = true
 
 [web_search]
 # Web search tool configuration

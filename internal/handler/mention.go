@@ -133,6 +133,11 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 	}
 
 	// Check response status
+	if resp.Status == "null" {
+		// Null response - user requested silence, return empty to skip IRC message
+		return "", nil
+	}
+
 	if resp.Status != "success" {
 		// Record error metric (Requirement 30.3)
 		if errRecordErr := h.db.RecordError("mention_api_error"); errRecordErr != nil {

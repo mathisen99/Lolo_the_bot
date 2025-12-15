@@ -8,6 +8,7 @@ AI-powered responses using GPT-5.1 with web search and Python execution tools.
 from api.router import MentionRequest, MentionResponse
 from api.utils.output import log_info, log_success, log_error, log_warning
 from api.ai import AIClient, AIConfig
+from api.tools import NULL_RESPONSE_MARKER
 
 # Global AI client instance (initialized on first use)
 _ai_client = None
@@ -67,6 +68,15 @@ def handle_mention(request: MentionRequest) -> MentionResponse:
             permission_level=request.permission_level,
             request_id=request.request_id
         )
+        
+        # Check for null response (user requested silence)
+        if response_message == NULL_RESPONSE_MARKER:
+            log_success(f"[{request.request_id}] Null response - staying silent for {request.nick}")
+            return MentionResponse(
+                request_id=request.request_id,
+                status="null",
+                message=""
+            )
         
         log_success(f"[{request.request_id}] Generated AI response for {request.nick}")
         

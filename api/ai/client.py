@@ -7,7 +7,7 @@ Handles communication with OpenAI API and tool execution.
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
 from .config import AIConfig
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceCloneTool
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceCloneTool, NullResponseTool, NULL_RESPONSE_MARKER
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -60,6 +60,8 @@ class AIClient:
                         tools_used.append('SHELL_EXEC')
                     elif func_name == 'clone_voice':
                         tools_used.append('VOICE_CLONE')
+                    elif func_name == 'null_response':
+                        tools_used.append('NULL_RESPONSE')
         
         if tools_used:
             tools_str = ', '.join(tools_used)
@@ -124,6 +126,11 @@ class AIClient:
             voice_clone = VoiceCloneTool()
             self.tools[voice_clone.name] = voice_clone
             log_info("Voice cloning tool enabled")
+        
+        if self.config.null_response_enabled:
+            null_response = NullResponseTool()
+            self.tools[null_response.name] = null_response
+            log_info("Null response tool enabled")
     
     def generate_response(self, user_message: str, request_id: str) -> str:
         """
@@ -231,7 +238,13 @@ class AIClient:
             self._check_tools_used(response, request_id)
             
             # Handle function calls if present
-            response = self._handle_function_calls(response, full_input, request_id, permission_level)
+            response, null_response_triggered = self._handle_function_calls(response, full_input, request_id, permission_level)
+            
+            # Check if null response was triggered (user asked for silence)
+            # Return special marker that tells Go bot to stay silent
+            if null_response_triggered:
+                log_info(f"[{request_id}] Null response triggered - staying silent")
+                return NULL_RESPONSE_MARKER
             
             # Extract response text
             output_text = self._extract_output(response, request_id)
@@ -253,7 +266,7 @@ class AIClient:
             log_error(f"[{request_id}] Traceback: {traceback.format_exc()}")
             return "Sorry, I encountered an error generating a response."
     
-    def _handle_function_calls(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal") -> Any:
+    def _handle_function_calls(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal") -> tuple[Any, bool]:
         """
         Handle function calls in the response using multi-turn tool calling.
         
@@ -268,12 +281,13 @@ class AIClient:
             permission_level: User's permission level for tool authorization
             
         Returns:
-            Final response after all function executions
+            Tuple of (final response, null_response_triggered)
         """
         import json
         
         MAX_TOOL_ITERATIONS = 10  # Safety limit to prevent infinite loops
         iteration = 0
+        null_response_triggered = False
         
         while iteration < MAX_TOOL_ITERATIONS:
             iteration += 1
@@ -281,7 +295,7 @@ class AIClient:
             output_items = getattr(response, 'output', None)
             if not output_items:
                 log_debug(f"[{request_id}] No output items in response")
-                return response
+                return response, null_response_triggered
             
             # Check for function calls
             function_calls = []
@@ -292,7 +306,7 @@ class AIClient:
             
             if not function_calls:
                 # No more function calls, we're done
-                return response
+                return response, null_response_triggered
             
             log_info(f"[{request_id}] Iteration {iteration}: Executing {len(function_calls)} function call(s)")
             
@@ -333,6 +347,11 @@ class AIClient:
                     # Execute the tool
                     result = tool.execute(**func_args)
                     log_success(f"[{request_id}] {func_name} executed successfully: {result[:100] if len(result) > 100 else result}")
+                    
+                    # Check for null response marker
+                    if result == NULL_RESPONSE_MARKER:
+                        null_response_triggered = True
+                        log_info(f"[{request_id}] Null response marker detected - will stay silent")
                     
                     # Handle image analysis - needs vision API call but continues the chain
                     if func_name == 'analyze_image':
@@ -417,10 +436,10 @@ class AIClient:
                 self._check_tools_used(response, request_id)
             else:
                 # No outputs to send, we're done
-                return response
+                return response, null_response_triggered
         
         log_warning(f"[{request_id}] Reached max tool iterations ({MAX_TOOL_ITERATIONS})")
-        return response
+        return response, null_response_triggered
     
     def _build_context_prompt(
         self, 

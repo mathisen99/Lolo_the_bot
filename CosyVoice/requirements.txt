@@ -9,8 +9,8 @@ transformers
 librosa
 soundfile
 pyworld
-lightning
-deepspeed; sys_platform == 'linux'
+lightning>=2.4.0
+deepspeed>=0.15.0; sys_platform == 'linux'
 diffusers
 onnx
 onnxruntime-gpu; sys_platform == 'linux'

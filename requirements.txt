@@ -1,16 +1,17 @@
 # Lolo Bot Python API Dependencies
+# Frozen December 2025
 
-fastapi
-uvicorn[standard]
-starlette
-pydantic
-rich
-openai
-tomli
-python-dotenv
-Pillow
-requests
-urllib3
-beautifulsoup4
-cloudscraper
-pypdf
+fastapi==0.124.4
+uvicorn==0.38.0
+starlette==0.50.0
+pydantic==2.12.5
+rich==14.2.0
+openai==2.12.0
+tomli==2.3.0
+python-dotenv==1.2.1
+Pillow==12.0.0
+requests==2.32.5
+urllib3==2.6.2
+beautifulsoup4==4.14.3
+cloudscraper==1.2.71
+pypdf==6.4.2

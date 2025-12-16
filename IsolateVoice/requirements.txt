@@ -1,5 +1,6 @@
 # IsolateVoice Dependencies
+# Frozen December 2025
 
-demucs
-yt-dlp
-torchcodec
+demucs==4.0.1
+yt-dlp>=2024.12.0
+torchcodec==0.9.1

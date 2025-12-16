@@ -21,7 +21,8 @@ import subprocess
 import tempfile
 import hashlib
 
-sys.path.append('third_party/Matcha-TTS')
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(_script_dir, 'third_party/Matcha-TTS'))
 
 # ============ SETTINGS ============
 DEFAULT_VOICE = "samples/voice.wav"
@@ -142,7 +143,10 @@ def main():
     from cosyvoice.utils.file_utils import load_wav
     import torchaudio
     
-    cosyvoice = CosyVoice2('pretrained_models/CosyVoice2-0.5B', load_jit=False, load_trt=False, fp16=False)
+    # Use absolute path to model directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(script_dir, 'pretrained_models/CosyVoice2-0.5B')
+    cosyvoice = CosyVoice2(model_path, load_jit=False, load_trt=False, fp16=False)
     print("Model loaded!\n")
     
     # Load voice

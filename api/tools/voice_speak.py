@@ -1,7 +1,7 @@
 """
-Voice cloning tool implementation.
+Voice speak tool implementation.
 
-Uses CosyVoice2 to clone voices from audio samples and generate speech.
+Uses CosyVoice2 to generate speech using a reference voice sample.
 Supports direct audio URLs or YouTube videos with time range extraction.
 Uploads results to 0x0.st for sharing via IRC.
 """
@@ -17,8 +17,8 @@ from .base import Tool
 from api.utils.output import log_info, log_success, log_error, log_warning
 
 
-class VoiceCloneTool(Tool):
-    """Voice cloning tool using CosyVoice2 with YouTube support."""
+class VoiceSpeakTool(Tool):
+    """Voice speak tool using CosyVoice2 with YouTube support."""
     
     # Directory paths (relative to project root)
     COSYVOICE_DIR = Path(__file__).parent.parent.parent / "CosyVoice"
@@ -42,19 +42,19 @@ class VoiceCloneTool(Tool):
     USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
     
     def __init__(self):
-        """Initialize voice clone tool."""
+        """Initialize voice speak tool."""
         self._session = None
     
     @property
     def name(self) -> str:
-        return "clone_voice"
+        return "voice_speak"
     
     def get_definition(self) -> Dict[str, Any]:
         """Get tool definition for OpenAI API."""
         return {
             "type": "function",
-            "name": "clone_voice",
-            "description": """Clone a voice and generate speech. Two modes:
+            "name": "voice_speak",
+            "description": """Generate speech using a reference voice sample. Two modes:
 
 1. DIRECT AUDIO: Provide voice_url to a direct audio file (MP3, WAV)
 2. YOUTUBE: Provide youtube_url + start_time + end_time to extract voice from a video
@@ -62,7 +62,7 @@ class VoiceCloneTool(Tool):
 For YouTube mode, the tool will:
 - Download the video segment
 - Isolate vocals (remove music/background)
-- Use the isolated voice for cloning
+- Use the isolated voice as reference
 
 Time format: "1:30" (mm:ss) or "0:01:30" (hh:mm:ss)
 
@@ -92,7 +92,7 @@ Voice samples work best with 5-15 seconds of clear speech.""",
                     },
                     "text": {
                         "type": "string",
-                        "description": "The text to speak in the cloned voice (1-2 paragraphs max)."
+                        "description": "The text to speak using the reference voice (1-2 paragraphs max)."
                     }
                 },
                 "required": ["text"],
@@ -293,7 +293,7 @@ Voice samples work best with 5-15 seconds of clear speech.""",
         end_time: Optional[str] = None,
         **kwargs
     ) -> str:
-        """Clone a voice and generate speech."""
+        """Generate speech using a reference voice sample."""
         # Validate text
         if not text or not text.strip():
             return "Error: No text provided"
@@ -342,61 +342,61 @@ Voice samples work best with 5-15 seconds of clear speech.""",
             
             if has_youtube:
                 # YouTube mode: extract clip -> try isolate vocals -> TTS
-                log_info(f"[VOICE_CLONE] Step 1/5: Extracting YouTube clip ({start_time} - {end_time})")
+                log_info(f"[VOICE_SPEAK] Step 1/5: Extracting YouTube clip ({start_time} - {end_time})")
                 success, error, clip_path = self._extract_youtube_clip(youtube_url, start_time, end_time, temp_path)
                 if not success:
-                    log_error(f"[VOICE_CLONE] YouTube extraction failed: {error}")
+                    log_error(f"[VOICE_SPEAK] YouTube extraction failed: {error}")
                     return f"Error: {error}"
-                log_success(f"[VOICE_CLONE] YouTube clip extracted: {clip_path.name}")
+                log_success(f"[VOICE_SPEAK] YouTube clip extracted: {clip_path.name}")
                 
                 # Try to isolate vocals, but fall back to raw clip if it fails
-                log_info("[VOICE_CLONE] Step 2/5: Isolating vocals (Demucs)...")
+                log_info("[VOICE_SPEAK] Step 2/5: Isolating vocals (Demucs)...")
                 success, error, vocals_path = self._isolate_vocals(clip_path, temp_path)
                 if success and vocals_path:
-                    log_success(f"[VOICE_CLONE] Vocals isolated: {vocals_path.name}")
+                    log_success(f"[VOICE_SPEAK] Vocals isolated: {vocals_path.name}")
                     voice_file = vocals_path
                 else:
                     # Isolation failed - use raw clip directly
-                    log_warning(f"[VOICE_CLONE] Vocal isolation failed, using raw clip: {error}")
+                    log_warning(f"[VOICE_SPEAK] Vocal isolation failed, using raw clip: {error}")
                     voice_file = clip_path
             else:
                 # Direct mode: download -> TTS
-                log_info(f"[VOICE_CLONE] Step 1/4: Downloading voice sample...")
+                log_info(f"[VOICE_SPEAK] Step 1/4: Downloading voice sample...")
                 url_path = urlparse(voice_url).path.lower()
                 voice_ext = '.wav' if url_path.endswith('.wav') else '.mp3'
                 voice_file = temp_path / f"voice{voice_ext}"
                 
                 success, error = self._download_voice(voice_url, voice_file)
                 if not success:
-                    log_error(f"[VOICE_CLONE] Download failed: {error}")
+                    log_error(f"[VOICE_SPEAK] Download failed: {error}")
                     return f"Error downloading voice: {error}"
-                log_success(f"[VOICE_CLONE] Voice sample downloaded")
+                log_success(f"[VOICE_SPEAK] Voice sample downloaded")
             
             # Run TTS
             step = "3/5" if has_youtube else "2/4"
-            log_info(f"[VOICE_CLONE] Step {step}: Running voice cloning (CosyVoice)...")
+            log_info(f"[VOICE_SPEAK] Step {step}: Generating speech (CosyVoice)...")
             success, error = self._run_tts(voice_file, text, output_wav)
             if not success:
-                log_error(f"[VOICE_CLONE] TTS failed: {error}")
+                log_error(f"[VOICE_SPEAK] TTS failed: {error}")
                 return f"Error generating speech: {error}"
-            log_success("[VOICE_CLONE] Voice cloning complete")
+            log_success("[VOICE_SPEAK] Speech generation complete")
             
             # Convert to MP3
             step = "4/5" if has_youtube else "3/4"
-            log_info(f"[VOICE_CLONE] Step {step}: Converting to MP3...")
+            log_info(f"[VOICE_SPEAK] Step {step}: Converting to MP3...")
             success, error = self._convert_to_mp3(output_wav, output_mp3)
             if not success:
-                log_error(f"[VOICE_CLONE] Conversion failed: {error}")
+                log_error(f"[VOICE_SPEAK] Conversion failed: {error}")
                 return f"Error converting: {error}"
-            log_success("[VOICE_CLONE] Converted to MP3")
+            log_success("[VOICE_SPEAK] Converted to MP3")
             
             # Upload
             step = "5/5" if has_youtube else "4/4"
-            log_info(f"[VOICE_CLONE] Step {step}: Uploading to 0x0.st...")
+            log_info(f"[VOICE_SPEAK] Step {step}: Uploading to 0x0.st...")
             success, result = self._upload_file(output_mp3)
             if not success:
-                log_error(f"[VOICE_CLONE] Upload failed: {result}")
+                log_error(f"[VOICE_SPEAK] Upload failed: {result}")
                 return f"Error uploading: {result}"
-            log_success(f"[VOICE_CLONE] Upload complete: {result}")
+            log_success(f"[VOICE_SPEAK] Upload complete: {result}")
             
             return result

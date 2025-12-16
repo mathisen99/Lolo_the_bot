@@ -7,7 +7,7 @@ Handles communication with OpenAI API and tool execution.
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
 from .config import AIConfig
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceCloneTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -58,8 +58,8 @@ class AIClient:
                         tools_used.append('PASTE')
                     elif func_name == 'execute_shell':
                         tools_used.append('SHELL_EXEC')
-                    elif func_name == 'clone_voice':
-                        tools_used.append('VOICE_CLONE')
+                    elif func_name == 'voice_speak':
+                        tools_used.append('VOICE_SPEAK')
                     elif func_name == 'null_response':
                         tools_used.append('NULL_RESPONSE')
                     elif func_name == 'bug_report':
@@ -124,10 +124,10 @@ class AIClient:
             self.tools[shell_exec.name] = shell_exec
             log_info("Shell execution tool enabled (OWNER ONLY)")
         
-        if self.config.voice_clone_enabled:
-            voice_clone = VoiceCloneTool()
-            self.tools[voice_clone.name] = voice_clone
-            log_info("Voice cloning tool enabled")
+        if self.config.voice_speak_enabled:
+            voice_speak = VoiceSpeakTool()
+            self.tools[voice_speak.name] = voice_speak
+            log_info("Voice speak tool enabled")
         
         if self.config.null_response_enabled:
             null_response = NullResponseTool()

@@ -309,7 +309,7 @@ user_rules_enabled = true
 chat_history_enabled = true
 paste_enabled = true
 shell_exec_enabled = true
-voice_clone_enabled = true
+voice_speak_enabled = true
 null_response_enabled = true
 bug_report_enabled = true
 

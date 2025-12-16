@@ -14,9 +14,9 @@ from .user_rules import UserRulesTool
 from .chat_history import ChatHistoryTool
 from .paste import PasteTool
 from .shell_exec import ShellExecTool
-from .voice_clone import VoiceCloneTool
+from .voice_speak import VoiceSpeakTool
 from .null_response import NullResponseTool, NULL_RESPONSE_MARKER
 from .bug_report import BugReportTool
 from .base import Tool
 
-__all__ = ["WebSearchTool", "PythonExecTool", "FluxCreateTool", "FluxEditTool", "ImageAnalysisTool", "FetchUrlTool", "UserRulesTool", "ChatHistoryTool", "PasteTool", "ShellExecTool", "VoiceCloneTool", "NullResponseTool", "NULL_RESPONSE_MARKER", "BugReportTool", "Tool"]
+__all__ = ["WebSearchTool", "PythonExecTool", "FluxCreateTool", "FluxEditTool", "ImageAnalysisTool", "FetchUrlTool", "UserRulesTool", "ChatHistoryTool", "PasteTool", "ShellExecTool", "VoiceSpeakTool", "NullResponseTool", "NULL_RESPONSE_MARKER", "BugReportTool", "Tool"]

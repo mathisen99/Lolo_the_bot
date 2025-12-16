@@ -7,7 +7,7 @@ Handles communication with OpenAI API and tool execution.
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
 from .config import AIConfig
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -64,6 +64,8 @@ class AIClient:
                         tools_used.append('NULL_RESPONSE')
                     elif func_name == 'bug_report':
                         tools_used.append('BUG_REPORT')
+                    elif func_name == 'gpt_image':
+                        tools_used.append('GPT_IMAGE')
         
         if tools_used:
             tools_str = ', '.join(tools_used)
@@ -138,6 +140,11 @@ class AIClient:
             bug_report = BugReportTool()
             self.tools[bug_report.name] = bug_report
             log_info("Bug report tool enabled")
+        
+        if self.config.gpt_image_enabled:
+            gpt_image = GPTImageTool()
+            self.tools[gpt_image.name] = gpt_image
+            log_info("GPT Image tool enabled (gpt-image-1.5)")
     
     def generate_response(self, user_message: str, request_id: str) -> str:
         """

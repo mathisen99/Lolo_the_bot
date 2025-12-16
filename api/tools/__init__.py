@@ -1,7 +1,7 @@
 """
 Tools module for AI assistant.
 
-Provides web search, Python execution, image generation/editing, image analysis, URL fetching, user rules, chat history, paste, shell execution, voice cloning, null response, and bug reporting capabilities.
+Provides web search, Python execution, image generation/editing, image analysis, URL fetching, user rules, chat history, paste, shell execution, voice cloning, null response, bug reporting, and GPT image capabilities.
 """
 
 from .web_search import WebSearchTool
@@ -17,6 +17,7 @@ from .shell_exec import ShellExecTool
 from .voice_speak import VoiceSpeakTool
 from .null_response import NullResponseTool, NULL_RESPONSE_MARKER
 from .bug_report import BugReportTool
+from .gpt_image import GPTImageTool
 from .base import Tool
 
-__all__ = ["WebSearchTool", "PythonExecTool", "FluxCreateTool", "FluxEditTool", "ImageAnalysisTool", "FetchUrlTool", "UserRulesTool", "ChatHistoryTool", "PasteTool", "ShellExecTool", "VoiceSpeakTool", "NullResponseTool", "NULL_RESPONSE_MARKER", "BugReportTool", "Tool"]
+__all__ = ["WebSearchTool", "PythonExecTool", "FluxCreateTool", "FluxEditTool", "ImageAnalysisTool", "FetchUrlTool", "UserRulesTool", "ChatHistoryTool", "PasteTool", "ShellExecTool", "VoiceSpeakTool", "NullResponseTool", "NULL_RESPONSE_MARKER", "BugReportTool", "GPTImageTool", "Tool"]

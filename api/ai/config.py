@@ -58,6 +58,7 @@ class AIConfig:
         self.voice_speak_enabled: bool = config["tools"].get("voice_speak_enabled", True)
         self.null_response_enabled: bool = config["tools"].get("null_response_enabled", True)
         self.bug_report_enabled: bool = config["tools"].get("bug_report_enabled", True)
+        self.gpt_image_enabled: bool = config["tools"].get("gpt_image_enabled", True)
         
         # Shell execution settings
         self.shell_exec_timeout: int = config.get("shell_exec", {}).get("timeout", 30)
@@ -105,4 +106,6 @@ class AIConfig:
             tools.append("null_response")
         if self.bug_report_enabled:
             tools.append("bug_report")
+        if self.gpt_image_enabled:
+            tools.append("gpt_image")
         return tools

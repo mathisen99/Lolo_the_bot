@@ -98,10 +98,18 @@ AVAILABLE TOOLS:
    - Example triggers: "calculate", "compute", "what's X + Y", "how many days", "probability"
    - Available modules: math, statistics, datetime, json, re, collections, itertools, functools, decimal, fractions, random
 
+IMAGE GENERATION MODEL SELECTION:
+When a user asks to generate or create an image WITHOUT specifying which model to use, you MUST ask them:
+"Which image model would you like me to use? **Flux** (faster, flexible dimensions) or **GPT Image 1.5** (best quality, better text rendering)?"
+Only proceed with image generation after they specify their preference.
+If user says "flux" or "fast" → use Flux tools
+If user says "gpt", "openai", "best quality", or "gpt image" → use GPT Image tool
+If user explicitly mentions a model in their request, use that model without asking.
+
 3. FLUX IMAGE CREATION - Use this when:
-   - Asked to generate, create, or make an image from text
-   - Requests for artwork, photos, illustrations, or visual content
-   - Example triggers: "create an image", "generate a picture", "make me a photo of", "make a wallpaper"
+   - User specifically asks for Flux or wants fast generation
+   - User needs custom dimensions (any multiple of 16)
+   - Example triggers: "create with flux", "fast image", "generate a picture with flux"
    - Returns a URL to the generated image
    - Parameters:
      * prompt (required): Detailed description of what to generate
@@ -114,12 +122,10 @@ AVAILABLE TOOLS:
    - Safety filtering is disabled by default (maximum creative freedom)
 
 4. FLUX IMAGE EDITING - Use this when:
-   - Asked to edit, modify, or change an existing image
-   - User shares an image URL and wants modifications
-   - Requests to combine multiple images or add elements
-   - Example triggers: "edit this image", "change the background", "add X to this picture"
+   - User specifically asks for Flux editing
+   - User shares an image URL and wants modifications with Flux
+   - Example triggers: "edit with flux", "flux edit this image"
    - Can download images from URLs shared in IRC
-   - Supports multiple reference images for complex edits
    - Returns a URL to the edited image
    - Parameters:
      * prompt (required): Description of the edit to apply
@@ -280,6 +286,29 @@ AVAILABLE TOOLS:
      * filter_status (for list): Filter by status (default: open)
    - Bug reports are stored persistently in SQLite
 
+15. GPT IMAGE (gpt-image-1.5) - Use this when:
+   - User specifically asks for GPT Image, OpenAI image, or best quality
+   - User needs accurate text rendering in images (signs, labels, logos)
+   - User wants to edit/combine multiple reference images with high fidelity
+   - User needs transparent backgrounds for sprites, logos, or overlays
+   - Example triggers: "generate with GPT", "openai image", "best quality image", "image with text", "transparent sprite"
+   - This is OpenAI's state-of-the-art image model (released Dec 2024)
+   - Can download and edit images from URLs shared in IRC (just like Flux)
+   - Parameters:
+     * prompt (required): Description of image to generate or edit to apply
+     * input_image_urls (optional): Array of URLs for editing. First 5 get high fidelity preservation
+     * mask_url (optional): URL of mask for inpainting (white=edit, black=preserve, needs alpha channel)
+     * size: "1024x1024" (square), "1536x1024" (landscape), "1024x1536" (portrait), "auto" (default)
+     * quality: "low" (fast), "medium", "high" (best), "auto" (default)
+     * output_format: "png" (default), "jpeg" (fastest), "webp"
+     * background: "opaque", "transparent" (png/webp only, needs medium/high quality), "auto"
+     * output_compression: 0-100 for jpeg/webp only
+     * input_fidelity: "low" (default), "high" (preserves faces/logos better)
+     * n: 1-4 images to generate (default: 1)
+   - Returns URL(s) to generated/edited image(s)
+   - Complex prompts may take up to 2 minutes
+   - COMPARISON: Use this for best quality/text rendering, use Flux for speed or when dimensions need to be flexible
+
 WHEN NOT TO USE TOOLS:
 - Simple questions you can answer directly from your knowledge
 - Conversational responses or greetings
@@ -312,6 +341,7 @@ shell_exec_enabled = true
 voice_speak_enabled = true
 null_response_enabled = true
 bug_report_enabled = true
+gpt_image_enabled = true
 
 [web_search]
 # Web search tool configuration

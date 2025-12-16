@@ -131,8 +131,8 @@ class FluxCreateTool(Tool):
             request_id = result["id"]
             polling_url = result["polling_url"]
             
-            # Poll for result
-            max_attempts = 60
+            # Poll for result (120 seconds max for flux-2-flex)
+            max_attempts = 120
             for _ in range(max_attempts):
                 time.sleep(1)
                 poll_response = requests.get(

@@ -1,17 +1,16 @@
 # Lolo Bot Python API Dependencies
-# December 2025 - Security patched versions
 
-fastapi>=0.115.0
-uvicorn[standard]>=0.34.0
-starlette>=0.45.0
-pydantic>=2.10.0
-rich>=13.9.0
-openai>=1.60.0
-tomli>=2.2.0
-python-dotenv>=1.0.1
-Pillow>=11.0.0
-requests>=2.32.0
-urllib3>=2.2.0
-beautifulsoup4>=4.12.3
-cloudscraper>=1.2.71
-pypdf>=5.1.0
+fastapi
+uvicorn[standard]
+starlette
+pydantic
+rich
+openai
+tomli
+python-dotenv
+Pillow
+requests
+urllib3
+beautifulsoup4
+cloudscraper
+pypdf

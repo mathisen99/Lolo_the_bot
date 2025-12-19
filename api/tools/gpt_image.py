@@ -10,6 +10,7 @@ import tempfile
 import requests
 from typing import Any, Dict, List, Optional
 from .base import Tool
+from api.utils.botbin import upload_to_botbin
 
 
 class GPTImageTool(Tool):
@@ -25,8 +26,6 @@ class GPTImageTool(Tool):
     def __init__(self):
         """Initialize GPT Image tool."""
         self.api_key = os.environ.get("OPENAI_API_KEY")
-        self.freeimage_api_key = os.environ.get("FREEIMAGE_API_KEY")
-        self.upload_url = "https://freeimage.host/api/1/upload"
         self.base_url = "https://api.openai.com/v1/images"
     
     @property
@@ -120,40 +119,9 @@ Returns a URL to the generated/edited image.""",
         response.raise_for_status()
         return response.content
     
-    def _upload_to_freeimage(self, image_bytes: bytes, format: str = "png") -> str:
-        """Upload image bytes to freeimage.host and return URL."""
-        if not self.freeimage_api_key:
-            raise ValueError("FREEIMAGE_API_KEY not configured")
-        
-        suffix = f".{format}"
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp.write(image_bytes)
-            tmp_path = tmp.name
-        
-        try:
-            with open(tmp_path, "rb") as f:
-                upload_response = requests.post(
-                    self.upload_url,
-                    data={
-                        "key": self.freeimage_api_key,
-                        "action": "upload",
-                        "format": "json"
-                    },
-                    files={"source": f}
-                )
-            
-            if upload_response.status_code != 200:
-                raise ValueError(f"Upload failed: {upload_response.status_code} {upload_response.text}")
-            
-            upload_result = upload_response.json()
-            
-            if upload_result.get("status_code") != 200:
-                error_msg = upload_result.get("error", {}).get("message", "Unknown error")
-                raise ValueError(f"Upload failed: {error_msg}")
-            
-            return upload_result["image"]["url"]
-        finally:
-            os.unlink(tmp_path)
+    def _upload_image(self, image_bytes: bytes, format: str = "png") -> str:
+        """Upload image bytes to botbin.net and return URL."""
+        return upload_to_botbin(image_bytes, f"image.{format}")
     
     def execute(
         self,
@@ -305,7 +273,7 @@ Returns a URL to the generated/edited image.""",
             image_b64 = item.get("b64_json")
             if image_b64:
                 image_bytes = base64.b64decode(image_b64)
-                url = self._upload_to_freeimage(image_bytes, output_format)
+                url = self._upload_image(image_bytes, output_format)
                 urls.append(url)
         
         if not urls:
@@ -404,7 +372,7 @@ Returns a URL to the generated/edited image.""",
                 image_b64 = item.get("b64_json")
                 if image_b64:
                     image_bytes = base64.b64decode(image_b64)
-                    url = self._upload_to_freeimage(image_bytes, output_format)
+                    url = self._upload_image(image_bytes, output_format)
                     urls.append(url)
             
             if not urls:

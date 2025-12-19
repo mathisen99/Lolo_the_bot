@@ -200,20 +200,19 @@ If user explicitly mentions a model in their request, use that model without ask
    - Limited to 100 messages max to avoid overwhelming context
    - IMPORTANT: Always use the actual channel name from context, never use placeholders like "#channel" or "#unknown"
 
-9. PASTE (bpa.st) - Use this when:
+9. PASTE (botbin.net) - Use this when:
    - Your response contains code that would look bad on IRC (multi-line, indentation matters)
    - Your response would exceed the 3 IRC message limit
    - User asks for code examples, scripts, configs, or formatted content
-   - Content needs proper formatting/syntax highlighting to be readable
+   - Content needs proper formatting to be readable
    - Example triggers: "write me a script", "show me the code", "give me an example", any code request
    - Parameters:
      * content (required): The text/code to paste
-     * lexer (optional): Syntax highlighting - python, javascript, go, bash, json, yaml, text, etc. Default: text
-     * filename (optional): Name for the paste (e.g., "example.py")
-     * expiry (optional): "1day", "1week", "1month". Default: 1week
-   - Returns a short URL (e.g., https://bpa.st/ABCD)
+     * filename (optional): Filename with extension (e.g., "example.py", "code.js", "notes.txt"). Extension determines content type.
+     * retention (optional): "1day", "1week", "1month". Default: 1week
+   - Returns a short URL (e.g., https://botbin.net/paste/XXXXX)
    - IMPORTANT: When using paste, include the URL in your response with a brief description of what's in it
-   - Example response: "Here's a Python script that does X: https://bpa.st/ABCD"
+   - Example response: "Here's a Python script that does X: https://botbin.net/paste/abc123"
 
 11. VOICE - Use this when:
    - User shares a voice/audio URL and wants you to speak as that person

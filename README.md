@@ -13,7 +13,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **Image Analysis** - Describe images, solve visual puzzles, OCR text recognition
 - **Image Archiving** - Auto-download images from configured channels to local `img/` folder
 - **Python Code Execution** - Run Python code snippets safely
-- **Text Pasting** - Create pastes for long code/text (bpa.st integration)
+- **Text Pasting** - Create pastes for long code/text (botbin.net integration)
 - **Chat History** - Access conversation context and history
 - **Shell Execution** - Run system commands (owner only)
 - **Voice Cloning** - Clone voices from audio samples or YouTube clips (CosyVoice2)
@@ -40,7 +40,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 **API Keys Required:**
 - **OpenAI API key** - For AI conversations and reasoning ([platform.openai.com](https://platform.openai.com))
 - **Black Forest Labs API key** - For Flux AI image generation/editing ([api.bfl.ml](https://api.bfl.ml))
-- **Freeimage.host API key** - For image hosting (free at [freeimage.host/api](https://freeimage.host/api))
+- **Botbin API key** - For file hosting (images, audio, text) - sign up at [botbin.net](https://botbin.net)
 
 ### Installation
 
@@ -94,20 +94,20 @@ OPENAI_API_KEY=sk-your-openai-key-here
 # Required for Flux AI image generation/editing
 BFL_API_KEY=your-black-forest-labs-key-here
 
-# Required for image hosting (free tier available)
-FREEIMAGE_API_KEY=your-freeimage-key-here
+# Required for file hosting (images, audio, text)
+BOTBIN_API_KEY=your-botbin-api-key-here
 ```
 
 **Where to get API keys:**
 - **OpenAI**: Sign up at [platform.openai.com](https://platform.openai.com) → API Keys
 - **Black Forest Labs**: Get free credits at [api.bfl.ml](https://api.bfl.ml) → Sign up
-- **Freeimage.host**: Free API key at [freeimage.host/api](https://freeimage.host/api) → Register
+- **Botbin**: Sign up at [botbin.net](https://botbin.net) → Request token from dashboard
 
 Alternatively, export them as environment variables:
 ```bash
 export OPENAI_API_KEY="sk-your-openai-key-here"
 export BFL_API_KEY="your-black-forest-labs-key-here"
-export FREEIMAGE_API_KEY="your-freeimage-key-here"
+export BOTBIN_API_KEY="your-botbin-api-key-here"
 ```
 
 ### Running
@@ -235,10 +235,10 @@ Non-owners attempting shell commands will be denied.
 Clone voices from audio samples or YouTube videos:
 ```
 <you>  lolo: clone this voice https://example.com/voice.mp3 and say "Hello world"
-<lolo> https://0x0.st/abc123.mp3
+<lolo> https://botbin.net/abc123.mp3
 
 <you>  lolo: use this youtube video https://youtube.com/watch?v=xxx from 1:00 to 1:15 to clone the voice and say "Testing voice clone"
-<lolo> https://0x0.st/def456.mp3
+<lolo> https://botbin.net/def456.mp3
 ```
 
 For YouTube clips, the bot automatically:
@@ -282,7 +282,7 @@ Edit `.env` and add your API keys:
 ```bash
 OPENAI_API_KEY=sk-your-actual-key-here
 BFL_API_KEY=your-actual-bfl-key-here
-FREEIMAGE_API_KEY=your-actual-freeimage-key-here
+BOTBIN_API_KEY=your-actual-botbin-key-here
 ```
 
 ### Step 3: Configure IRC Settings (config/bot.toml)
@@ -339,7 +339,7 @@ flux_create_enabled = true     # Image generation (requires BFL_API_KEY)
 flux_edit_enabled = true       # Image editing (requires BFL_API_KEY)
 image_analysis_enabled = true  # Image analysis/OCR
 python_exec_enabled = true     # Python code execution
-paste_enabled = true           # Text pasting to bpa.st
+paste_enabled = true           # Text pasting to botbin.net
 user_rules_enabled = true      # Per-user memories and rules
 chat_history_enabled = true    # Conversation history access
 shell_exec_enabled = true      # Shell command execution (owner only)
@@ -352,7 +352,7 @@ voice_clone_enabled = true     # Voice cloning (requires CosyVoice setup)
 
 | File | Purpose | Required |
 |------|---------|----------|
-| `.env` | API keys (OpenAI, BFL, Freeimage) | Yes |
+| `.env` | API keys (OpenAI, BFL, Botbin) | Yes |
 | `config/bot.toml` | IRC server, nickname, channels, auth | Yes |
 | `api/config/ai_settings.toml` | AI personality, tools, system prompt | Optional (has defaults) |
 
@@ -368,7 +368,7 @@ voice_clone_enabled = true     # Voice cloning (requires CosyVoice setup)
 **Image generation not working**
 - Ensure `BFL_API_KEY` is set correctly
 - Check Black Forest Labs account has credits
-- Verify `FREEIMAGE_API_KEY` for image hosting
+- Verify `BOTBIN_API_KEY` for file hosting
 
 **Bot not responding to mentions**
 - Check Python API is running on port 8000

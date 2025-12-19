@@ -7,9 +7,9 @@ Provides image editing using BFL's Flux API.
 import os
 import time
 import requests
-import tempfile
 from typing import Any, Dict, Optional
 from .base import Tool
+from api.utils.botbin import upload_to_botbin
 
 
 class FluxEditTool(Tool):
@@ -18,8 +18,6 @@ class FluxEditTool(Tool):
     def __init__(self):
         """Initialize Flux edit tool."""
         self.api_key = os.environ.get("BFL_API_KEY")
-        self.freeimage_api_key = os.environ.get("FREEIMAGE_API_KEY")
-        self.upload_url = "https://freeimage.host/api/1/upload"
     
     @property
     def name(self) -> str:
@@ -170,37 +168,10 @@ class FluxEditTool(Tool):
                     img_response = requests.get(image_url)
                     img_response.raise_for_status()
                     
-                    # Upload to paste
-                    with tempfile.NamedTemporaryFile(suffix=".jpeg", delete=False) as tmp:
-                        tmp.write(img_response.content)
-                        tmp_path = tmp.name
-                    
-                    try:
-                        with open(tmp_path, "rb") as f:
-                            upload_response = requests.post(
-                                self.upload_url,
-                                data={
-                                    "key": self.freeimage_api_key,
-                                    "action": "upload",
-                                    "format": "json"
-                                },
-                                files={"source": f}
-                            )
-                        
-                        if upload_response.status_code != 200:
-                            return f"Error: Failed to upload image - {upload_response.status_code} {upload_response.text}"
-                        
-                        upload_result = upload_response.json()
-                        
-                        if upload_result.get("status_code") != 200:
-                            error_msg = upload_result.get("error", {}).get("message", "Unknown error")
-                            return f"Error: Image upload failed - {error_msg}"
-                        
-                        # Get the direct image URL
-                        image_url = upload_result["image"]["url"]
-                        return image_url
-                    finally:
-                        os.unlink(tmp_path)
+                    # Upload to botbin
+                    fmt = output_format if output_format else "jpeg"
+                    url = upload_to_botbin(img_response.content, f"image.{fmt}")
+                    return url
                 
                 elif poll_result["status"] in ["Error", "Failed"]:
                     return f"Error: Image editing failed - {poll_result.get('error', 'Unknown error')}"

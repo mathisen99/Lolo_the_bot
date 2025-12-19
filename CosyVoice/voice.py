@@ -12,7 +12,7 @@ Examples:
     voice.py -y "https://youtube.com/watch?v=xxx" -s 1:00 -e 1:15 "Hello world"
     voice.py -f voices/sample.wav "Hello world"
     
-Output is uploaded to 0x0.st and URL is printed.
+Output is uploaded to botbin.net and URL is printed.
 Use --local to save locally instead.
 """
 
@@ -38,7 +38,7 @@ OUTPUT_DIR = SCRIPT_DIR / "output"
 MODEL_PATH = SCRIPT_DIR / "pretrained_models/CosyVoice2-0.5B"
 MAX_VOICE_DURATION = 15  # seconds
 MAX_YOUTUBE_DURATION = 30  # seconds
-UPLOAD_URL = "https://0x0.st"
+BOTBIN_UPLOAD_URL = "https://botbin.net/upload"
 # ==================================
 
 
@@ -240,15 +240,39 @@ def convert_to_mp3(wav_path: Path, mp3_path: Path):
 
 
 def upload_file(file_path: Path) -> str:
-    """Upload file to 0x0.st."""
-    print("[VOICE] Uploading to 0x0.st...")
+    """Upload file to botbin.net."""
+    import json
+    print("[VOICE] Uploading to botbin.net...")
+    api_key = os.environ.get("BOTBIN_API_KEY")
+    if not api_key:
+        raise RuntimeError("BOTBIN_API_KEY not configured")
+    
+    # Use -w to get HTTP status code, don't use -f (201 is valid success)
     result = subprocess.run(
-        ["curl", "-s", "-f", "-F", f"file=@{file_path}", UPLOAD_URL],
+        ["curl", "-s", "-X", "POST", BOTBIN_UPLOAD_URL,
+         "-H", f"Authorization: Bearer {api_key}",
+         "-F", f"file=@{file_path}",
+         "-F", "retention=168h",
+         "-w", "\n%{http_code}"],
         capture_output=True, text=True, timeout=60
     )
     if result.returncode != 0:
         raise RuntimeError(f"Upload failed: {result.stderr}")
-    url = result.stdout.strip()
+    
+    # Parse response - last line is HTTP status code
+    lines = result.stdout.strip().rsplit("\n", 1)
+    if len(lines) != 2:
+        raise RuntimeError(f"Unexpected response format: {result.stdout}")
+    
+    body, status_code = lines
+    if status_code not in ("200", "201"):
+        raise RuntimeError(f"Upload failed with status {status_code}: {body}")
+    
+    # Parse JSON response
+    response = json.loads(body)
+    url = response.get("url")
+    if not url:
+        raise RuntimeError(f"No URL in response: {body}")
     print(f"[VOICE] Uploaded: {url}")
     return url
 

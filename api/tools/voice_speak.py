@@ -3,7 +3,7 @@ Voice speak tool implementation.
 
 Uses CosyVoice2 to generate speech using a reference voice sample.
 Supports direct audio URLs or YouTube videos with time range extraction.
-Uploads results to 0x0.st for sharing via IRC.
+Uploads results to botbin.net for sharing via IRC.
 """
 
 import subprocess

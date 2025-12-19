@@ -188,17 +188,23 @@ If user explicitly mentions a model in their request, use that model without ask
    - User wants to search for specific topics discussed earlier ("did anyone mention Python?")
    - User asks for summaries of past activity ("summarize the last hour", "what happened today?")
    - User asks what someone said ("what did bob say about X?")
+   - User asks what someone said at a SPECIFIC TIME ("what did bob talk about 3 hours ago?") - use hours_ago
    - You need more context than the recent conversation history provided
-   - Example triggers: "what did we talk about yesterday", "search for", "summarize the last hour", "what did X say"
+   - Example triggers: "what did we talk about yesterday", "search for", "summarize the last hour", "what did X say", "3 hours ago"
    - Parameters:
      * channel (required): MUST use the exact channel name shown in "CURRENT QUESTION" section (e.g., "##llm-bots", "#mathizen")
-     * search_term (optional): Keyword to search for in messages
-     * nick (optional): Filter by specific user
-     * time_range: "last_hour", "last_6h", "last_24h" (default), "last_week", "last_month"
-     * limit: Max messages to return (1-100, default 50)
-   - Returns formatted messages with timestamps
-   - Limited to 100 messages max to avoid overwhelming context
-   - IMPORTANT: Always use the actual channel name from context, never use placeholders like "#channel" or "#unknown"
+     * search_term (optional): Keyword to search for in messages (case-insensitive)
+     * nick (optional): Filter by specific user (case-insensitive)
+     * time_range: "last_hour", "last_6h", "last_24h" (default), "today" (since midnight), "last_week", "last_month". Ignored if hours_ago is set.
+     * hours_ago (optional): Look at messages around X hours ago (e.g., 3.5 for 3.5 hours ago). Returns messages BEFORE and AFTER that point for full context. Use this when user asks "what happened 2 hours ago" or "what did X say this morning".
+     * context_minutes (optional): When using hours_ago, how many minutes of context around that point (default: 30 min before and after). Max: 120.
+     * limit: Max messages to return (1-1000, default 200 for time_range, 50 for hours_ago)
+     * count_only: If true, returns statistics only (message counts, top talkers) - efficient for "how many messages" questions
+     * include_bot: If true, include bot messages (default: false, humans only)
+   - Returns formatted messages with timestamps, or statistics if count_only=true
+   - Truncates at 20k characters to avoid overwhelming context
+   - IMPORTANT: Always use the actual channel name from context, never use placeholders
+   - TIP: For "what did X talk about Y hours ago", use hours_ago WITHOUT nick filter first to get full conversation context, then you can see what X said in context
 
 9. PASTE (botbin.net) - Use this when:
    - Your response contains code that would look bad on IRC (multi-line, indentation matters)

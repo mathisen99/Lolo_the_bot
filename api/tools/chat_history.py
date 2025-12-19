@@ -8,27 +8,28 @@ message statistics.
 """
 
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 from .base import Tool
 
 
 class ChatHistoryTool(Tool):
     """Tool for querying chat history from the database."""
     
-    # Limits - allow full day context but cap characters
-    MAX_MESSAGES = 1000  # Allow fetching full day of messages
-    MAX_CHARS = 50000    # ~50k chars for analysis
+    MAX_MESSAGES = 1000
+    MAX_CHARS = 20000
+    DEFAULT_LIMIT = 200
+    DEFAULT_CONTEXT_MESSAGES = 50  # Messages around a specific point in time
     
-    # Time range mappings
     TIME_RANGES = {
-        "last_hour": timedelta(hours=1),
-        "last_6h": timedelta(hours=6),
-        "last_24h": timedelta(hours=24),
-        "today": timedelta(hours=24),  # Alias for last_24h
-        "last_week": timedelta(days=7),
-        "last_month": timedelta(days=30),
+        "last_hour": "hour",
+        "last_6h": "6h",
+        "last_24h": "24h",
+        "today": "today",
+        "last_week": "week",
+        "last_month": "month",
     }
     
     def __init__(self):
@@ -51,12 +52,14 @@ Use this when:
 - User wants to search for specific topics ("did anyone mention Python?")
 - User asks for summaries ("summarize the last hour")
 - User asks what someone said ("what did bob say about X?")
+- User asks what someone said at a specific time ("what did bob talk about 3 hours ago?") - use hours_ago
 - User asks how many messages someone sent ("how many messages did I send today?")
 - User asks about activity ("how active was the channel today?")
 - User asks about specific actions ("how many times did X try to generate images?") - fetch messages and analyze them
 - You need more context than the recent 20 messages provided
 
 For counting questions, use count_only=true for efficiency.
+For looking at a specific point in time with context, use hours_ago (returns messages around that time).
 For semantic analysis (like counting image generation attempts), fetch full messages and analyze the content yourself.
 
 Can fetch up to 1000 messages for full day analysis.""",
@@ -73,20 +76,32 @@ Can fetch up to 1000 messages for full day analysis.""",
                     },
                     "nick": {
                         "type": ["string", "null"],
-                        "description": "Optional: filter messages by specific user nickname"
+                        "description": "Optional: filter messages by specific user nickname (case-insensitive)"
                     },
                     "time_range": {
                         "type": "string",
                         "enum": ["last_hour", "last_6h", "last_24h", "today", "last_week", "last_month"],
-                        "description": "Time range to search. 'today' is alias for 'last_24h'. Default: last_24h"
+                        "description": "Time range to search. 'today' means since midnight. Default: last_24h. Ignored if hours_ago is set."
+                    },
+                    "hours_ago": {
+                        "type": ["number", "null"],
+                        "description": "Look at messages around X hours ago (e.g., 3.5 for 3.5 hours ago). Returns messages before AND after that point for context. Use this when user asks about a specific time like '2 hours ago' or 'this morning'. Overrides time_range."
+                    },
+                    "context_minutes": {
+                        "type": ["integer", "null"],
+                        "description": "When using hours_ago, how many minutes of context to include around that point (default: 30 minutes before and after, so 60 total). Max: 120."
                     },
                     "limit": {
                         "type": ["integer", "null"],
-                        "description": "Max messages to return (1-1000). Default: 200. Use higher values for full day analysis."
+                        "description": "Max messages to return (1-1000). Default: 200 for time_range, 50 for hours_ago."
                     },
                     "count_only": {
                         "type": "boolean",
                         "description": "If true, only return message count statistics instead of message content. Efficient for 'how many messages' questions. Default: false"
+                    },
+                    "include_bot": {
+                        "type": "boolean",
+                        "description": "If true, include bot messages in results. Default: false (only human messages)"
                     }
                 },
                 "required": ["channel"],
@@ -94,62 +109,114 @@ Can fetch up to 1000 messages for full day analysis.""",
             }
         }
     
-    def _get_connection(self) -> sqlite3.Connection:
-        """Get a read-only database connection."""
-        # Use URI mode for read-only access
+    @contextmanager
+    def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
+        """Get a read-only database connection as context manager."""
         db_uri = f"file:{self.db_path}?mode=ro"
         conn = sqlite3.connect(db_uri, uri=True)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+        finally:
+            conn.close()
+    
+    def _get_start_time(self, time_range: str) -> datetime:
+        """Calculate start time based on time range."""
+        now = datetime.now()
+        
+        if time_range == "today":
+            return now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        deltas = {
+            "last_hour": timedelta(hours=1),
+            "last_6h": timedelta(hours=6),
+            "last_24h": timedelta(hours=24),
+            "last_week": timedelta(days=7),
+            "last_month": timedelta(days=30),
+        }
+        return now - deltas.get(time_range, timedelta(hours=24))
     
     def _format_timestamp(self, timestamp_str: str) -> str:
-        """Format timestamp for readable output."""
-        # Handle Go's verbose timestamp format
-        # e.g. "2025-11-27 21:48:39.770514389 +0200 EET m=+3141.074466282"
-        # Extract just the date and time part
-        parts = timestamp_str.split()
-        if len(parts) >= 2:
-            date_part = parts[0]
-            time_part = parts[1].split('.')[0]  # Remove nanoseconds
-            return f"{date_part} {time_part}"
+        """Format Go's verbose timestamp for readable output."""
+        if len(timestamp_str) >= 19:
+            return timestamp_str[:19]
         return timestamp_str
     
-    def _format_messages(self, messages: List[sqlite3.Row], total_found: int) -> str:
+    def _build_where_clause(
+        self,
+        channel: str,
+        start_time_str: str,
+        nick: Optional[str],
+        search_term: Optional[str],
+        include_bot: bool,
+        end_time_str: Optional[str] = None
+    ) -> tuple[str, List[Any]]:
+        """Build WHERE clause and params for queries."""
+        conditions = [
+            "channel = ?",
+            "substr(timestamp, 1, 19) >= ?"
+        ]
+        params: List[Any] = [channel, start_time_str]
+        
+        if end_time_str:
+            conditions.append("substr(timestamp, 1, 19) <= ?")
+            params.append(end_time_str)
+        
+        if not include_bot:
+            conditions.append("is_bot = 0")
+        
+        if nick:
+            conditions.append("LOWER(nick) = LOWER(?)")
+            params.append(nick)
+        
+        if search_term and search_term.strip():
+            conditions.append("LOWER(content) LIKE LOWER(?)")
+            params.append(f"%{search_term}%")
+        
+        return " AND ".join(conditions), params
+    
+    def _format_messages(
+        self, 
+        messages: List[sqlite3.Row], 
+        total_found: int, 
+        limit: int,
+        context_mode: bool = False,
+        target_time: Optional[datetime] = None
+    ) -> str:
         """Format messages for output, respecting character limit."""
         if not messages:
             return "No messages found matching your criteria."
         
         lines = []
         char_count = 0
-        truncated_at = None
+        truncated = False
         
         for msg in messages:
-            # Format: [timestamp] nick: content
             timestamp = self._format_timestamp(msg["timestamp"])
-            nick = msg["nick"]
-            content = msg["content"]
-            
-            line = f"[{timestamp}] {nick}: {content}"
-            line_len = len(line) + 1  # +1 for newline
+            line = f"[{timestamp}] {msg['nick']}: {msg['content']}"
+            line_len = len(line) + 1
             
             if char_count + line_len > self.MAX_CHARS:
-                truncated_at = len(lines)
+                truncated = True
                 break
             
             lines.append(line)
             char_count += line_len
         
-        # Build header
         shown = len(lines)
-        if total_found > self.MAX_MESSAGES:
-            header = f"Found {total_found} messages, showing {shown} most recent"
-        elif truncated_at:
+        
+        # Build header
+        if context_mode and target_time:
+            target_str = target_time.strftime("%Y-%m-%d %H:%M")
+            header = f"Messages around {target_str} ({shown} messages)"
+        elif truncated:
             header = f"Found {total_found} messages, showing {shown} (truncated for length)"
+        elif total_found > limit:
+            header = f"Found {total_found} messages, showing {shown} most recent"
         else:
             header = f"Found {total_found} messages"
         
-        # Add note if results were limited
-        if total_found > shown:
+        if total_found > shown and not context_mode:
             header += ". Consider narrowing your search with a search_term or shorter time_range."
         
         return f"{header}:\n\n" + "\n".join(lines)
@@ -158,64 +225,93 @@ Can fetch up to 1000 messages for full day analysis.""",
         self,
         cursor: sqlite3.Cursor,
         channel: str,
-        start_time: datetime,
-        nick: Optional[str] = None,
-        search_term: Optional[str] = None
+        start_time_str: str,
+        nick: Optional[str],
+        search_term: Optional[str],
+        include_bot: bool,
+        time_desc: str,
+        end_time_str: Optional[str] = None
     ) -> str:
         """Get message count statistics."""
-        base_query = """
-            SELECT COUNT(*) as count
-            FROM messages
-            WHERE channel = ?
-            AND timestamp >= ?
-        """
-        params: List[Any] = [channel, start_time.strftime("%Y-%m-%d %H:%M:%S")]
+        where_clause, params = self._build_where_clause(
+            channel, start_time_str, nick, search_term, include_bot, end_time_str
+        )
         
-        if nick:
-            base_query += " AND LOWER(nick) = LOWER(?)"
-            params.append(nick)
-        
-        if search_term:
-            base_query += " AND content LIKE ?"
-            params.append(f"%{search_term}%")
-        
-        cursor.execute(base_query, params)
+        cursor.execute(f"SELECT COUNT(*) FROM messages WHERE {where_clause}", params)
         total_count = cursor.fetchone()[0]
         
-        # Build response
         if nick:
-            result = f"{nick} sent {total_count} message(s) in {channel}"
+            result = f"{nick} sent {total_count} message(s) in {channel} ({time_desc})"
         else:
-            result = f"Total: {total_count} message(s) in {channel}"
+            result = f"Total: {total_count} message(s) in {channel} ({time_desc})"
         
-        if search_term:
+        if search_term and search_term.strip():
             result += f" containing '{search_term}'"
         
-        # Get top contributors if no nick filter
         if not nick and total_count > 0:
-            top_query = """
-                SELECT nick, COUNT(*) as msg_count
+            where_clause_top, params_top = self._build_where_clause(
+                channel, start_time_str, None, search_term, include_bot, end_time_str
+            )
+            
+            top_query = f"""
+                SELECT LOWER(nick) as nick_lower, COUNT(*) as msg_count
                 FROM messages
-                WHERE channel = ?
-                AND timestamp >= ?
+                WHERE {where_clause_top}
+                GROUP BY nick_lower
+                ORDER BY msg_count DESC
+                LIMIT 10
             """
-            top_params: List[Any] = [channel, start_time.strftime("%Y-%m-%d %H:%M:%S")]
             
-            if search_term:
-                top_query += " AND content LIKE ?"
-                top_params.append(f"%{search_term}%")
-            
-            top_query += " GROUP BY LOWER(nick) ORDER BY msg_count DESC LIMIT 10"
-            
-            cursor.execute(top_query, top_params)
+            cursor.execute(top_query, params_top)
             top_users = cursor.fetchall()
             
             if top_users:
                 result += "\n\nTop contributors:\n"
                 for i, row in enumerate(top_users, 1):
-                    result += f"  {i}. {row['nick']}: {row['msg_count']} messages\n"
+                    result += f"  {i}. {row['nick_lower']}: {row['msg_count']} messages\n"
         
         return result
+
+    def _query_around_time(
+        self,
+        cursor: sqlite3.Cursor,
+        channel: str,
+        target_time: datetime,
+        context_minutes: int,
+        nick: Optional[str],
+        search_term: Optional[str],
+        include_bot: bool,
+        limit: int
+    ) -> tuple[List[sqlite3.Row], int, datetime]:
+        """Query messages around a specific point in time."""
+        start_time = target_time - timedelta(minutes=context_minutes)
+        end_time = target_time + timedelta(minutes=context_minutes)
+        
+        start_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
+        end_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
+        
+        where_clause, params = self._build_where_clause(
+            channel, start_str, nick, search_term, include_bot, end_str
+        )
+        
+        # Get count
+        cursor.execute(f"SELECT COUNT(*) FROM messages WHERE {where_clause}", params)
+        total_found = cursor.fetchone()[0]
+        
+        # Get messages in chronological order
+        query = f"""
+            SELECT timestamp, nick, content
+            FROM messages
+            WHERE {where_clause}
+            ORDER BY timestamp ASC
+            LIMIT ?
+        """
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        messages = cursor.fetchall()
+        
+        return list(messages), total_found, target_time
 
     def execute(
         self,
@@ -223,8 +319,11 @@ Can fetch up to 1000 messages for full day analysis.""",
         search_term: Optional[str] = None,
         nick: Optional[str] = None,
         time_range: str = "last_24h",
+        hours_ago: Optional[float] = None,
+        context_minutes: Optional[int] = None,
         limit: Optional[int] = None,
         count_only: bool = False,
+        include_bot: bool = False,
         **kwargs
     ) -> str:
         """
@@ -232,84 +331,121 @@ Can fetch up to 1000 messages for full day analysis.""",
         
         Args:
             channel: Channel to search
-            search_term: Optional keyword to search for
-            nick: Optional user to filter by
-            time_range: Time range to search
+            search_term: Optional keyword to search for (case-insensitive)
+            nick: Optional user to filter by (case-insensitive)
+            time_range: Time range to search (ignored if hours_ago is set)
+            hours_ago: Look at messages around X hours ago
+            context_minutes: Minutes of context around hours_ago point (default 30)
             limit: Max messages to return
             count_only: If True, return only statistics
+            include_bot: If True, include bot messages
             
         Returns:
             Formatted message history, statistics, or error message
         """
-        # Validate database exists
         if not self.db_path.exists():
             return "Error: Database not found. No chat history available."
         
-        # Validate time range
-        if time_range not in self.TIME_RANGES:
-            return f"Error: Invalid time_range. Must be one of: {', '.join(self.TIME_RANGES.keys())}"
+        if not channel or not channel.strip():
+            return "Error: Channel is required."
         
-        # Apply limit constraints
+        # Handle hours_ago mode (specific point in time with context)
+        if hours_ago is not None:
+            if hours_ago < 0:
+                return "Error: hours_ago must be positive."
+            if hours_ago > 24 * 30:  # Max 30 days back
+                return "Error: hours_ago cannot exceed 720 (30 days)."
+            
+            target_time = datetime.now() - timedelta(hours=hours_ago)
+            
+            # Default/constrain context_minutes
+            if context_minutes is None:
+                context_minutes = 30
+            context_minutes = max(5, min(context_minutes, 120))
+            
+            # Default limit for context mode
+            if limit is None:
+                limit = self.DEFAULT_CONTEXT_MESSAGES
+            limit = max(1, min(limit, self.MAX_MESSAGES))
+            
+            try:
+                with self._get_connection() as conn:
+                    cursor = conn.cursor()
+                    
+                    if count_only:
+                        start_time = target_time - timedelta(minutes=context_minutes)
+                        end_time = target_time + timedelta(minutes=context_minutes)
+                        time_desc = f"around {target_time.strftime('%H:%M')} (±{context_minutes}min)"
+                        return self._get_stats(
+                            cursor, channel,
+                            start_time.strftime("%Y-%m-%d %H:%M:%S"),
+                            nick, search_term, include_bot, time_desc,
+                            end_time.strftime("%Y-%m-%d %H:%M:%S")
+                        )
+                    
+                    messages, total_found, target = self._query_around_time(
+                        cursor, channel, target_time, context_minutes,
+                        nick, search_term, include_bot, limit
+                    )
+                    
+                    return self._format_messages(
+                        messages, total_found, limit,
+                        context_mode=True, target_time=target
+                    )
+                    
+            except sqlite3.Error as e:
+                return f"Error querying database: {e}"
+            except Exception as e:
+                return f"Error: {e}"
+        
+        # Standard time_range mode
+        if time_range not in self.TIME_RANGES:
+            valid = ", ".join(self.TIME_RANGES.keys())
+            return f"Error: Invalid time_range. Must be one of: {valid}"
+        
         if limit is None:
-            limit = 200  # Higher default for analysis
+            limit = self.DEFAULT_LIMIT
         limit = max(1, min(limit, self.MAX_MESSAGES))
         
-        # Calculate time boundary
-        time_delta = self.TIME_RANGES[time_range]
-        start_time = datetime.now() - time_delta
+        start_time = self._get_start_time(time_range)
+        start_time_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
         
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            
-            # Count-only mode for statistics
-            if count_only:
-                result = self._get_stats(cursor, channel, start_time, nick, search_term)
-                conn.close()
-                return result
-            
-            # Build query for full messages
-            query = """
-                SELECT timestamp, nick, content
-                FROM messages
-                WHERE channel = ?
-                AND timestamp >= ?
-            """
-            params: List[Any] = [channel, start_time.strftime("%Y-%m-%d %H:%M:%S")]
-            
-            # Add nick filter
-            if nick:
-                query += " AND LOWER(nick) = LOWER(?)"
-                params.append(nick)
-            
-            # Add search term filter
-            if search_term:
-                query += " AND content LIKE ?"
-                params.append(f"%{search_term}%")
-            
-            # First get total count
-            count_query = query.replace(
-                "SELECT timestamp, nick, content",
-                "SELECT COUNT(*)"
-            )
-            cursor.execute(count_query, params)
-            total_found = cursor.fetchone()[0]
-            
-            # Now get actual messages (ordered by time, most recent last for reading order)
-            query += " ORDER BY timestamp DESC LIMIT ?"
-            params.append(limit)
-            
-            cursor.execute(query, params)
-            messages = cursor.fetchall()
-            
-            # Reverse to chronological order for readability
-            messages = list(reversed(messages))
-            
-            conn.close()
-            
-            return self._format_messages(messages, total_found)
-            
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if count_only:
+                    time_desc = time_range.replace("_", " ")
+                    return self._get_stats(
+                        cursor, channel, start_time_str, nick,
+                        search_term, include_bot, time_desc
+                    )
+                
+                where_clause, params = self._build_where_clause(
+                    channel, start_time_str, nick, search_term, include_bot
+                )
+                
+                cursor.execute(
+                    f"SELECT COUNT(*) FROM messages WHERE {where_clause}",
+                    params
+                )
+                total_found = cursor.fetchone()[0]
+                
+                query = f"""
+                    SELECT timestamp, nick, content
+                    FROM messages
+                    WHERE {where_clause}
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """
+                params.append(limit)
+                
+                cursor.execute(query, params)
+                messages = list(reversed(cursor.fetchall()))
+                
+                return self._format_messages(messages, total_found, limit)
+                
         except sqlite3.Error as e:
-            return f"Error querying database: {str(e)}"
+            return f"Error querying database: {e}"
         except Exception as e:
-            return f"Error: {str(e)}"
+            return f"Error: {e}"

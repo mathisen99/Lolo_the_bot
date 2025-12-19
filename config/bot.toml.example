@@ -24,7 +24,7 @@
   command_prefix = "!"
   channels = ["#yourchannel"]  # Channels to join on startup
   api_endpoint = "http://localhost:8000"  # Python API endpoint
-  api_timeout = 120
+  api_timeout = 240
   test_mode = false  # Set to true to use mock API for testing
 
 [limits]

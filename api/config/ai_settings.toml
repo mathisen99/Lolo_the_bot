@@ -27,8 +27,8 @@ verbosity = "low"
 max_output_tokens = 4000
 
 # Request timeout in seconds
-# Note: Complex queries with multiple web searches can take 60-120 seconds
-timeout = 120
+# Note: Complex queries with multiple tool calls can take 120-180 seconds
+timeout = 240
 
 [system_prompt]
 # System instructions for the AI
@@ -150,15 +150,22 @@ If user explicitly mentions a model in their request, use that model without ask
    - Asked to read an article, blog post, code file, or webpage content
    - Need to extract text content from a specific URL
    - Browsing mailing list archives, forums, or documentation
-   - Reading code files (Python, JS, etc.) shared via URL
+   - Reading code files (Python, JS, C/C++, etc.) shared via URL
    - Reading PDFs linked in chat
-   - Example triggers: "what's on this page", "summarize this article [URL]", "read this link", "review this code [URL]"
-   - Returns cleaned text with links preserved as [text](url) markdown format
-   - You can follow links found in the content by fetching those URLs too
-   - Supports: HTML pages, PDFs, code files, JSON, XML, plain text
-   - Can bypass some bot protection (Cloudflare)
-   - Content is truncated to ~12000 characters
-   - TIP: For mailing lists/forums, fetch the thread index first, then follow links to specific posts
+   - Example triggers: "what's on this page", "summarize this article [URL]", "read this link", "what does the X function do in [URL]"
+   - Parameters:
+     * url (required): The URL to fetch
+     * search_term (optional): Extract only sections containing this term. For code files, extracts the full function/class/block containing matches with line numbers. For articles/text, extracts paragraphs with context. Case-insensitive.
+   - Returns: Cleaned text with links as [text](url), page title when available
+   - Supports: HTML pages, PDFs, code files (Python, JS, C/C++, Go, Rust, etc.), JSON, XML, YAML, Markdown
+   - Content limit: ~12000 characters (truncated if larger)
+   - WHEN TO USE search_term:
+     * User asks about a specific function: fetch_url(url, search_term="function_name")
+     * User asks about a topic in a long article: fetch_url(url, search_term="topic")
+     * File is large and you only need part of it
+   - IMPORTANT: If response contains "[TRUNCATED:", tell user content was cut off and suggest using search_term for specific content
+   - TIP: For code questions, use search_term with the function/class name to get just that code block
+   - Can bypass some Cloudflare protection
    - Use WEB SEARCH for general queries, use FETCH URL when you have a specific URL to read
 
 7. USER MEMORIES/RULES - Use this when:

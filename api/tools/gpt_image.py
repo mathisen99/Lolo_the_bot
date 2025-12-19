@@ -179,12 +179,12 @@ Returns a URL to the generated/edited image.""",
             if quality == "low":
                 return "Error: Transparent background requires medium or high quality"
         
-        # Validate compression - only matters for jpeg/webp, ignore for png
-        if output_compression is not None and output_compression > 0:
-            if output_format not in ["jpeg", "webp"]:
-                # Silently ignore compression for png instead of erroring
+        # Validate compression - only valid for jpeg/webp, not png
+        if output_compression is not None:
+            if output_format == "png":
+                # PNG doesn't support compression < 100, silently ignore
                 output_compression = None
-            elif output_compression > 100:
+            elif output_compression < 0 or output_compression > 100:
                 return "Error: output_compression must be between 0 and 100"
         
         try:

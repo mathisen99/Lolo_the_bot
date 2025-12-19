@@ -116,7 +116,7 @@ func DefaultConfig() *Config {
 			CommandPrefix: "!",
 			Channels:      []string{"#yourchannel"},
 			APIEndpoint:   "http://localhost:8000",
-			APITimeout:    120, // 120 seconds for future AI features
+			APITimeout:    240, // 240 seconds for complex multi-tool AI requests
 			TestMode:      false,
 		},
 		Limits: LimitsConfig{

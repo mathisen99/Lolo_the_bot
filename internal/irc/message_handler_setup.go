@@ -23,8 +23,8 @@ func (cm *ConnectionManager) SetupBotMessageHandler(messageHandler *handler.Mess
 				handlerChannel = ""
 			}
 
-			// Process the message with timeout (2 minutes for image generation)
-			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+			// Process the message with timeout (4 minutes for complex multi-tool AI requests)
+			ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 			defer cancel()
 
 			responses, err := messageHandler.HandleMessage(

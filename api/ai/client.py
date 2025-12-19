@@ -339,7 +339,17 @@ class AIClient:
                 
                 # Parse arguments if they're a JSON string
                 if isinstance(func_args_raw, str):
-                    func_args = json.loads(func_args_raw)
+                    try:
+                        func_args = json.loads(func_args_raw)
+                    except json.JSONDecodeError as e:
+                        log_warning(f"[{request_id}] Failed to parse tool arguments for {func_name}: {e}")
+                        log_warning(f"[{request_id}] Raw arguments: {func_args_raw[:200]}...")
+                        function_outputs.append({
+                            "type": "function_call_output",
+                            "call_id": call_id,
+                            "output": f"Error: Invalid JSON in tool arguments - {e}"
+                        })
+                        continue
                 else:
                     func_args = func_args_raw
                 
@@ -377,7 +387,15 @@ class AIClient:
                     
                     # Handle image analysis - needs vision API call but continues the chain
                     if func_name == 'analyze_image':
-                        result_data = json.loads(result)
+                        try:
+                            result_data = json.loads(result)
+                        except json.JSONDecodeError:
+                            function_outputs.append({
+                                "type": "function_call_output",
+                                "call_id": call_id,
+                                "output": f"Error: analyze_image returned invalid JSON"
+                            })
+                            continue
                         
                         if result_data.get('status') == 'error':
                             function_outputs.append({

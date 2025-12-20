@@ -59,6 +59,7 @@ class AIConfig:
         self.null_response_enabled: bool = config["tools"].get("null_response_enabled", True)
         self.bug_report_enabled: bool = config["tools"].get("bug_report_enabled", True)
         self.gpt_image_enabled: bool = config["tools"].get("gpt_image_enabled", True)
+        self.usage_stats_enabled: bool = config["tools"].get("usage_stats_enabled", True)
         
         # Shell execution settings
         self.shell_exec_timeout: int = config.get("shell_exec", {}).get("timeout", 30)

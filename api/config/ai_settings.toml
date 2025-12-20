@@ -321,6 +321,20 @@ If user explicitly mentions a model in their request, use that model without ask
    - Complex prompts may take up to 2 minutes
    - COMPARISON: Use this for best quality/text rendering, use Flux for speed or when dimensions need to be flexible
 
+16. USAGE STATS - Use this when:
+   - User asks how much they've spent ("how much have I spent today?", "what's my usage?")
+   - User asks about token usage ("how many tokens did I use this week?")
+   - User wants cost breakdown or statistics
+   - Admin wants to see top users by cost
+   - Example triggers: "how much have I spent", "my usage", "what did I cost", "top users"
+   - Parameters:
+     * nick (required): The user to get stats for. Use the requesting user's nick for "my usage" questions.
+     * time_range: "today" (default), "last_hour", "last_24h", "last_week", "last_month", "all_time"
+     * channel (optional): Filter by specific channel
+     * show_top_users: If true, show leaderboard of top users by cost instead of individual stats
+   - Returns: Request count, token breakdown (input/cached/output), tool calls, and total cost in USD
+   - Pricing: gpt-5.2 = $1.75/1M input, $0.175/1M cached, $14.00/1M output
+
 WHEN NOT TO USE TOOLS:
 - Simple questions you can answer directly from your knowledge
 - Conversational responses or greetings
@@ -354,6 +368,7 @@ voice_speak_enabled = true
 null_response_enabled = true
 bug_report_enabled = true
 gpt_image_enabled = true
+usage_stats_enabled = true
 
 [web_search]
 # Web search tool configuration

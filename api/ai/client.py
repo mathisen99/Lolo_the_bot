@@ -7,7 +7,8 @@ Handles communication with OpenAI API and tool execution.
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
 from .config import AIConfig
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool
+from .usage_tracker import log_usage, extract_usage_from_response
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, UsageStatsTool
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -66,6 +67,8 @@ class AIClient:
                         tools_used.append('BUG_REPORT')
                     elif func_name == 'gpt_image':
                         tools_used.append('GPT_IMAGE')
+                    elif func_name == 'usage_stats':
+                        tools_used.append('USAGE_STATS')
         
         if tools_used:
             tools_str = ', '.join(tools_used)
@@ -145,6 +148,11 @@ class AIClient:
             gpt_image = GPTImageTool()
             self.tools[gpt_image.name] = gpt_image
             log_info("GPT Image tool enabled (gpt-image-1.5)")
+        
+        if self.config.usage_stats_enabled:
+            usage_stats = UsageStatsTool()
+            self.tools[usage_stats.name] = usage_stats
+            log_info("Usage stats tool enabled")
     
     def generate_response(self, user_message: str, request_id: str) -> str:
         """
@@ -252,7 +260,19 @@ class AIClient:
             self._check_tools_used(response, request_id)
             
             # Handle function calls if present
-            response, null_response_triggered = self._handle_function_calls(response, full_input, request_id, permission_level, nick, channel)
+            response, null_response_triggered, total_usage = self._handle_function_calls(response, full_input, request_id, permission_level, nick, channel)
+            
+            # Log usage to database
+            log_usage(
+                request_id=request_id,
+                nick=nick,
+                channel=channel,
+                model=self.config.model_name,
+                input_tokens=total_usage.get("input_tokens", 0),
+                cached_tokens=total_usage.get("cached_tokens", 0),
+                output_tokens=total_usage.get("output_tokens", 0),
+                tool_calls=total_usage.get("tool_calls", 0)
+            )
             
             # Check if null response was triggered (user asked for silence)
             # Return special marker that tells Go bot to stay silent
@@ -280,7 +300,7 @@ class AIClient:
             log_error(f"[{request_id}] Traceback: {traceback.format_exc()}")
             return "Sorry, I encountered an error generating a response."
     
-    def _handle_function_calls(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal", nick: str = "", channel: str = "") -> tuple[Any, bool]:
+    def _handle_function_calls(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal", nick: str = "", channel: str = "") -> tuple[Any, bool, Dict[str, int]]:
         """
         Handle function calls in the response using multi-turn tool calling.
         
@@ -297,7 +317,7 @@ class AIClient:
             channel: Channel name for context
             
         Returns:
-            Tuple of (final response, null_response_triggered)
+            Tuple of (final response, null_response_triggered, usage_stats)
         """
         import json
         
@@ -305,13 +325,27 @@ class AIClient:
         iteration = 0
         null_response_triggered = False
         
+        # Track cumulative usage across all iterations
+        total_usage = {
+            "input_tokens": 0,
+            "cached_tokens": 0,
+            "output_tokens": 0,
+            "tool_calls": 0
+        }
+        
+        # Extract usage from initial response
+        initial_usage = extract_usage_from_response(response)
+        total_usage["input_tokens"] += initial_usage.get("input_tokens", 0)
+        total_usage["cached_tokens"] += initial_usage.get("cached_tokens", 0)
+        total_usage["output_tokens"] += initial_usage.get("output_tokens", 0)
+        
         while iteration < MAX_TOOL_ITERATIONS:
             iteration += 1
             
             output_items = getattr(response, 'output', None)
             if not output_items:
                 log_debug(f"[{request_id}] No output items in response")
-                return response, null_response_triggered
+                return response, null_response_triggered, total_usage
             
             # Check for function calls
             function_calls = []
@@ -322,7 +356,7 @@ class AIClient:
             
             if not function_calls:
                 # No more function calls, we're done
-                return response, null_response_triggered
+                return response, null_response_triggered, total_usage
             
             log_info(f"[{request_id}] Iteration {iteration}: Executing {len(function_calls)} function call(s)")
             
@@ -472,14 +506,21 @@ class AIClient:
                     timeout=self.config.timeout
                 )
                 
+                # Track usage from this iteration
+                iter_usage = extract_usage_from_response(response)
+                total_usage["input_tokens"] += iter_usage.get("input_tokens", 0)
+                total_usage["cached_tokens"] += iter_usage.get("cached_tokens", 0)
+                total_usage["output_tokens"] += iter_usage.get("output_tokens", 0)
+                total_usage["tool_calls"] += len(function_calls)
+                
                 # Check which tools were used in this iteration
                 self._check_tools_used(response, request_id)
             else:
                 # No outputs to send, we're done
-                return response, null_response_triggered
+                return response, null_response_triggered, total_usage
         
         log_warning(f"[{request_id}] Reached max tool iterations ({MAX_TOOL_ITERATIONS})")
-        return response, null_response_triggered
+        return response, null_response_triggered, total_usage
     
     def _build_context_prompt(
         self, 

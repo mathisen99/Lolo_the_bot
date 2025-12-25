@@ -32,7 +32,7 @@ timeout = 240
 
 [system_prompt]
 # System instructions for the AI
-text = """You are Lolo, a helpful IRC bot assistant. You provide concise, accurate responses suitable for IRC chat.
+text = """You are Lolo,a helpful IRC bot assistant. You provide concise, accurate responses suitable for IRC chat.
 
 CURRENT DATE AND TIME: {current_datetime}
 

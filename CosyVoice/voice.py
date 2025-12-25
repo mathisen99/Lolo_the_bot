@@ -122,7 +122,10 @@ def download_youtube_clip(url: str, start: str, end: str, output_dir: Path) -> P
         # Download video
         out_template = str(tmp_path / "%(title)s.%(ext)s")
         cmd = ["yt-dlp", "-f", "bv*+ba/b", "--merge-output-format", "mp4", "-o", out_template, url]
-        subprocess.run(cmd, check=True, capture_output=True)
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown yt-dlp error"
+            raise RuntimeError(f"yt-dlp failed: {error_msg}")
         
         # Find downloaded file
         mp4_files = list(tmp_path.glob("*.mp4"))

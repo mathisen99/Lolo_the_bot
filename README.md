@@ -5,18 +5,22 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 ## Features
 
 ### AI-Powered Tools
-- **AI Conversations** - GPT-5.1 powered responses when mentioned
+- **AI Conversations** - GPT-5.2 powered responses when mentioned
+- **YouTube Search** - Search videos, channels, and read comments
+- **Usage Tracking** - Track token usage and costs
 - **Web Search** - Real-time information lookup via Brave Search
 - **URL Fetching** - Retrieve and analyze web page content
 - **Image Generation** - Create images from text prompts (Flux AI)
 - **Image Editing** - Modify existing images with text instructions
 - **Image Analysis** - Describe images, solve visual puzzles, OCR text recognition
 - **Image Archiving** - Auto-download images from configured channels to local `img/` folder
+- **GPT Image 1.5** - High-quality image generation/editing with superior text rendering
 - **Python Code Execution** - Run Python code snippets safely
 - **Text Pasting** - Create pastes for long code/text (botbin.net integration)
 - **Chat History** - Access conversation context and history
 - **Shell Execution** - Run system commands (owner only)
 - **Voice Cloning** - Clone voices from audio samples or YouTube clips (CosyVoice2)
+- **Agentic Status Reporting** - Real-time status updates for complex tasks
 
 ### Bot Management
 - **User Memories** - Per-user memories and custom personas that persist across conversations
@@ -41,6 +45,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **OpenAI API key** - For AI conversations and reasoning ([platform.openai.com](https://platform.openai.com))
 - **Black Forest Labs API key** - For Flux AI image generation/editing ([api.bfl.ml](https://api.bfl.ml))
 - **Botbin API key** - For file hosting (images, audio, text) - sign up at [botbin.net](https://botbin.net)
+- **Google API Key** - For YouTube Search (enable YouTube Data API v3 on Google Cloud Console)
 
 ### Installation
 
@@ -108,6 +113,7 @@ Alternatively, export them as environment variables:
 export OPENAI_API_KEY="sk-your-openai-key-here"
 export BFL_API_KEY="your-black-forest-labs-key-here"
 export BOTBIN_API_KEY="your-botbin-api-key-here"
+export GOOGLE_API_KEY="your-google-api-key-here"
 ```
 
 ### Running
@@ -169,6 +175,9 @@ The bot has access to these tools when mentioned:
 | **User Memories** | Store personal facts and preferences | "remember I like cats" |
 | **Shell Execution** | Run system commands (owner only) | "check disk space" |
 | **Voice Cloning** | Clone voices and generate speech | "clone this voice and say hello" |
+| **YouTube Search** | Search videos and comments | "search youtube for funny cats" |
+| **GPT Image 1.5** | High-quality image generation with text | "generate with GPT: a sign saying HELLO" |
+| **Usage Stats** | Check costs and token usage | "how much have I spent today?" |
 
 ### IRC Formatting
 
@@ -283,6 +292,7 @@ Edit `.env` and add your API keys:
 OPENAI_API_KEY=sk-your-actual-key-here
 BFL_API_KEY=your-actual-bfl-key-here
 BOTBIN_API_KEY=your-actual-botbin-key-here
+GOOGLE_API_KEY=your-actual-google-key-here
 ```
 
 ### Step 3: Configure IRC Settings (config/bot.toml)
@@ -308,6 +318,15 @@ channels = ["#yourchannel"]     # Channels to join on startup
 
 [images]
 download_channels = ["#yourchannel"]  # Channels to auto-download images from
+
+### Step 5: Initialize Semantic Search (Optional)
+
+If you have existing chat history and want to enable semantic search:
+
+```bash
+# Initialize ChromaDB with existing messages
+python3 scripts/migrate_to_chroma.py
+```
 ```
 
 ### Step 4: Customize AI Personality (api/config/ai_settings.toml)
@@ -352,7 +371,7 @@ voice_clone_enabled = true     # Voice cloning (requires CosyVoice setup)
 
 | File | Purpose | Required |
 |------|---------|----------|
-| `.env` | API keys (OpenAI, BFL, Botbin) | Yes |
+| `.env` | API keys (OpenAI, BFL, Botbin, Google) | Yes |
 | `config/bot.toml` | IRC server, nickname, channels, auth | Yes |
 | `api/config/ai_settings.toml` | AI personality, tools, system prompt | Optional (has defaults) |
 

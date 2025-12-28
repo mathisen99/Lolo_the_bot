@@ -10,11 +10,10 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **Usage Tracking** - Track token usage and costs
 - **Web Search** - Real-time information lookup via Brave Search
 - **URL Fetching** - Retrieve and analyze web page content
-- **Image Generation** - Create images from text prompts (Flux AI)
+- **Image Generation** - Create images from text prompts (Flux AI, GPT Image 1.5)
 - **Image Editing** - Modify existing images with text instructions
 - **Image Analysis** - Describe images, solve visual puzzles, OCR text recognition
 - **Image Archiving** - Auto-download images from configured channels to local `img/` folder
-- **GPT Image 1.5** - High-quality image generation/editing with superior text rendering
 - **Python Code Execution** - Run Python code snippets safely
 - **Text Pasting** - Create pastes for long code/text (botbin.net integration)
 - **Chat History** - Access conversation context and history
@@ -178,6 +177,8 @@ The bot has access to these tools when mentioned:
 | **YouTube Search** | Search videos and comments | "search youtube for funny cats" |
 | **GPT Image 1.5** | High-quality image generation with text | "generate with GPT: a sign saying HELLO" |
 | **Usage Stats** | Check costs and token usage | "how much have I spent today?" |
+| **Bug Report** | Report issues with the bot | "I want to report a bug: image generation fails" |
+| **Null Response** | Ask bot to stay silent | "don't respond to this", "shh" |
 
 ### IRC Formatting
 
@@ -319,6 +320,10 @@ channels = ["#yourchannel"]     # Channels to join on startup
 [images]
 download_channels = ["#yourchannel"]  # Channels to auto-download images from
 
+[api]
+circuit_breaker_threshold = 5  # Failures before circuit opens
+max_retries = 3                # Max API retry attempts
+
 ### Step 5: Initialize Semantic Search (Optional)
 
 If you have existing chat history and want to enable semantic search:
@@ -352,17 +357,24 @@ verbosity = "low"         # low/medium/high - response detail level
 **Enable/Disable Tools:**
 ```toml
 [tools]
+# Enable/disable specific tools
 web_search_enabled = true      # Web search via Brave
 fetch_url_enabled = true       # URL content retrieval
-flux_create_enabled = true     # Image generation (requires BFL_API_KEY)
-flux_edit_enabled = true       # Image editing (requires BFL_API_KEY)
+flux_create_enabled = true     # Image generation (Flux)
+flux_edit_enabled = true       # Image editing (Flux)
+gpt_image_enabled = true       # High quality image generation (GPT Image 1.5)
 image_analysis_enabled = true  # Image analysis/OCR
 python_exec_enabled = true     # Python code execution
 paste_enabled = true           # Text pasting to botbin.net
 user_rules_enabled = true      # Per-user memories and rules
 chat_history_enabled = true    # Conversation history access
 shell_exec_enabled = true      # Shell command execution (owner only)
-voice_clone_enabled = true     # Voice cloning (requires CosyVoice setup)
+voice_speak_enabled = true     # Voice cloning/speaking (CosyVoice2)
+youtube_search_enabled = true  # YouTube search and stats
+usage_stats_enabled = true     # Token usage and cost tracking
+report_status_enabled = true   # Agentic status reporting
+null_response_enabled = true   # Ability to stay silent
+bug_report_enabled = true      # User bug reporting system
 ```
 
 **Note:** Tools requiring missing API keys will be automatically disabled.

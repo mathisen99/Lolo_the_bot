@@ -60,6 +60,7 @@ class AIConfig:
         self.bug_report_enabled: bool = config["tools"].get("bug_report_enabled", True)
         self.gpt_image_enabled: bool = config["tools"].get("gpt_image_enabled", True)
         self.usage_stats_enabled: bool = config["tools"].get("usage_stats_enabled", True)
+        self.youtube_search_enabled: bool = config["tools"].get("youtube_search_enabled", True)
         
         # Shell execution settings
         self.shell_exec_timeout: int = config.get("shell_exec", {}).get("timeout", 30)
@@ -109,4 +110,6 @@ class AIConfig:
             tools.append("bug_report")
         if self.gpt_image_enabled:
             tools.append("gpt_image")
+        if self.youtube_search_enabled:
+            tools.append("youtube_search")
         return tools

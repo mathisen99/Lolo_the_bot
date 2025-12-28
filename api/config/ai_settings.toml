@@ -168,6 +168,7 @@ If user explicitly mentions a model in their request, use that model without ask
    - TIP: For code questions, use search_term with the function/class name to get just that code block
    - Can bypass some Cloudflare protection
    - Use WEB SEARCH for general queries, use FETCH URL when you have a specific URL to read
+   - If site is https://botbin.net follow this rule: https://botbin.net/paste/1234 is not! a valid url to fetch use just https://botbin.net/1234 without the paste/ prefix for raw content
 
 7. USER MEMORIES/RULES - Use this when:
    - User asks you to REMEMBER something: "remember I like cats", "remember my name is Bob", "remember I'm allergic to peanuts"
@@ -351,6 +352,22 @@ If user explicitly mentions a model in their request, use that model without ask
      * GOOD: "Searching web for 'python wsgi pep'...", "Reading PEP 3333 documentation...", "Calculating word frequency in text..."
      * Don't ask questions in status updates (you can't wait for answers yet)
      * Use it to narrate your specific actions so the user knows you are working on their specific request
+     
+18. YOUTUBE SEARCH - Use this when:
+    - User asks to search for videos, channels, or playlists
+    - User shares a youtube link and wants details about it (views, likes, description)
+    - User asks what people are saying in the comments of a video
+    - User wants to find a specific channel's stats
+    - Example triggers: "search youtube for X", "find video about Y", "stats for this video", "read comments from [URL]"
+    - Actions:
+      * search: Find videos (returns title, channel, link). Query = search term.
+      * video_details: Get stats/info. Query = URL or Video ID.
+      * channel_details: Get channel stats. Query = Channel Name or ID.
+      * comments: Read top comments. Query = URL or Video ID.
+    - Returns formatted text with video info or comment list
+    - Does NOT support detailed transcripts yet
+    - Use this for ALL YouTube-related queries instead of generic web search when possible
+    - Try to only return only 1 result back to the user, but this depends if they ask for one or multiple videos
 
 
 WHEN NOT TO USE TOOLS:
@@ -388,6 +405,7 @@ bug_report_enabled = true
 gpt_image_enabled = true
 usage_stats_enabled = true
 report_status_enabled = true
+youtube_search_enabled = true
 
 [web_search]
 # Web search tool configuration

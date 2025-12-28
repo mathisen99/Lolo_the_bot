@@ -21,6 +21,7 @@ type APIClientInterface interface {
 	SendCommand(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool, timeout time.Duration) (*APIResponse, error)
 	SendCommandStream(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool, timeout time.Duration) (<-chan *APIResponse, error)
 	SendMention(ctx context.Context, message, nick, hostmask, channel, permissionLevel string, history []*database.Message) (*APIResponse, error)
+	SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel string, history []*database.Message) (<-chan *APIResponse, error)
 	CheckHealth(ctx context.Context) (*HealthResponse, error)
 	GetCommands(ctx context.Context) (*CommandsResponse, error)
 	WaitForInflightRequests(timeout time.Duration) bool
@@ -232,6 +233,49 @@ func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, ch
 	}
 
 	return response, err
+}
+
+// SendMentionStream sends a streaming mention request to the Python API with conversation history
+// Returns a channel that receives response chunks as they arrive
+func (c *APIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel string, history []*database.Message) (<-chan *APIResponse, error) {
+	requestID := uuid.New().String()
+
+	// Convert database messages to API format
+	historyMessages := make([]HistoryMessage, 0, len(history))
+	for _, msg := range history {
+		historyMessages = append(historyMessages, HistoryMessage{
+			Timestamp: msg.Timestamp.Format("2006-01-02 15:04:05"),
+			Nick:      msg.Nick,
+			Content:   msg.Content,
+		})
+	}
+
+	req := MentionRequest{
+		RequestID:       requestID,
+		Message:         message,
+		Nick:            nick,
+		Hostmask:        hostmask,
+		Channel:         channel,
+		PermissionLevel: permissionLevel,
+		History:         historyMessages,
+	}
+
+	// Create channel for responses
+	responseChan := make(chan *APIResponse, 10) // Buffered channel to avoid blocking
+
+	// Use circuit breaker to protect API calls
+	cbErr := c.circuitBreaker.Call(ctx, func() error {
+		go c.streamRequest(ctx, "/mention/stream", req, requestID, responseChan, 0)
+		return nil
+	})
+
+	if cbErr != nil {
+		// Circuit breaker blocked the call
+		close(responseChan)
+		return nil, fmt.Errorf("circuit breaker: %w", cbErr)
+	}
+
+	return responseChan, nil
 }
 
 // CheckHealth checks if the Python API is available
@@ -552,8 +596,8 @@ func validateAPIResponse(resp *APIResponse) error {
 	}
 
 	// Validate status field values
-	if resp.Status != "success" && resp.Status != "error" && resp.Status != "null" {
-		return fmt.Errorf("invalid status value: %q (must be 'success', 'error', or 'null')", resp.Status)
+	if resp.Status != "success" && resp.Status != "error" && resp.Status != "null" && resp.Status != "processing" {
+		return fmt.Errorf("invalid status value: %q (must be 'success', 'error', 'null', or 'processing')", resp.Status)
 	}
 
 	// Validate optional required_level field if present

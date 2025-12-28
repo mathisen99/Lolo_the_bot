@@ -119,6 +119,49 @@ func (m *MockAPIClient) SendMention(ctx context.Context, message, nick, hostmask
 	}
 
 	return response, nil
+
+}
+
+// SendMentionStream returns a mock streaming response for mentions
+func (m *MockAPIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel string, history []*database.Message) (<-chan *handler.APIResponse, error) {
+	responseChan := make(chan *handler.APIResponse, 1)
+
+	go func() {
+		defer close(responseChan)
+
+		// Simulate latency if configured
+		if m.latency > 0 {
+			select {
+			case <-time.After(m.latency):
+			case <-ctx.Done():
+				return
+			}
+		}
+
+		// Build response
+		responseMsg := fmt.Sprintf("Thanks for mentioning me, %s!", nick)
+		if len(history) > 0 {
+			responseMsg = fmt.Sprintf("Thanks for mentioning me, %s! I can see the last %d messages for context.", nick, len(history))
+		}
+
+		// Send processing update first
+		responseChan <- &handler.APIResponse{
+			RequestID: fmt.Sprintf("mock-%d", time.Now().UnixNano()),
+			Status:    "processing",
+			Message:   "Thinking...",
+			Streaming: true,
+		}
+
+		// Send final response
+		responseChan <- &handler.APIResponse{
+			RequestID: fmt.Sprintf("mock-%d", time.Now().UnixNano()),
+			Status:    "success",
+			Message:   responseMsg,
+			Streaming: false,
+		}
+	}()
+
+	return responseChan, nil
 }
 
 // CheckHealth returns a mock health response

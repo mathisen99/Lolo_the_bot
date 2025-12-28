@@ -5,10 +5,11 @@ Handles communication with OpenAI API and tool execution.
 """
 
 from typing import List, Dict, Any, Optional
+import json
 from openai import OpenAI
 from .config import AIConfig
 from .usage_tracker import log_usage, extract_usage_from_response
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, UsageStatsTool
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, UsageStatsTool, ReportStatusTool, STATUS_UPDATE_MARKER
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -153,6 +154,11 @@ class AIClient:
             usage_stats = UsageStatsTool()
             self.tools[usage_stats.name] = usage_stats
             log_info("Usage stats tool enabled")
+            
+        # Report Status tool is always enabled as it's a core feature for long-running tasks
+        report_status = ReportStatusTool()
+        self.tools[report_status.name] = report_status
+        log_info("Report status tool enabled")
     
     def generate_response(self, user_message: str, request_id: str) -> str:
         """
@@ -208,7 +214,7 @@ class AIClient:
             log_error(f"[{request_id}] Traceback: {traceback.format_exc()}")
             return "Sorry, I encountered an error generating a response."
     
-    def generate_response_with_context(
+    def generate_response_with_context_stream(
         self, 
         user_message: str, 
         nick: str, 
@@ -216,20 +222,13 @@ class AIClient:
         conversation_history: list,
         permission_level: str,
         request_id: str
-    ) -> str:
+    ):
         """
-        Generate AI response with conversation context.
+        Generate AI response with conversation context, streaming updates.
         
-        Args:
-            user_message: The current mention message
-            nick: User who mentioned the bot
-            channel: Channel where mention occurred
-            conversation_history: List of recent messages for context
-            permission_level: User's permission level (owner, admin, normal, ignored)
-            request_id: Request ID for logging
-            
-        Returns:
-            AI-generated response text
+        Yields:
+            Dict containing 'status' and 'message' keys.
+            status: "processing" for intermediate updates, "success" or "error" for final
         """
         log_info(f"[{request_id}] Generating AI response with context (permission: {permission_level})")
         
@@ -259,8 +258,26 @@ class AIClient:
             # Check which tools were used
             self._check_tools_used(response, request_id)
             
-            # Handle function calls if present
-            response, null_response_triggered, total_usage = self._handle_function_calls(response, full_input, request_id, permission_level, nick, channel)
+            # Handle function calls with streaming support
+            response_generator = self._handle_function_calls_stream(
+                response, full_input, request_id, permission_level, nick, channel
+            )
+            
+            final_response = None
+            total_usage = {}
+            null_response_triggered = False
+            
+            for event in response_generator:
+                if event["type"] == "status_update":
+                    # Yield intermediate status update
+                    yield {
+                        "status": "processing",
+                        "message": event["message"]
+                    }
+                elif event["type"] == "final_result":
+                    final_response = event["response"]
+                    total_usage = event["usage"]
+                    null_response_triggered = event["null_triggered"]
             
             # Log usage to database
             log_usage(
@@ -274,54 +291,95 @@ class AIClient:
                 tool_calls=total_usage.get("tool_calls", 0)
             )
             
-            # Check if null response was triggered (user asked for silence)
-            # Return special marker that tells Go bot to stay silent
+            # Check if null response triggered
             if null_response_triggered:
                 log_info(f"[{request_id}] Null response triggered - staying silent")
-                return NULL_RESPONSE_MARKER
+                yield {
+                    "status": "null",
+                    "message": ""
+                }
+                return
             
             # Extract response text
-            output_text = self._extract_output(response, request_id)
+            output_text = self._extract_output(final_response, request_id)
             
-            # Clean response for IRC (remove newlines)
+            # Clean response
             cleaned_text = self._clean_for_irc(output_text)
             
-            # Validate we have a response
             if not cleaned_text or cleaned_text.strip() == "":
                 log_error(f"[{request_id}] AI returned empty response")
-                return "I couldn't generate a proper response. Please try again."
+                yield {
+                    "status": "error", 
+                    "message": "I couldn't generate a proper response. Please try again."
+                }
+                return
             
             log_info(f"[{request_id}] AI response generated successfully")
-            return cleaned_text
+            yield {
+                "status": "success",
+                "message": cleaned_text
+            }
         
         except Exception as e:
             log_error(f"[{request_id}] Error generating AI response: {e}")
             import traceback
             log_error(f"[{request_id}] Traceback: {traceback.format_exc()}")
-            return "Sorry, I encountered an error generating a response."
+            yield {
+                "status": "error",
+                "message": "Sorry, I encountered an error generating a response."
+            }
+
+    def generate_response_with_context(
+        self, 
+        user_message: str, 
+        nick: str, 
+        channel: str,
+        conversation_history: list,
+        permission_level: str,
+        request_id: str
+    ) -> str:
+        """
+        Legacy blocking method for backward compatibility.
+        Wraps the streaming method and just returns the final result.
+        """
+        generator = self.generate_response_with_context_stream(
+            user_message, nick, channel, conversation_history, permission_level, request_id
+        )
+        
+        final_message = "I couldn't generate a proper response."
+        
+        for event in generator:
+            if event["status"] == "success":
+                final_message = event["message"]
+            elif event["status"] == "null":
+                return NULL_RESPONSE_MARKER
+                
+        return final_message
     
-    def _handle_function_calls(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal", nick: str = "", channel: str = "") -> tuple[Any, bool, Dict[str, int]]:
+    def _handle_function_calls(self, *args, **kwargs):
+        """Legacy wrapper for streaming handler."""
+        # Convert generator to final result
+        generator = self._handle_function_calls_stream(*args, **kwargs)
+        final_response = None
+        total_usage = {} 
+        null_triggered = False
+        
+        for event in generator:
+            if event["type"] == "final_result":
+                final_response = event["response"]
+                total_usage = event["usage"]
+                null_triggered = event["null_triggered"]
+        
+        return final_response, null_triggered, total_usage
+
+    def _handle_function_calls_stream(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal", nick: str = "", channel: str = ""):
         """
         Handle function calls in the response using multi-turn tool calling.
-        
-        Uses previous_response_id to maintain reasoning chain across turns.
-        Loops until the model stops requesting function calls or max iterations reached.
-        All tools are treated uniformly - outputs feed back into the loop for potential chaining.
-        
-        Args:
-            response: Initial API response
-            original_input: Original input prompt
-            request_id: Request ID for logging
-            permission_level: User's permission level for tool authorization
-            nick: User's nickname for context
-            channel: Channel name for context
-            
-        Returns:
-            Tuple of (final response, null_response_triggered, usage_stats)
+        Yields status events during execution.
         """
         import json
         
-        MAX_TOOL_ITERATIONS = 10  # Safety limit to prevent infinite loops
+        MAX_TOOL_ITERATIONS = 18  # Safety limit to prevent infinite loops
         iteration = 0
         null_response_triggered = False
         
@@ -345,7 +403,13 @@ class AIClient:
             output_items = getattr(response, 'output', None)
             if not output_items:
                 log_debug(f"[{request_id}] No output items in response")
-                return response, null_response_triggered, total_usage
+                yield {
+                    "type": "final_result",
+                    "response": response,
+                    "null_triggered": null_response_triggered,
+                    "usage": total_usage
+                }
+                return
             
             # Check for function calls
             function_calls = []
@@ -356,7 +420,13 @@ class AIClient:
             
             if not function_calls:
                 # No more function calls, we're done
-                return response, null_response_triggered, total_usage
+                yield {
+                    "type": "final_result",
+                    "response": response,
+                    "null_triggered": null_response_triggered,
+                    "usage": total_usage
+                }
+                return
             
             log_info(f"[{request_id}] Iteration {iteration}: Executing {len(function_calls)} function call(s)")
             
@@ -372,12 +442,12 @@ class AIClient:
                 call_id = getattr(func_call, 'call_id', None)
                 
                 # Parse arguments if they're a JSON string
+                func_args = {}
                 if isinstance(func_args_raw, str):
                     try:
                         func_args = json.loads(func_args_raw)
                     except json.JSONDecodeError as e:
                         log_warning(f"[{request_id}] Failed to parse tool arguments for {func_name}: {e}")
-                        log_warning(f"[{request_id}] Raw arguments: {func_args_raw[:200]}...")
                         function_outputs.append({
                             "type": "function_call_output",
                             "call_id": call_id,
@@ -388,7 +458,6 @@ class AIClient:
                     func_args = func_args_raw
                 
                 if func_name not in self.tools:
-                    log_warning(f"[{request_id}] Unknown tool: {func_name}")
                     function_outputs.append({
                         "type": "function_call_output",
                         "call_id": call_id,
@@ -400,89 +469,89 @@ class AIClient:
                 log_info(f"[{request_id}] Executing {func_name} with args: {func_args}")
                 
                 try:
-                    # Inject permission_level for tools that need it
-                    if func_name in ('manage_user_rules', 'execute_shell'):
+                    # Inject permission_level/context for specific tools
+                    if func_name in ('manage_user_rules', 'execute_shell', 'bug_report'):
                         func_args['permission_level'] = permission_level
-                    
-                    # Inject full context for bug_report tool
-                    if func_name == 'bug_report':
-                        func_args['permission_level'] = permission_level
-                        func_args['requesting_user'] = nick
-                        func_args['channel'] = channel
+                        if func_name == 'bug_report':
+                            func_args['requesting_user'] = nick
+                            func_args['channel'] = channel
                     
                     # Execute the tool
                     result = tool.execute(**func_args)
-                    log_success(f"[{request_id}] {func_name} executed successfully: {result[:100] if len(result) > 100 else result}")
+                    
+                    # Check for status updates
+                    if func_name == 'report_status' and result.startswith(STATUS_UPDATE_MARKER):
+                        status_msg = result.replace(STATUS_UPDATE_MARKER, "")
+                        log_success(f"[{request_id}] Status update: {status_msg}")
+                        yield {
+                            "type": "status_update",
+                            "message": status_msg
+                        }
+                        # We return a generic success message to the LLM so it continues
+                        result = "Status reported to user."
+                    else:
+                        log_success(f"[{request_id}] {func_name} executed successfully")
                     
                     # Check for null response marker
                     if result == NULL_RESPONSE_MARKER:
                         null_response_triggered = True
-                        log_info(f"[{request_id}] Null response marker detected - will stay silent")
                     
-                    # Handle image analysis - needs vision API call but continues the chain
+                    # Handle image analysis special case (recurses)
                     if func_name == 'analyze_image':
                         try:
                             result_data = json.loads(result)
-                        except json.JSONDecodeError:
-                            function_outputs.append({
-                                "type": "function_call_output",
-                                "call_id": call_id,
-                                "output": f"Error: analyze_image returned invalid JSON"
-                            })
-                            continue
-                        
-                        if result_data.get('status') == 'error':
-                            function_outputs.append({
-                                "type": "function_call_output",
-                                "call_id": call_id,
-                                "output": f"Error: {result_data.get('error', 'Unknown error')}"
-                            })
-                        else:
-                            # Make vision API call to analyze the image
-                            image_data = result_data.get('image_data', {})
-                            question = result_data.get('question', '')
-                            
-                            question_text = f" Question: {question}" if question else ""
-                            vision_prompt = f"Analyze this image in detail.{question_text} Provide a comprehensive description that could be used to recreate or understand the image."
-                            
-                            vision_response = self.client.responses.create(
-                                model=self.config.model_name,
-                                input=[
-                                    {
+                            if result_data.get('status') == 'success' and 'image_data' in result_data:
+                                log_info(f"[{request_id}] Running vision analysis on image...")
+                                yield {
+                                    "type": "status_update",
+                                    "message": "Analyzing image content..."
+                                }
+                                
+                                image_data = result_data['image_data']
+                                detail = image_data.get('detail', 'auto')
+                                question = result_data.get('question', 'Describe this image.')
+                                
+                                # Make separate vision call
+                                vision_response = self.client.responses.create(
+                                    model=self.config.model_name,
+                                    input=[{
+                                        "type": "message",
                                         "role": "user",
                                         "content": [
-                                            {"type": "input_text", "text": vision_prompt},
-                                            image_data
+                                            {
+                                                "type": "input_image",
+                                                "image_url": image_data['image_url']
+                                            },
+                                            {
+                                                "type": "input_text",
+                                                "text": f"Please analyze this image. {question}"
+                                            }
                                         ]
-                                    }
-                                ],
-                                reasoning={"effort": "medium"},
-                                text={"verbosity": self.config.verbosity},
-                                max_output_tokens=5000,
-                                timeout=self.config.timeout
-                            )
-                            
-                            # Extract the analysis text and feed it back as tool output
-                            analysis_text = self._extract_output(vision_response, request_id)
-                            log_info(f"[{request_id}] Image analysis complete, feeding back to chain")
-                            
-                            function_outputs.append({
-                                "type": "function_call_output",
-                                "call_id": call_id,
-                                "output": analysis_text
-                            })
-                    else:
-                        # Standard function output - all tools treated the same
-                        function_outputs.append({
-                            "type": "function_call_output",
-                            "call_id": call_id,
-                            "output": result
-                        })
+                                    }],
+                                    max_output_tokens=1000,
+                                    timeout=60
+                                )
+                                
+                                # Extract description
+                                analysis = self._extract_output(vision_response, f"{request_id}_vision")
+                                
+                                # Replace the huge result with the text description
+                                result = f"Image Analysis Result:\n{analysis}"
+                                log_success(f"[{request_id}] Vision analysis complete")
+                                
+                        except Exception as e:
+                            log_error(f"[{request_id}] Vision analysis failed: {e}")
+                            result = f"Error analyzing image: {str(e)}"
+
+                    # Standard function output
+                    function_outputs.append({
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": result
+                    })
                     
                 except Exception as e:
                     log_error(f"[{request_id}] Error executing {func_name}: {e}")
-                    import traceback
-                    log_error(f"[{request_id}] Traceback: {traceback.format_exc()}")
                     function_outputs.append({
                         "type": "function_call_output",
                         "call_id": call_id,
@@ -493,8 +562,8 @@ class AIClient:
             if function_outputs:
                 tool_defs = [t.get_definition() for t in self.tools.values()]
                 
-                # Use previous_response_id to maintain reasoning chain
-                # This is the recommended approach from GPT-5.1 docs
+                # Yield "working" status if taking long (optional, skipping for now to rely on explicit reports)
+                
                 response = self.client.responses.create(
                     model=self.config.model_name,
                     input=function_outputs,
@@ -506,21 +575,30 @@ class AIClient:
                     timeout=self.config.timeout
                 )
                 
-                # Track usage from this iteration
+                # Track usage
                 iter_usage = extract_usage_from_response(response)
                 total_usage["input_tokens"] += iter_usage.get("input_tokens", 0)
                 total_usage["cached_tokens"] += iter_usage.get("cached_tokens", 0)
                 total_usage["output_tokens"] += iter_usage.get("output_tokens", 0)
                 total_usage["tool_calls"] += len(function_calls)
                 
-                # Check which tools were used in this iteration
                 self._check_tools_used(response, request_id)
             else:
-                # No outputs to send, we're done
-                return response, null_response_triggered, total_usage
+                yield {
+                    "type": "final_result",
+                    "response": response,
+                    "null_triggered": null_response_triggered,
+                    "usage": total_usage
+                }
+                return
         
         log_warning(f"[{request_id}] Reached max tool iterations ({MAX_TOOL_ITERATIONS})")
-        return response, null_response_triggered, total_usage
+        yield {
+            "type": "final_result",
+            "response": response,
+            "null_triggered": null_response_triggered,
+            "usage": total_usage
+        }
     
     def _build_context_prompt(
         self, 

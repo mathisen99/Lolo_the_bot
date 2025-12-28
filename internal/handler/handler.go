@@ -109,7 +109,8 @@ func (h *MessageHandler) GetCommandMetadata(command string) *CommandMetadata {
 
 // HandleMessage processes an incoming IRC message and returns responses to send
 // This is the main entry point for message processing
-func (h *MessageHandler) HandleMessage(ctx context.Context, nick, hostmask, channel, message string, isPM bool) ([]string, error) {
+// statusCallback is an optional function to send immediate status updates (user loop feedback)
+func (h *MessageHandler) HandleMessage(ctx context.Context, nick, hostmask, channel, message string, isPM bool, statusCallback func(string)) ([]string, error) {
 	// Log the incoming message
 	if isPM {
 		h.logger.PrivateMessage(nick, message)
@@ -140,7 +141,7 @@ func (h *MessageHandler) HandleMessage(ctx context.Context, nick, hostmask, chan
 
 	// Check if this is a mention (only in channels, not PMs)
 	if !isPM && h.mentionHandler.ContainsMention(message) {
-		return h.handleMention(ctx, nick, hostmask, channel, message)
+		return h.handleMention(ctx, nick, hostmask, channel, message, statusCallback)
 	}
 
 	// Not a command or mention, no response needed
@@ -418,10 +419,10 @@ func (h *MessageHandler) handleStreamingAPICommand(ctx context.Context, command 
 }
 
 // handleMention processes a bot mention
-func (h *MessageHandler) handleMention(ctx context.Context, nick, hostmask, channel, message string) ([]string, error) {
+func (h *MessageHandler) handleMention(ctx context.Context, nick, hostmask, channel, message string, statusCallback func(string)) ([]string, error) {
 	h.logger.Info("Processing mention from %s in %s", nick, channel)
 
-	response, err := h.mentionHandler.HandleMention(ctx, message, nick, hostmask, channel)
+	response, err := h.mentionHandler.HandleMention(ctx, message, nick, hostmask, channel, statusCallback)
 	if err != nil {
 		h.logger.Error("Mention handling failed: %v", err)
 		return nil, nil // Don't send error messages for mentions

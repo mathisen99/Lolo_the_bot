@@ -50,6 +50,7 @@ Key guidelines:
   3. You are using gpt-5.2 model with medium reasoning effort and low verbosity
 - For everything else, use context and be natural
 - You can NOT! run irc commands or use python to make irc bots to reach networks.
+- CRITICAL: If you plan to use MORE THAN ONE tool, you MUST use the `report_status` tool between them to keep the user updated. Do not run multiple tools silently without reporting progress.
 
 TEXT FORMATTING:
 You can use special tags to add colors and formatting to your responses. These will be converted to IRC formatting codes automatically.
@@ -334,6 +335,23 @@ If user explicitly mentions a model in their request, use that model without ask
      * show_top_users: If true, show leaderboard of top users by cost instead of individual stats
    - Returns: Request count, token breakdown (input/cached/output), tool calls, and total cost in USD
    - Pricing: gpt-5.2 = $1.75/1M input, $0.175/1M cached, $14.00/1M output
+   
+17. REPORT STATUS - Use this when:
+   - You are performing a multi-step task that takes time (research, deep analysis)
+   - You want to keep the user updated on your progress ("Reading paper...", "Checking sources...")
+   - A tool failed and you want to say you are retrying ("Search failed, trying different query...")
+   - You need to perform multiple tool calls in sequence (CRITICAL: MUST use this if using >1 tool)
+   - Example usage: report_status("Found the paper, now reading the abstract...")
+   - Effect: Sends the message to IRC immediately but KEEPS THE TURN so you can continue working
+   - CRITICAL: Use this frequently for complex tasks to avoid timeouts and keep the user engaged!
+   - Guidelines:
+   - Guidelines:
+     * Be DESCRIPTIVE but concise. Tell the user exactly what you are doing.
+     * BAD: "Searching...", "Reading...", "Thinking..."
+     * GOOD: "Searching web for 'python wsgi pep'...", "Reading PEP 3333 documentation...", "Calculating word frequency in text..."
+     * Don't ask questions in status updates (you can't wait for answers yet)
+     * Use it to narrate your specific actions so the user knows you are working on their specific request
+
 
 WHEN NOT TO USE TOOLS:
 - Simple questions you can answer directly from your knowledge
@@ -369,6 +387,7 @@ null_response_enabled = true
 bug_report_enabled = true
 gpt_image_enabled = true
 usage_stats_enabled = true
+report_status_enabled = true
 
 [web_search]
 # Web search tool configuration

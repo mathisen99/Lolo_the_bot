@@ -27,6 +27,21 @@ func (cm *ConnectionManager) SetupBotMessageHandler(messageHandler *handler.Mess
 			ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 			defer cancel()
 
+			// Send responses back to IRC
+			target := channel
+			if isPM {
+				target = nick
+			}
+
+			// Callback for streaming status updates
+			statusCallback := func(msg string) {
+				// Prepend a status indicator or color if desired, e.g. "[Status] Reading paper..."
+				// For now, send raw message as the AI formats it.
+				if err := cm.client.SendMessage(target, msg); err != nil {
+					logger.Error("Failed to send status update to %s: %v", target, err)
+				}
+			}
+
 			responses, err := messageHandler.HandleMessage(
 				ctx,
 				nick,
@@ -34,6 +49,7 @@ func (cm *ConnectionManager) SetupBotMessageHandler(messageHandler *handler.Mess
 				handlerChannel,
 				message,
 				isPM,
+				statusCallback,
 			)
 
 			if err != nil {
@@ -41,12 +57,7 @@ func (cm *ConnectionManager) SetupBotMessageHandler(messageHandler *handler.Mess
 				return
 			}
 
-			// Send responses back to IRC
-			target := channel
-			if isPM {
-				target = nick
-			}
-
+			// Send final responses back to IRC
 			for _, response := range responses {
 				if err := cm.client.SendMessage(target, response); err != nil {
 					logger.Error("Failed to send message to %s: %v", target, err)

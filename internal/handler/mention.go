@@ -63,7 +63,8 @@ func (h *MentionHandler) ContainsMention(message string) bool {
 
 // HandleMention processes a bot mention
 // Returns the response message and any error
-func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostmask, channel string) (string, error) {
+// If statusCallback is provided, it will be called with intermediate status updates
+func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostmask, channel string, statusCallback func(string)) (string, error) {
 	// Check if channel is enabled
 	enabled, err := h.db.GetChannelState(channel)
 	if err != nil {
@@ -113,40 +114,60 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 		conversationHistory = nil
 	}
 
-	// Send mention to Python API with conversation history and measure latency
+	// Send streaming mention to Python API
 	startTime := time.Now()
-	resp, err := h.apiClient.SendMention(ctx, message, nick, hostmask, channel, permissionLevel, conversationHistory)
-	latencyMs := float64(time.Since(startTime).Milliseconds())
 
-	// Record API latency metric (Requirement 30.2)
-	if err := h.db.RecordAPILatency(latencyMs); err != nil {
-		// Log but don't fail
-		fmt.Printf("Warning: Failed to record API latency metric: %v\n", err)
-	}
-
+	// Use SendMentionStream to get updates
+	respChan, err := h.apiClient.SendMentionStream(ctx, message, nick, hostmask, channel, permissionLevel, conversationHistory)
 	if err != nil {
 		// Record error metric (Requirement 30.3)
 		if errRecordErr := h.db.RecordError("mention_api_failed"); errRecordErr != nil {
 			fmt.Printf("Warning: Failed to record error metric: %v\n", errRecordErr)
 		}
-		return "", fmt.Errorf("failed to send mention to API [request ID unavailable]: %w", err)
+		return "", fmt.Errorf("failed to send mention to API: %w", err)
 	}
 
-	// Check response status
-	if resp.Status == "null" {
-		// Null response - user requested silence, return empty to skip IRC message
-		return "", nil
-	}
+	// Process stream
+	var finalMessage string
+	var lastStatus string
 
-	if resp.Status != "success" {
-		// Record error metric (Requirement 30.3)
-		if errRecordErr := h.db.RecordError("mention_api_error"); errRecordErr != nil {
-			fmt.Printf("Warning: Failed to record error metric: %v\n", errRecordErr)
+	for resp := range respChan {
+		fmt.Printf("[MentionHandler] Received chunk at %s: status=%s\n", time.Now().Format(time.RFC3339), resp.Status)
+		lastStatus = resp.Status
+
+		switch resp.Status {
+		case "processing":
+			if statusCallback != nil && resp.Message != "" {
+				statusCallback(resp.Message)
+			}
+		case "success":
+			finalMessage = resp.Message
+		case "error":
+			// Record error metric
+			if errRecordErr := h.db.RecordError("mention_api_error"); errRecordErr != nil {
+				fmt.Printf("Warning: Failed to record error metric: %v\n", errRecordErr)
+			}
+			return "", fmt.Errorf("API returned error [%s]: %s", resp.RequestID, resp.Message)
+		case "null":
+			// User requested silence
+			return "", nil
 		}
-		return "", fmt.Errorf("API returned error [%s]: %s", resp.RequestID, resp.Message)
 	}
 
-	return resp.Message, nil
+	// Calculate total latency
+	latencyMs := float64(time.Since(startTime).Milliseconds())
+
+	// Record API latency metric
+	if err := h.db.RecordAPILatency(latencyMs); err != nil {
+		fmt.Printf("Warning: Failed to record API latency metric: %v\n", err)
+	}
+
+	if lastStatus == "" {
+		// Stream closed without any response
+		return "", fmt.Errorf("API stream closed without response")
+	}
+
+	return finalMessage, nil
 }
 
 // getConversationHistory retrieves recent messages from a channel for context

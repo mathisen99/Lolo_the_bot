@@ -73,10 +73,6 @@ func NewFormatter() *Formatter {
 			"I":         Italic,
 			"UNDERLINE": Underline,
 			"U":         Underline,
-			"STRIKE":    Strikethrough,
-			"S":         Strikethrough,
-			"MONO":      Monospace,
-			"M":         Monospace,
 			"REVERSE":   Reverse,
 		},
 	}
@@ -93,11 +89,53 @@ func (f *Formatter) Format(input string) string {
 	// Handle self-closing reset tag first
 	result = f.handleResetTag(result)
 
+	// Handle special tags (MONO for compatibility, STRIKE for cleanup)
+	result = f.handleSpecialTags(result)
+
 	// Handle color tags (most complex, do first)
 	result = f.handleColorTags(result)
 
 	// Handle simple toggle tags
 	result = f.handleSimpleTags(result)
+
+	return result
+}
+
+// handleSpecialTags handles tags that need specific compatibility logic
+// <MONO> -> Color Grey (standard IRC code) instead of Monospace (extended)
+// <STRIKE> -> Strip tags (avoid weird symbols on old clients)
+func (f *Formatter) handleSpecialTags(input string) string {
+	result := input
+
+	// Handle MONO/M -> Color Grey (14)
+	// We use color code 14 (Grey) to simulate code block appearance
+	// This is compatible with all clients, unlike \x11 (Monospace)
+	monoStart := Color + "14"
+	monoEnd := Color // Reset color
+
+	// Replace <MONO> tags
+	result = strings.ReplaceAll(result, "<MONO>", monoStart)
+	result = strings.ReplaceAll(result, "<mono>", monoStart) // basic case insensitivity
+	result = strings.ReplaceAll(result, "</MONO>", monoEnd)
+	result = strings.ReplaceAll(result, "</mono>", monoEnd)
+
+	// Replace <M> tags
+	result = strings.ReplaceAll(result, "<M>", monoStart)
+	result = strings.ReplaceAll(result, "<m>", monoStart)
+	result = strings.ReplaceAll(result, "</M>", monoEnd)
+	result = strings.ReplaceAll(result, "</m>", monoEnd)
+
+	// Handle STRIKE/S -> Strip tags
+	// Strikethrough (\x1E) causes squares/symbols in older clients
+	result = strings.ReplaceAll(result, "<STRIKE>", "")
+	result = strings.ReplaceAll(result, "<strike>", "")
+	result = strings.ReplaceAll(result, "</STRIKE>", "")
+	result = strings.ReplaceAll(result, "</strike>", "")
+
+	result = strings.ReplaceAll(result, "<S>", "")
+	result = strings.ReplaceAll(result, "<s>", "")
+	result = strings.ReplaceAll(result, "</S>", "")
+	result = strings.ReplaceAll(result, "</s>", "")
 
 	return result
 }

@@ -97,8 +97,9 @@ func TestFormat_Underline(t *testing.T) {
 func TestFormat_Strikethrough(t *testing.T) {
 	f := NewFormatter()
 
+	// Strikethrough tags should be stripped for compatibility
 	result := f.Format("<STRIKE>hello</STRIKE>")
-	expected := "\x1Ehello\x1E"
+	expected := "hello"
 	if result != expected {
 		t.Errorf("Format() = %q, want %q", result, expected)
 	}
@@ -112,8 +113,10 @@ func TestFormat_Strikethrough(t *testing.T) {
 func TestFormat_Monospace(t *testing.T) {
 	f := NewFormatter()
 
+	// Monospace tags should be converted to Grey color (14) for compatibility
+	// \x0314 = Color Grey, \x03 = Reset Color
 	result := f.Format("<MONO>code</MONO>")
-	expected := "\x11code\x11"
+	expected := "\x0314code\x03"
 	if result != expected {
 		t.Errorf("Format() = %q, want %q", result, expected)
 	}

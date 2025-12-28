@@ -37,7 +37,7 @@ def handle_mention(request: MentionRequest) -> MentionResponse:
     """
     Handle a bot mention with AI-powered response.
     
-    Uses GPT-5.1 to generate contextual responses with support for:
+    Uses GPT-5.2 to generate contextual responses with support for:
     - Web search for current information
     - Python execution for calculations and code examples
     - Concise responses optimized for IRC (max 3 messages)

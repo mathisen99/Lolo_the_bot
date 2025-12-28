@@ -13,6 +13,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 from .base import Tool
+import chromadb
+import os
+from openai import OpenAI
 
 
 class ChatHistoryTool(Tool):
@@ -35,6 +38,9 @@ class ChatHistoryTool(Tool):
     def __init__(self):
         """Initialize chat history tool."""
         self.db_path = Path("data/bot.db")
+        self.chroma_path = Path("data/chroma_db")
+        self.collection_name = "chat_history"
+        self.model_name = "text-embedding-3-small"
     
     @property
     def name(self) -> str:
@@ -62,7 +68,9 @@ For counting questions, use count_only=true for efficiency.
 For looking at a specific point in time with context, use hours_ago (returns messages around that time).
 For semantic analysis (like counting image generation attempts), fetch full messages and analyze the content yourself.
 
-Can fetch up to 1000 messages for full day analysis.""",
+Can fetch up to 1000 messages for full day analysis.
+
+New: Use semantic=true to find concepts instead of exact words (e.g. "cats" finds "feline", "kittens").""",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -102,6 +110,10 @@ Can fetch up to 1000 messages for full day analysis.""",
                     "include_bot": {
                         "type": "boolean",
                         "description": "If true, include bot messages in results. Default: false (only human messages)"
+                    },
+                    "semantic": {
+                        "type": "boolean",
+                        "description": "Use semantic search instead of exact keyword matching. Useful for finding concepts, topics, or vaguely remembered conversations."
                     }
                 },
                 "required": ["channel"],
@@ -324,6 +336,7 @@ Can fetch up to 1000 messages for full day analysis.""",
         limit: Optional[int] = None,
         count_only: bool = False,
         include_bot: bool = False,
+        semantic: bool = False,
         **kwargs
     ) -> str:
         """
@@ -338,7 +351,10 @@ Can fetch up to 1000 messages for full day analysis.""",
             context_minutes: Minutes of context around hours_ago point (default 30)
             limit: Max messages to return
             count_only: If True, return only statistics
+            limit: Max messages to return
+            count_only: If True, return only statistics
             include_bot: If True, include bot messages
+            semantic: If True, use semantic search (requires search_term)
             
         Returns:
             Formatted message history, statistics, or error message
@@ -348,6 +364,72 @@ Can fetch up to 1000 messages for full day analysis.""",
         
         if not channel or not channel.strip():
             return "Error: Channel is required."
+
+        # Handle Semantic Search
+        if semantic:
+            if not search_term:
+                return "Error: search_term is required for semantic search."
+            
+            if not self.chroma_path.exists():
+                return "Error: ChromaDB not found. Semantic search unavailable."
+
+            try:
+                api_key = os.getenv("OPENAI_API_KEY")
+                if not api_key:
+                    return "Error: OPENAI_API_KEY not set."
+
+                # Connect to ChromaDB
+                client = chromadb.PersistentClient(path=str(self.chroma_path))
+                collection = client.get_collection(name=self.collection_name)
+                openai_client = OpenAI(api_key=api_key)
+
+                # Generate embedding
+                response = openai_client.embeddings.create(
+                    input=search_term,
+                    model=self.model_name
+                )
+                query_embedding = response.data[0].embedding
+
+                # Build filters
+                conditions = [{"channel": channel}]
+                
+                if nick:
+                    conditions.append({"nick": nick})
+                
+                if not include_bot:
+                    conditions.append({"is_bot": False})
+                
+                where_clause = conditions[0] if len(conditions) == 1 else {"$and": conditions}
+
+                # Query
+                results = collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=min(limit or 10, 20), # Cap semantic results for relevance
+                    where=where_clause,
+                    include=['documents', 'metadatas', 'distances']
+                )
+
+                if not results['documents'] or not results['documents'][0]:
+                    return "No relevant messages found."
+
+                # Format results
+                lines = []
+                lines.append(f"Semantic Search Results for '{search_term}':\n")
+                
+                for i, doc in enumerate(results['documents'][0]):
+                    meta = results['metadatas'][0][i]
+                    # Format timestamp
+                    ts = meta.get('timestamp', 'Unknown')
+                    if len(ts) >= 19: ts = ts[:19]
+                    
+                    sender = meta.get('nick', 'Unknown')
+                    line = f"[{ts}] {sender}: {doc}"
+                    lines.append(line)
+
+                return "\n".join(lines)
+
+            except Exception as e:
+                return f"Error executing semantic search: {e}"
         
         # Handle hours_ago mode (specific point in time with context)
         if hours_ago is not None:

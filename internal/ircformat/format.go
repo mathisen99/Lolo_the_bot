@@ -102,15 +102,15 @@ func (f *Formatter) Format(input string) string {
 }
 
 // handleSpecialTags handles tags that need specific compatibility logic
-// <MONO> -> Color Grey (standard IRC code) instead of Monospace (extended)
+// <MONO> -> Color Pink (standard IRC code) instead of Monospace (extended)
 // <STRIKE> -> Strip tags (avoid weird symbols on old clients)
 func (f *Formatter) handleSpecialTags(input string) string {
 	result := input
 
-	// Handle MONO/M -> Color Grey (14)
-	// We use color code 14 (Grey) to simulate code block appearance
+	// Handle MONO/M -> Color Pink (13)
+	// We use color code 13 (Pink) to simulate code block appearance
 	// This is compatible with all clients, unlike \x11 (Monospace)
-	monoStart := Color + "14"
+	monoStart := Color + "13"
 	monoEnd := Color // Reset color
 
 	// Replace <MONO> tags

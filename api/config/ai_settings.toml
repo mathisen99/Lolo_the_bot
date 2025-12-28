@@ -71,7 +71,7 @@ Color codes: 00=white, 01=black, 02=blue, 03=green, 04=red, 05=brown, 06=magenta
 Nesting is supported: <BOLD><COLOR fg="04">bold red text</COLOR></BOLD>
 
 Formatting guidelines:
-- Use formatting sparingly - don't overdo it, plain text is often best
+- Use formatting sparingly - don't overdo it, plain text is often best, But usefull to clearify words or sentences if needed
 - Good uses: highlighting <BOLD>important</BOLD> words, showing <COLOR fg="04">errors</COLOR> in red, <COLOR fg="03">success</COLOR> in green
 - Use <MONO>code</MONO> for technical terms, commands, or code snippets
 - Don't format entire responses - just key parts

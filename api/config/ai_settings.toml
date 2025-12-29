@@ -105,7 +105,7 @@ AVAILABLE TOOLS:
    - NOTE: No internet access inside sandbox for security
 
 IMAGE GENERATION MODEL SELECTION:
-When a user asks to generate or create an image WITHOUT specifying which model to use, you MUST ask them:
+When a user asks to generate or create an image WITHOUT specifying which model to use, you MUST ask them Assuming they have not set there own rules/memories to use a default model:
 "Which image model would you like me to use? **Flux** (faster, flexible dimensions) or **GPT Image 1.5** (best quality, better text rendering)?"
 Only proceed with image generation after they specify their preference.
 If user says "flux" or "fast" → use Flux tools

@@ -293,7 +293,9 @@ class AIClient:
                 input_tokens=total_usage.get("input_tokens", 0),
                 cached_tokens=total_usage.get("cached_tokens", 0),
                 output_tokens=total_usage.get("output_tokens", 0),
-                tool_calls=total_usage.get("tool_calls", 0)
+                tool_calls=total_usage.get("tool_calls", 0),
+                web_search_calls=total_usage.get("web_search_calls", 0),
+                code_interpreter_calls=total_usage.get("code_interpreter_calls", 0)
             )
             
             # Check if null response triggered
@@ -393,14 +395,37 @@ class AIClient:
             "input_tokens": 0,
             "cached_tokens": 0,
             "output_tokens": 0,
-            "tool_calls": 0
+            "tool_calls": 0,
+            "web_search_calls": 0,
+            "code_interpreter_calls": 0
         }
+        
+        # Helper to count tool types from output items
+        def count_tools_in_output(output_items):
+            counts = {"function": 0, "web_search": 0, "code_interpreter": 0}
+            if output_items:
+                for item in output_items:
+                    item_type = getattr(item, 'type', None)
+                    if item_type == 'function_call':
+                        counts["function"] += 1
+                    elif item_type == 'web_search_call':
+                        counts["web_search"] += 1
+                    elif item_type == 'code_interpreter_call':
+                        counts["code_interpreter"] += 1
+            return counts
         
         # Extract usage from initial response
         initial_usage = extract_usage_from_response(response)
         total_usage["input_tokens"] += initial_usage.get("input_tokens", 0)
         total_usage["cached_tokens"] += initial_usage.get("cached_tokens", 0)
         total_usage["output_tokens"] += initial_usage.get("output_tokens", 0)
+        
+        # Count initial response's tool calls (this was the bug - we weren't counting these)
+        initial_output = getattr(response, 'output', None)
+        initial_counts = count_tools_in_output(initial_output)
+        total_usage["tool_calls"] += initial_counts["function"]
+        total_usage["web_search_calls"] += initial_counts["web_search"]
+        total_usage["code_interpreter_calls"] += initial_counts["code_interpreter"]
         
         while iteration < MAX_TOOL_ITERATIONS:
             iteration += 1
@@ -585,7 +610,13 @@ class AIClient:
                 total_usage["input_tokens"] += iter_usage.get("input_tokens", 0)
                 total_usage["cached_tokens"] += iter_usage.get("cached_tokens", 0)
                 total_usage["output_tokens"] += iter_usage.get("output_tokens", 0)
-                total_usage["tool_calls"] += len(function_calls)
+                
+                # Count tools from the NEW response (not the previous one we just processed)
+                new_output = getattr(response, 'output', None)
+                new_counts = count_tools_in_output(new_output)
+                total_usage["tool_calls"] += new_counts["function"]
+                total_usage["web_search_calls"] += new_counts["web_search"]
+                total_usage["code_interpreter_calls"] += new_counts["code_interpreter"]
                 
                 self._check_tools_used(response, request_id)
             else:

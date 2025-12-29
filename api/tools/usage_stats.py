@@ -198,7 +198,9 @@ Returns token counts and estimated costs in USD.""",
                 COALESCE(SUM(cached_tokens), 0) as total_cached,
                 COALESCE(SUM(output_tokens), 0) as total_output,
                 COALESCE(SUM(cost_usd), 0) as total_cost,
-                COALESCE(SUM(tool_calls), 0) as total_tools
+                COALESCE(SUM(tool_calls), 0) as total_tools,
+                COALESCE(SUM(web_search_calls), 0) as total_web_searches,
+                COALESCE(SUM(code_interpreter_calls), 0) as total_code_interpreters
             FROM usage_tracking
             WHERE {where}
         """
@@ -218,6 +220,10 @@ Returns token counts and estimated costs in USD.""",
         result += f"  Output tokens: {self._format_tokens(row['total_output'])}\n"
         if row['total_tools'] > 0:
             result += f"  Tool calls: {row['total_tools']}\n"
+        if row['total_web_searches'] > 0:
+            result += f"  Web searches: {row['total_web_searches']}\n"
+        if row['total_code_interpreters'] > 0:
+            result += f"  Code interpreter: {row['total_code_interpreters']}\n"
         result += f"  Total cost: {self._format_cost(row['total_cost'])}"
         
         return result

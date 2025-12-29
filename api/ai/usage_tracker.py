@@ -18,6 +18,11 @@ PRICING = {
         "cached": 0.175,    # $0.175 per 1M cached tokens  
         "output": 14.00,    # $14.00 per 1M output tokens
     },
+    "gpt-image-1.5": {
+        "input": 5.00,      # $5.00 per 1M input tokens
+        "cached": 1.25,     # $1.25 per 1M cached tokens
+        "output": 10.00,    # $10.00 per 1M output tokens
+    },
     # Add other models as needed
     "default": {
         "input": 2.00,
@@ -25,6 +30,10 @@ PRICING = {
         "output": 10.00,
     }
 }
+
+# Per-call costs for native tools
+WEB_SEARCH_COST = 0.01       # $10/1k calls = $0.01 each
+CODE_INTERPRETER_COST = 0.03  # $0.03 per container (1GB default)
 
 
 def calculate_cost(model: str, input_tokens: int, cached_tokens: int, output_tokens: int) -> float:
@@ -47,7 +56,9 @@ def log_usage(
     input_tokens: int,
     cached_tokens: int,
     output_tokens: int,
-    tool_calls: int = 0
+    tool_calls: int = 0,
+    web_search_calls: int = 0,
+    code_interpreter_calls: int = 0
 ) -> None:
     """Log usage to database."""
     db_path = Path("data/bot.db")
@@ -56,7 +67,15 @@ def log_usage(
         log_warning(f"[{request_id}] Cannot log usage: database not found")
         return
     
-    cost = calculate_cost(model, input_tokens, cached_tokens, output_tokens)
+    # Calculate token cost
+    token_cost = calculate_cost(model, input_tokens, cached_tokens, output_tokens)
+    
+    # Add per-call costs for native tools
+    web_search_cost = web_search_calls * WEB_SEARCH_COST
+    code_interpreter_cost = code_interpreter_calls * CODE_INTERPRETER_COST
+    
+    # Total cost
+    cost = token_cost + web_search_cost + code_interpreter_cost
     
     try:
         conn = sqlite3.connect(str(db_path))
@@ -64,8 +83,8 @@ def log_usage(
         
         cursor.execute("""
             INSERT INTO usage_tracking 
-            (timestamp, request_id, nick, channel, model, input_tokens, cached_tokens, output_tokens, cost_usd, tool_calls)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (timestamp, request_id, nick, channel, model, input_tokens, cached_tokens, output_tokens, cost_usd, tool_calls, web_search_calls, code_interpreter_calls)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             request_id,
@@ -76,7 +95,9 @@ def log_usage(
             cached_tokens,
             output_tokens,
             cost,
-            tool_calls
+            tool_calls,
+            web_search_calls,
+            code_interpreter_calls
         ))
         
         conn.commit()

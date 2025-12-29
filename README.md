@@ -89,6 +89,46 @@ source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
+### Python Sandbox Setup (Optional)
+
+The Python sandbox uses Firecracker microVMs for secure code execution with no network access.
+
+**Requirements:**
+- Linux with KVM access (`/dev/kvm`)
+- Docker (for building the rootfs)
+
+**Setup:**
+```bash
+cd scripts/firecracker/
+
+# Download Firecracker binary and kernel
+./setup.sh
+
+# Build Python rootfs with libraries (matplotlib, numpy, pandas, etc.)
+sudo ./build-rootfs.sh
+
+# Start the VM (runs in background)
+sudo ./start-vm.sh &
+
+# To stop the VM
+sudo ./stop-vm.sh
+```
+
+**Available libraries:** matplotlib, numpy, pandas, Pillow, graphviz, diagrams, seaborn, scipy, sympy, networkx, plotly
+
+If the VM is not running, Python execution falls back to local (unsandboxed) execution.
+
+### Semantic Search Setup (Optional)
+
+Enable semantic/embedding-based search for chat history using ChromaDB.
+
+```bash
+# Initialize ChromaDB with existing chat messages
+python3 scripts/migrate_to_chroma.py
+```
+
+This creates a vector database for semantic search queries like "what did people say about databases" instead of exact keyword matches.
+
 ### API Key Setup
 
 Create a `.env` file in the project root with your API keys:

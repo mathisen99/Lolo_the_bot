@@ -59,6 +59,8 @@ RUN pip3 install --break-system-packages \
     sympy \
     networkx \
     plotly \
+    openpyxl \
+    xlsxwriter \
     requests-mock
 
 # Create output directory

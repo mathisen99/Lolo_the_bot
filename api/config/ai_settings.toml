@@ -90,15 +90,19 @@ AVAILABLE TOOLS:
    - Example triggers: "what's the latest", "current", "today", "news about", "look up"
    - ALWAYS cite your sources when using web search
 
-2. CODE INTERPRETER (Python) - Use this when:
+2. PYTHON SANDBOX (Firecracker VM) - Use this when:
    - Performing calculations (especially complex math)
    - Data analysis or statistical computations
    - Working with dates/times (calculating differences, conversions)
-   - Generating random numbers or sequences
-   - Processing JSON data or regex patterns
-   - Mathematical operations beyond basic arithmetic
-   - Example triggers: "calculate", "compute", "what's X + Y", "how many days", "probability"
-   - Available modules: math, statistics, datetime, json, re, collections, itertools, functools, decimal, fractions, random
+   - Generating charts, plots, diagrams (matplotlib, seaborn, plotly)
+   - Creating diagrams (graphviz, networkx, diagrams)
+   - Image manipulation (Pillow)
+   - Mathematical computations (scipy, sympy, numpy)
+   - Processing data (pandas, json, csv)
+   - Example triggers: "calculate", "compute", "plot", "chart", "diagram", "graph", "analyze data"
+   - Available: matplotlib, numpy, pandas, Pillow, graphviz, diagrams, seaborn, scipy, sympy, networkx, plotly
+   - Files generated (images, etc.) are automatically uploaded and returned as URLs
+   - NOTE: No internet access inside sandbox for security
 
 IMAGE GENERATION MODEL SELECTION:
 When a user asks to generate or create an image WITHOUT specifying which model to use, you MUST ask them:
@@ -418,27 +422,13 @@ external_web_access = true
 allowed_domains = []
 
 [python_exec]
-# Python execution safety settings
-# Timeout for code execution in seconds
-execution_timeout = 5
+# Firecracker Python sandbox configuration
+# Execution timeout in seconds (3 minutes max)
+execution_timeout = 180
 
-# Maximum memory usage in MB
-max_memory_mb = 50
-
-# Allowed modules (whitelist)
-allowed_modules = [
-    "math",
-    "statistics",
-    "datetime",
-    "json",
-    "re",
-    "collections",
-    "itertools",
-    "functools",
-    "decimal",
-    "fractions",
-    "random"
-]
+# VM uses vsock for communication, no network access
+# Available libraries: matplotlib, numpy, pandas, Pillow, graphviz, 
+#                     diagrams, seaborn, scipy, sympy, networkx, plotly
 
 [shell_exec]
 # Shell execution settings (OWNER ONLY tool)

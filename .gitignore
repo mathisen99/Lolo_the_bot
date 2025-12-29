@@ -150,3 +150,16 @@ CosyVoice/*.pyc
 IsolateVoice/.venv/
 IsolateVoice/__pycache__/
 IsolateVoice/*.pyc
+
+# Firecracker - Python sandbox VM
+scripts/firecracker/firecracker
+scripts/firecracker/jailer
+scripts/firecracker/vmlinux-latest
+scripts/firecracker/python-rootfs.ext4
+scripts/firecracker/shared.ext4
+scripts/firecracker/vm_key
+scripts/firecracker/vm_key.pub
+scripts/firecracker/firecracker.pid
+scripts/firecracker/firecracker.sock
+scripts/firecracker/vsock.sock
+scripts/firecracker/firecracker.log

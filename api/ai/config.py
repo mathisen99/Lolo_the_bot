@@ -69,10 +69,8 @@ class AIConfig:
         self.web_search_external_access: bool = config["web_search"]["external_web_access"]
         self.web_search_allowed_domains: List[str] = config["web_search"]["allowed_domains"]
         
-        # Python execution settings
-        self.python_exec_timeout: int = config["python_exec"]["execution_timeout"]
-        self.python_exec_max_memory: int = config["python_exec"]["max_memory_mb"]
-        self.python_exec_allowed_modules: List[str] = config["python_exec"]["allowed_modules"]
+        # Python execution settings (Firecracker VM)
+        self.python_exec_timeout: int = config["python_exec"].get("execution_timeout", 180)
         
         # OpenAI API key from environment
         self.openai_api_key: str = os.getenv("OPENAI_API_KEY", "")

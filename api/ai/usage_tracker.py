@@ -33,7 +33,7 @@ PRICING = {
 
 # Per-call costs for native tools
 WEB_SEARCH_COST = 0.01       # $10/1k calls = $0.01 each
-CODE_INTERPRETER_COST = 0.03  # $0.03 per container (1GB default)
+# Note: code_interpreter removed - now using self-hosted Firecracker (free)
 
 
 def calculate_cost(model: str, input_tokens: int, cached_tokens: int, output_tokens: int) -> float:
@@ -72,10 +72,10 @@ def log_usage(
     
     # Add per-call costs for native tools
     web_search_cost = web_search_calls * WEB_SEARCH_COST
-    code_interpreter_cost = code_interpreter_calls * CODE_INTERPRETER_COST
+    # Note: code_interpreter_calls still logged for historical tracking, but no cost
     
     # Total cost
-    cost = token_cost + web_search_cost + code_interpreter_cost
+    cost = token_cost + web_search_cost
     
     try:
         conn = sqlite3.connect(str(db_path))

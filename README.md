@@ -14,7 +14,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **Image Editing** - Modify existing images with text instructions
 - **Image Analysis** - Describe images, solve visual puzzles, OCR text recognition
 - **Image Archiving** - Auto-download images from configured channels to local `img/` folder
-- **Python Code Execution** - Run Python code snippets safely
+- **Python Sandbox** - Secure Python execution in Firecracker microVM (matplotlib, numpy, pandas, etc.)
 - **Text Pasting** - Create pastes for long code/text (botbin.net integration)
 - **Chat History** - Access conversation context and history
 - **Shell Execution** - Run system commands (owner only)
@@ -39,6 +39,8 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - ffmpeg (for audio/video processing)
 - yt-dlp (optional, for voice cloning from YouTube)
 - NVIDIA GPU with CUDA (optional, for voice cloning)
+- KVM access (optional, for Python sandbox - `/dev/kvm`)
+- Docker (optional, for building Python sandbox rootfs)
 
 **API Keys Required:**
 - **OpenAI API key** - For AI conversations and reasoning ([platform.openai.com](https://platform.openai.com))
@@ -169,7 +171,7 @@ The bot has access to these tools when mentioned:
 | **Image Generation** | Create images from text descriptions | "generate a sunset over mountains" |
 | **Image Editing** | Modify existing images with instructions | "edit this image to add a rainbow" |
 | **Image Analysis** | Analyze, describe, or extract text from images | "what's in this image?" |
-| **Python Execution** | Run Python code snippets | "calculate fibonacci sequence in python" |
+| **Python Sandbox** | Run Python code in secure Firecracker VM | "plot sin(x)", "calculate factorial(100)" |
 | **Text Pasting** | Create pastes for long content | "paste this code snippet" |
 | **User Memories** | Store personal facts and preferences | "remember I like cats" |
 | **Shell Execution** | Run system commands (owner only) | "check disk space" |
@@ -257,6 +259,32 @@ For YouTube clips, the bot automatically:
 3. Uses the clean voice for cloning
 
 Best results with 5-15 seconds of clear speech. Max YouTube clip: 30 seconds.
+
+### Python Sandbox (Firecracker VM)
+
+Secure Python execution in an isolated microVM with no network access:
+```
+<you>  lolo: calculate 100 factorial
+<lolo> 9332621544394415268169923885626670049071596826...
+
+<you>  lolo: plot sin(x) from 0 to 10
+<lolo> Generated: https://botbin.net/abc123.png
+
+<you>  lolo: create a bar chart of sales data [10, 25, 40, 30]
+<lolo> https://botbin.net/def456.png
+```
+
+Available libraries: matplotlib, numpy, pandas, Pillow, graphviz, diagrams, seaborn, scipy, sympy, networkx, plotly
+
+**Setup (Optional - uses fallback if not configured):**
+```bash
+cd scripts/firecracker/
+./setup.sh                    # Download Firecracker + kernel
+sudo ./build-rootfs.sh        # Build Python rootfs (requires Docker)
+sudo ./start-vm.sh &          # Start the VM
+```
+
+The VM runs persistently and uses vsock for host-guest communication. No network access for security.
 
 ### Commands
 

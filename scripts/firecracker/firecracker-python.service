@@ -1,0 +1,15 @@
+[Unit]
+Description=Firecracker Python Sandbox VM
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/mathisen/Mathisen/Filez/Dev/Mathisen/LoloV6/scripts/firecracker
+ExecStart=/home/mathisen/Mathisen/Filez/Dev/Mathisen/LoloV6/scripts/firecracker/start-vm.sh
+ExecStop=/home/mathisen/Mathisen/Filez/Dev/Mathisen/LoloV6/scripts/firecracker/stop-vm.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -88,7 +88,7 @@ class AIClient:
         if self.config.python_exec_enabled:
             python_exec = PythonExecTool()
             self.tools[python_exec.name] = python_exec
-            log_info("Python execution tool enabled (code_interpreter)")
+            log_info("Python execution tool enabled (Firecracker sandbox)")
         
         if self.config.flux_create_enabled:
             flux_create = FluxCreateTool()

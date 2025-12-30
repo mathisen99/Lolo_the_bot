@@ -199,11 +199,12 @@ class AIClient:
             # Check which tools were used
             self._check_tools_used(response, request_id)
             
-            # Extract response text
+            # Extract response text and citations
             output_text = self._extract_output(response, request_id)
+            citations = self._extract_citations(response, request_id)
             
-            # Clean response for IRC (remove newlines)
-            cleaned_text = self._clean_for_irc(output_text)
+            # Clean response for IRC (remove newlines, strip markdown links, append sources)
+            cleaned_text = self._clean_for_irc(output_text, citations)
             
             # Validate we have a response
             if not cleaned_text or cleaned_text.strip() == "":
@@ -271,6 +272,7 @@ class AIClient:
             final_response = None
             total_usage = {}
             null_response_triggered = False
+            accumulated_citations = []
             
             for event in response_generator:
                 if event["type"] == "status_update":
@@ -283,6 +285,7 @@ class AIClient:
                     final_response = event["response"]
                     total_usage = event["usage"]
                     null_response_triggered = event["null_triggered"]
+                    accumulated_citations = event.get("citations", [])
             
             # Log usage to database
             log_usage(
@@ -310,8 +313,20 @@ class AIClient:
             # Extract response text
             output_text = self._extract_output(final_response, request_id)
             
-            # Clean response
-            cleaned_text = self._clean_for_irc(output_text)
+            # Use accumulated citations from all iterations, plus any from final response
+            final_citations = self._extract_citations(final_response, request_id)
+            # Merge: accumulated first, then any new ones from final response
+            all_citation_urls = set(accumulated_citations)
+            for url in final_citations:
+                all_citation_urls.add(url)
+            # Preserve order: accumulated first, then new ones
+            merged_citations = accumulated_citations.copy()
+            for url in final_citations:
+                if url not in accumulated_citations:
+                    merged_citations.append(url)
+            
+            # Clean response (strip markdown links, append sources at end)
+            cleaned_text = self._clean_for_irc(output_text, merged_citations)
             
             if not cleaned_text or cleaned_text.strip() == "":
                 log_error(f"[{request_id}] AI returned empty response")
@@ -390,6 +405,10 @@ class AIClient:
         iteration = 0
         null_response_triggered = False
         
+        # Track all citations across iterations
+        all_citations = []
+        seen_citation_urls = set()
+        
         # Track cumulative usage across all iterations
         total_usage = {
             "input_tokens": 0,
@@ -430,6 +449,13 @@ class AIClient:
         while iteration < MAX_TOOL_ITERATIONS:
             iteration += 1
             
+            # Collect citations from current response
+            iter_citations = self._extract_citations(response, request_id)
+            for url in iter_citations:
+                if url not in seen_citation_urls:
+                    seen_citation_urls.add(url)
+                    all_citations.append(url)
+            
             output_items = getattr(response, 'output', None)
             if not output_items:
                 log_debug(f"[{request_id}] No output items in response")
@@ -437,7 +463,8 @@ class AIClient:
                     "type": "final_result",
                     "response": response,
                     "null_triggered": null_response_triggered,
-                    "usage": total_usage
+                    "usage": total_usage,
+                    "citations": all_citations
                 }
                 return
             
@@ -454,7 +481,8 @@ class AIClient:
                     "type": "final_result",
                     "response": response,
                     "null_triggered": null_response_triggered,
-                    "usage": total_usage
+                    "usage": total_usage,
+                    "citations": all_citations
                 }
                 return
             
@@ -624,7 +652,8 @@ class AIClient:
                     "type": "final_result",
                     "response": response,
                     "null_triggered": null_response_triggered,
-                    "usage": total_usage
+                    "usage": total_usage,
+                    "citations": all_citations
                 }
                 return
         
@@ -633,7 +662,8 @@ class AIClient:
             "type": "final_result",
             "response": response,
             "null_triggered": null_response_triggered,
-            "usage": total_usage
+            "usage": total_usage,
+            "citations": all_citations
         }
     
     def _build_context_prompt(
@@ -695,6 +725,80 @@ class AIClient:
         prompt_parts.append("Please respond to the CURRENT QUESTION above. Use the conversation history for context if relevant, but focus on answering what was just asked.")
         
         return "\n".join(prompt_parts)
+    
+    def _extract_citations(self, response: Any, request_id: str) -> List[str]:
+        """
+        Extract all URL citations from API response annotations.
+        
+        Args:
+            response: OpenAI API response
+            request_id: Request ID for logging
+            
+        Returns:
+            List of unique cleaned URLs from citations
+        """
+        urls = []
+        seen_urls = set()
+        
+        try:
+            if hasattr(response, 'output'):
+                for item in response.output:
+                    if hasattr(item, 'type') and item.type == 'message':
+                        if hasattr(item, 'content') and item.content:
+                            for content_item in item.content:
+                                # Check for annotations in the content item
+                                annotations = getattr(content_item, 'annotations', None)
+                                if annotations:
+                                    for annotation in annotations:
+                                        ann_type = getattr(annotation, 'type', None)
+                                        if ann_type == 'url_citation':
+                                            url = getattr(annotation, 'url', None)
+                                            if url:
+                                                # Clean the URL
+                                                clean_url = self._clean_citation_url(url)
+                                                if clean_url and clean_url not in seen_urls:
+                                                    seen_urls.add(clean_url)
+                                                    urls.append(clean_url)
+        except Exception as e:
+            log_debug(f"[{request_id}] Error extracting citations: {e}")
+        
+        return urls
+    
+    def _clean_citation_url(self, url: str) -> str:
+        """
+        Clean a citation URL by removing tracking parameters.
+        
+        Args:
+            url: Raw URL from citation
+            
+        Returns:
+            Cleaned URL without tracking params
+        """
+        if not url:
+            return url
+        
+        import re
+        from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+        
+        try:
+            parsed = urlparse(url)
+            
+            # Parse query params and remove tracking ones
+            if parsed.query:
+                params = parse_qs(parsed.query, keep_blank_values=True)
+                # Remove common tracking parameters
+                tracking_params = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']
+                for param in tracking_params:
+                    params.pop(param, None)
+                
+                # Rebuild query string
+                new_query = urlencode(params, doseq=True) if params else ''
+                parsed = parsed._replace(query=new_query)
+            
+            return urlunparse(parsed)
+        except Exception:
+            # If parsing fails, just do simple string replacement
+            return re.sub(r'\?utm_source=openai(&|$)', '', url)
     
     def _extract_output(self, response: Any, request_id: str) -> str:
         """
@@ -768,21 +872,36 @@ class AIClient:
             return user_rules_tool.get_active_rules(nick)
         return None
     
-    def _clean_for_irc(self, text: str) -> str:
+    def _clean_for_irc(self, text: str, citations: List[str] = None) -> str:
         """
         Clean text for IRC compatibility.
         
-        Removes newlines and excessive whitespace to ensure
-        the message works well with IRC message splitting.
+        Removes newlines, excessive whitespace, and inline markdown links.
+        Appends collected citations as plain URLs at the end.
         
         Args:
             text: Raw text to clean
+            citations: Optional list of citation URLs to append at end
             
         Returns:
             Cleaned text suitable for IRC
         """
+        import re
+        
         if not text:
             return "I couldn't generate a response."
+        
+        # Strip inline markdown links [text](url) -> text
+        # This regex matches [any text](any url)
+        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+        
+        # Remove leftover parenthetical domain references like (domain.com) or (domain.org)
+        # These are artifacts from stripped markdown links
+        text = re.sub(r'\s*\([\w.-]+\.(com|org|net|gov|edu|io|co|uk|de|fr|info|dev)\)', '', text)
+        
+        # Remove model's own "Sources:" section if present (we'll add our own clean one)
+        # Match "Sources:" followed by domain names, URLs, or descriptive text until end or period
+        text = re.sub(r'\s*Sources?:\s*[^|]*?(?=\s*\||$)', '', text, flags=re.IGNORECASE)
         
         # Replace newlines with spaces
         text = text.replace('\n', ' ').replace('\r', ' ')
@@ -794,8 +913,16 @@ class AIClient:
         # Strip leading/trailing whitespace
         text = text.strip()
         
+        # Remove trailing periods that might be left over
+        text = text.rstrip('.')
+        
         # Ensure we have something to return
         if not text:
             return "I couldn't generate a response."
+        
+        # Append citations at the end if we have any
+        if citations and len(citations) > 0:
+            sources_text = " | Sources: " + " , ".join(citations)
+            text = text + sources_text
         
         return text

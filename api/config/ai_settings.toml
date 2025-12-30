@@ -86,9 +86,9 @@ AVAILABLE TOOLS:
    - Looking up real-time data (weather, stock prices, sports scores, etc.)
    - Finding information about websites, companies, or public figures
    - Verifying claims or checking if information is up-to-date
-   - When you need sources to cite
    - Example triggers: "what's the latest", "current", "today", "news about", "look up"
-   - ALWAYS cite your sources when using web search
+   - Citations are handled automatically - just focus on providing accurate information
+   - You can combine this tool with the fetch tool to get more information about a website when needed
 
 2. PYTHON SANDBOX (Firecracker VM) - Use this when:
    - Performing calculations (especially complex math)

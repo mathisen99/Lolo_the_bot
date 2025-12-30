@@ -95,6 +95,30 @@ Save any files you want to return to the current directory.""",
         except (ProcessLookupError, ValueError):
             return False
     
+
+    def _start_vm(self):
+        proc = subprocess.Popen(
+            ["sudo", "./start-vm.sh"],
+            cwd=str(self.fc_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        for line in proc.stdout:
+            if "localhost console" in line:
+                log_info("VM booted successfully")
+                return  # VM has booted
+            #log_info(line.strip())
+
+        raise RuntimeError("VM exited without booting")
+
+
+    def _stop_vm(self):
+        """Stop the Firecracker VM."""
+        subprocess.run(["sudo", "./stop-vm.sh"], cwd=str(self.fc_dir), check=True)
+
     def _execute_via_vsock(self, code: str) -> Tuple[str, str, Dict[str, bytes]]:
         """
         Execute Python code via vsock connection to VM.
@@ -225,51 +249,71 @@ Save any files you want to return to the current directory.""",
         """
         log_info(f"Executing Python code ({len(code)} chars)")
         
-        # Try VM first, fall back to local
-        if self._is_vm_running():
+        vm_was_started = False
+        
+        try:
+            # Start VM if not running
+            if not self._is_vm_running():
+                log_info("VM not running, starting with sudo...")
+                try:
+                    self._start_vm()
+                    vm_was_started = True
+                except Exception as e:
+                    log_error(f"Failed to start VM: {e}")
+                    return f"Error: Failed to start VM: {e}"
+            
+            # Execute code via vsock
             stdout, stderr, files = self._execute_via_vsock(code)
-        else:
-            stdout, stderr, files = self._execute_local_fallback(code)
+            
+            # Check for errors
+            if stderr and not stdout and not files:
+                return f"Error:\n{stderr}"
+            
+            # Handle output files (images, etc.)
+            uploaded_urls = []
+            for filename, content in files.items():
+                try:
+                    url = upload_to_botbin(content, filename)
+                    if url and not url.startswith("Error"):
+                        uploaded_urls.append(f"{filename}: {url}")
+                        log_success(f"Uploaded {filename} to botbin")
+                except Exception as e:
+                    log_error(f"Failed to upload {filename}: {e}")
+            
+            # Build result
+            result_parts = []
+            
+            if stdout.strip():
+                result_parts.append(f"Output:\n{stdout.strip()}")
+            
+            if stderr.strip():
+                result_parts.append(f"Warnings:\n{stderr.strip()}")
+            
+            if uploaded_urls:
+                result_parts.append("Files:\n" + "\n".join(uploaded_urls))
+            
+            combined = "\n\n".join(result_parts) if result_parts else "Code executed successfully (no output)"
+            
+            # If output is small enough, return directly
+            if len(combined) < 500 and not uploaded_urls:
+                return combined
+            
+            # Otherwise upload the full output + code to botbin
+            full_output = f"=== Code ===\n{code}\n\n=== Result ===\n{combined}"
+            paste_url = upload_to_botbin(full_output.encode(), "python_execution.txt")
+            
+            if uploaded_urls:
+                urls_summary = ", ".join([u.split(": ")[1] for u in uploaded_urls])
+                return f"Execution complete: {paste_url}\nFiles: {urls_summary}"
+            else:
+                return f"Execution complete: {paste_url}"
         
-        # Check for errors
-        if stderr and not stdout and not files:
-            return f"Error:\n{stderr}"
-        
-        # Handle output files (images, etc.)
-        uploaded_urls = []
-        for filename, content in files.items():
-            try:
-                url = upload_to_botbin(content, filename)
-                if url and not url.startswith("Error"):
-                    uploaded_urls.append(f"{filename}: {url}")
-                    log_success(f"Uploaded {filename} to botbin")
-            except Exception as e:
-                log_error(f"Failed to upload {filename}: {e}")
-        
-        # Build result
-        result_parts = []
-        
-        if stdout.strip():
-            result_parts.append(f"Output:\n{stdout.strip()}")
-        
-        if stderr.strip():
-            result_parts.append(f"Warnings:\n{stderr.strip()}")
-        
-        if uploaded_urls:
-            result_parts.append("Files:\n" + "\n".join(uploaded_urls))
-        
-        combined = "\n\n".join(result_parts) if result_parts else "Code executed successfully (no output)"
-        
-        # If output is small enough, return directly
-        if len(combined) < 500 and not uploaded_urls:
-            return combined
-        
-        # Otherwise upload the full output + code to botbin
-        full_output = f"=== Code ===\n{code}\n\n=== Result ===\n{combined}"
-        paste_url = upload_to_botbin(full_output.encode(), "python_execution.txt")
-        
-        if uploaded_urls:
-            urls_summary = ", ".join([u.split(": ")[1] for u in uploaded_urls])
-            return f"Execution complete: {paste_url}\nFiles: {urls_summary}"
-        else:
-            return f"Execution complete: {paste_url}"
+        finally:
+            # Always stop VM after execution
+            if vm_was_started or self._is_vm_running():
+                log_info("Stopping VM with sudo...")
+                try:
+                    self._stop_vm()
+                    log_success("VM stopped successfully")
+                except Exception as e:
+                    log_error(f"Failed to stop VM: {e}")

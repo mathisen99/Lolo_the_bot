@@ -37,15 +37,24 @@ WEB_SEARCH_COST = 0.01       # $10/1k calls = $0.01 each
 
 
 def calculate_cost(model: str, input_tokens: int, cached_tokens: int, output_tokens: int) -> float:
-    """Calculate cost in USD for token usage."""
+    """
+    Calculate cost in USD for token usage.
+    
+    IMPORTANT: input_tokens is the TOTAL input, cached_tokens is a SUBSET of input_tokens.
+    We charge uncached tokens at full price and cached tokens at discounted price.
+    """
     pricing = PRICING.get(model, PRICING["default"])
     
-    # Cost per token (pricing is per 1M tokens)
-    input_cost = (input_tokens / 1_000_000) * pricing["input"]
+    # Cached tokens are a subset of input tokens, not additional
+    # Uncached = total input - cached portion
+    uncached_tokens = input_tokens - cached_tokens
+    
+    # Cost calculation (pricing is per 1M tokens)
+    uncached_cost = (uncached_tokens / 1_000_000) * pricing["input"]
     cached_cost = (cached_tokens / 1_000_000) * pricing["cached"]
     output_cost = (output_tokens / 1_000_000) * pricing["output"]
     
-    return input_cost + cached_cost + output_cost
+    return uncached_cost + cached_cost + output_cost
 
 
 def log_usage(

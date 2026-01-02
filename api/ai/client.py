@@ -185,7 +185,7 @@ class AIClient:
             # Prepare the input with system prompt
             full_input = f"{self.config.system_prompt}\n\nUser: {user_message}"
             
-            # Make API request
+            # Make API request with extended cache retention
             response = self.client.responses.create(
                 model=self.config.model_name,
                 input=full_input,
@@ -193,7 +193,8 @@ class AIClient:
                 text={"verbosity": self.config.verbosity},
                 max_output_tokens=self.config.max_output_tokens,
                 tools=tool_defs if tool_defs else None,
-                timeout=self.config.timeout
+                timeout=self.config.timeout,
+                prompt_cache_retention="24h"
             )
             
             # Check which tools were used
@@ -250,7 +251,7 @@ class AIClient:
                 conversation_history
             )
             
-            # Make API request
+            # Make API request with extended cache retention for better prefix caching
             response = self.client.responses.create(
                 model=self.config.model_name,
                 input=full_input,
@@ -258,7 +259,8 @@ class AIClient:
                 text={"verbosity": self.config.verbosity},
                 max_output_tokens=self.config.max_output_tokens,
                 tools=tool_defs if tool_defs else None,
-                timeout=self.config.timeout
+                timeout=self.config.timeout,
+                prompt_cache_retention="24h"
             )
             
             # Check which tools were used
@@ -620,8 +622,8 @@ class AIClient:
             if function_outputs:
                 tool_defs = [t.get_definition() for t in self.tools.values()]
                 
-                # Yield "working" status if taking long (optional, skipping for now to rely on explicit reports)
-                
+                # Use previous_response_id for multi-turn - this enables CoT passing
+                # and better caching as documented in GPT-5.2 guide
                 response = self.client.responses.create(
                     model=self.config.model_name,
                     input=function_outputs,
@@ -630,7 +632,8 @@ class AIClient:
                     reasoning={"effort": self.config.reasoning_effort},
                     text={"verbosity": self.config.verbosity},
                     max_output_tokens=self.config.max_output_tokens,
-                    timeout=self.config.timeout
+                    timeout=self.config.timeout,
+                    prompt_cache_retention="24h"
                 )
                 
                 # Track usage
@@ -676,6 +679,11 @@ class AIClient:
         """
         Build a prompt with conversation context.
         
+        IMPORTANT: Structure is optimized for OpenAI prompt caching.
+        The system prompt and user rules form a STABLE PREFIX that gets cached.
+        The current question and conversation history come AFTER so they can
+        change without invalidating the cached prefix.
+        
         Args:
             user_message: The current mention message
             nick: User who mentioned the bot
@@ -687,13 +695,15 @@ class AIClient:
         """
         from datetime import datetime
         
-        # Get current date/time and inject into system prompt
-        current_datetime = datetime.now().strftime("%A, %B %d, %Y at %H:%M:%S UTC")
+        # Get current date/time - use hour precision to maximize cache hits
+        # More granular timestamps break prefix caching on every request
+        current_datetime = datetime.now().strftime("%A, %B %d, %Y at %H:00 UTC")
         system_prompt_with_time = self.config.system_prompt.format(current_datetime=current_datetime)
         
         prompt_parts = [system_prompt_with_time, ""]
         
         # Inject user-specific rules if they exist and are enabled
+        # Note: User rules are semi-stable (change rarely) so they're part of the prefix
         user_rules = self._get_user_rules(nick)
         if user_rules:
             prompt_parts.append("=== CUSTOM RULES FOR THIS USER ===")
@@ -702,10 +712,19 @@ class AIClient:
             prompt_parts.append("=== END CUSTOM RULES ===")
             prompt_parts.append("")
         
-        # Add conversation history if available
+        # Add the current question BEFORE history (cache optimization)
+        # This way the system prompt prefix stays stable and cacheable
+        prompt_parts.append("=== CURRENT QUESTION ===")
+        prompt_parts.append(f"Channel: {channel}")
+        prompt_parts.append(f"User: {nick}")
+        prompt_parts.append(f"Message: {user_message}")
+        prompt_parts.append("")
+        
+        # Add conversation history AFTER the question (at the end)
+        # Changes to history won't invalidate the cached system prompt prefix
         if conversation_history and len(conversation_history) > 0:
-            prompt_parts.append("=== RECENT CONVERSATION HISTORY ===")
-            prompt_parts.append(f"(Last {len(conversation_history)} messages from {channel})")
+            prompt_parts.append("=== RECENT CONVERSATION CONTEXT ===")
+            prompt_parts.append(f"(Last {len(conversation_history)} messages from {channel} for context)")
             prompt_parts.append("")
             
             for msg in conversation_history:
@@ -713,16 +732,10 @@ class AIClient:
                 prompt_parts.append(f"[{msg.timestamp}] {msg.nick}: {msg.content}")
             
             prompt_parts.append("")
-            prompt_parts.append("=== END OF HISTORY ===")
-            prompt_parts.append("")
+            prompt_parts.append("=== END OF CONTEXT ===")
         
-        # Add the current question clearly separated
-        prompt_parts.append("=== CURRENT QUESTION ===")
-        prompt_parts.append(f"Channel: {channel}")
-        prompt_parts.append(f"User: {nick}")
-        prompt_parts.append(f"Message: {user_message}")
         prompt_parts.append("")
-        prompt_parts.append("Please respond to the CURRENT QUESTION above. Use the conversation history for context if relevant, but focus on answering what was just asked.")
+        prompt_parts.append("Please respond to the CURRENT QUESTION above. Use the conversation context if relevant, but focus on answering what was just asked.")
         
         return "\n".join(prompt_parts)
     

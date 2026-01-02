@@ -103,7 +103,7 @@ Guidelines:
 - botbin.net: Use https://botbin.net/XXXXX (NOT /paste/XXXXX) for raw content when fetching
 
 === CONVERSATION CONTEXT ===
-- History format: [timestamp] nickname: message
+- History format: [timestamp] nickname: message (timestamps are server local time, Europe/Helsinki)
 - Always respond to CURRENT QUESTION, use history for context
 - For older messages beyond visible history, use chat_history tool
 - Use semantic=true in chat_history for conceptual searches (opinions, discussions)"""

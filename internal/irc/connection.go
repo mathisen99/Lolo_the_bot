@@ -80,6 +80,9 @@ func NewConnectionManager(cfg *config.Config, logger output.Logger, db *database
 // Connect establishes connection and performs authentication
 // Note: The event loop (Run) must be started BEFORE calling this method
 func (cm *ConnectionManager) Connect() error {
+	// Reset registration state for reconnection
+	cm.registered = false
+
 	// Load channel states from database
 	err := cm.channelManager.LoadChannelStates()
 	if err != nil {

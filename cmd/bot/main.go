@@ -262,12 +262,40 @@ func main() {
 	// Start the IRC client event loop in a goroutine
 	// This must run BEFORE Connect() because Connect() waits for registration messages
 	// which are processed by the event loop
+	//
+	// IMPORTANT: When Run() returns due to a connection error (e.g., "connection reset by peer"),
+	// we should NOT trigger shutdown. Instead, we let the reconnection manager handle it.
+	// Only trigger shutdown for intentional disconnects (SIGINT/SIGTERM or !quit command).
 	go func() {
-		if err := connManager.Run(); err != nil {
-			logger.Error("IRC client error: %v", err)
+		for {
+			if err := connManager.Run(); err != nil {
+				logger.Error("IRC client error: %v", err)
+
+				// Check if this is a shutdown-initiated disconnect
+				// If shutdown is already in progress, don't try to reconnect
+				select {
+				case <-shutdownHandler.Done():
+					// Shutdown already completed, exit the loop
+					return
+				default:
+					// Not a shutdown - this is a connection error
+					// Let the reconnection manager handle it
+					// Run() will be called again immediately - it internally waits for
+					// a new connection to be established (waits for c.conn != nil)
+					logger.Info("Connection lost, reconnection manager will handle it...")
+
+					// Small delay to avoid tight loop while reconnection manager works
+					time.Sleep(500 * time.Millisecond)
+
+					// Continue the loop to call Run() again
+					// Run() will wait for the new connection to be ready
+					continue
+				}
+			}
+			// Run() returned without error (clean disconnect)
+			// This happens when we intentionally disconnect
+			break
 		}
-		// When the IRC client exits, trigger shutdown
-		shutdownHandler.Shutdown()
 	}()
 
 	// Give the event loop a moment to start

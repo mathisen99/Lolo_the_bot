@@ -50,6 +50,9 @@ func (c *Client) Connect() error {
 		return fmt.Errorf("already connected")
 	}
 
+	// Reset context for reconnection (in case previous connection was cancelled)
+	c.ctx, c.cancel = context.WithCancel(context.Background())
+
 	// Create connection
 	address := net.JoinHostPort(c.config.Server.Address, fmt.Sprintf("%d", c.config.Server.Port))
 
@@ -112,6 +115,8 @@ func (c *Client) Disconnect() error {
 	}
 
 	c.connected = false
+	c.conn = nil    // Clear the connection so Run() waits for a new one
+	c.rawConn = nil // Clear raw connection too
 	c.cancel()
 	c.logger.Info("Disconnected from IRC server")
 
@@ -209,8 +214,9 @@ func (c *Client) SetMessageHandler(handlerFunc func(*irc.Client, *irc.Message)) 
 // This will wait for a connection to be established if called before Connect()
 func (c *Client) Run() error {
 	// Wait for connection to be established (with timeout)
-	timeout := time.After(10 * time.Second)
-	ticker := time.NewTicker(50 * time.Millisecond)
+	// Use a longer timeout to accommodate reconnection backoff delays
+	timeout := time.After(120 * time.Second)
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	var conn *irc.Client
@@ -274,6 +280,8 @@ func (c *Client) Quit(message string) error {
 
 	// Always clean up state
 	c.connected = false
+	c.conn = nil    // Clear the connection
+	c.rawConn = nil // Clear raw connection
 	c.cancel()
 	c.logger.Info("Sent QUIT message and disconnected")
 

@@ -110,6 +110,9 @@ func (rm *ReconnectionManager) reconnect() {
 				rm.logger.Success("Reconnection successful!")
 				rm.resetBackoff()
 
+				// Restart ping monitor (it exits when context is cancelled)
+				rm.cm.StartPingMonitor()
+
 				// Rejoin all previously joined channels
 				err = rm.cm.RejoinChannels()
 				if err != nil {

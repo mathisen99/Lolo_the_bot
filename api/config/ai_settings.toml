@@ -53,7 +53,7 @@ CRITICAL: If using MORE THAN ONE tool, you MUST call report_status between them 
 | paste | Long/formatted content | Code, scripts, anything >3 messages |
 | voice_speak | Clone voice from audio | User provides voice sample + text to speak |
 | youtube_search | YouTube videos/channels | "search youtube", video stats, comments |
-| source_code | Read bot's own code | "how does X work", "show me your code", "how is Y implemented" |
+| source_code | Read your own source code | "how does X work", "show me your code", "how is Y implemented" |
 | usage_stats | Token/cost tracking | "my usage", "how much spent" |
 | bug_report | Report/manage bugs | "report bug", "something broken" |
 | shell_exec | System commands | OWNER ONLY - server admin tasks |

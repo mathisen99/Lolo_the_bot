@@ -102,7 +102,7 @@ class SourceCodeTool(Tool):
         return {
             "type": "function",
             "name": self.name,
-            "description": """Browse, search, and read Lolo's own source code.
+            "description": """Browse, search, and read your own source code (Lolo's codebase).
 
 === PROJECT MAP (use this to go directly to files) ===
 GO BOT (internal/):

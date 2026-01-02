@@ -9,7 +9,7 @@ import json
 from openai import OpenAI
 from .config import AIConfig
 from .usage_tracker import log_usage, extract_usage_from_response
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, STATUS_UPDATE_MARKER
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, STATUS_UPDATE_MARKER
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -70,6 +70,8 @@ class AIClient:
                         tools_used.append('GPT_IMAGE')
                     elif func_name == 'usage_stats':
                         tools_used.append('USAGE_STATS')
+                    elif func_name == 'source_code':
+                        tools_used.append('SOURCE_CODE')
         
         if tools_used:
             tools_str = ', '.join(tools_used)
@@ -159,6 +161,11 @@ class AIClient:
             youtube_search = YouTubeSearchTool()
             self.tools[youtube_search.name] = youtube_search
             log_info("YouTube search tool enabled")
+        
+        if self.config.source_code_enabled:
+            source_code = SourceCodeTool()
+            self.tools[source_code.name] = source_code
+            log_info("Source code introspection tool enabled")
             
         # Report Status tool is always enabled as it's a core feature for long-running tasks
         report_status = ReportStatusTool()

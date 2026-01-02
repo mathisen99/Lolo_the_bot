@@ -693,14 +693,8 @@ class AIClient:
         Returns:
             Formatted prompt with context
         """
-        from datetime import datetime
-        
-        # Get current date/time - use hour precision to maximize cache hits
-        # More granular timestamps break prefix caching on every request
-        current_datetime = datetime.now().strftime("%A, %B %d, %Y at %H:00 UTC")
-        system_prompt_with_time = self.config.system_prompt.format(current_datetime=current_datetime)
-        
-        prompt_parts = [system_prompt_with_time, ""]
+        # System prompt is static (no datetime injection) for better caching
+        prompt_parts = [self.config.system_prompt, ""]
         
         # Inject user-specific rules if they exist and are enabled
         # Note: User rules are semi-stable (change rarely) so they're part of the prefix
@@ -714,7 +708,12 @@ class AIClient:
         
         # Add the current question BEFORE history (cache optimization)
         # This way the system prompt prefix stays stable and cacheable
+        # Include timestamp so model knows current time without it being in system prompt
+        from datetime import datetime
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
         prompt_parts.append("=== CURRENT QUESTION ===")
+        prompt_parts.append(f"Timestamp: {current_time}")
         prompt_parts.append(f"Channel: {channel}")
         prompt_parts.append(f"User: {nick}")
         prompt_parts.append(f"Message: {user_message}")

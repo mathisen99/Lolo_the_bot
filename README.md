@@ -19,6 +19,8 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **Chat History** - Access conversation context and history
 - **Shell Execution** - Run system commands (owner only)
 - **Voice Cloning** - Clone voices from audio samples or YouTube clips (CosyVoice2)
+- **IRC Commands** - Execute IRC commands via AI (whois, NickServ, ChanServ, channel queries)
+- **Source Code Introspection** - AI can read and explain its own source code
 - **Agentic Status Reporting** - Real-time status updates for complex tasks
 
 ### Bot Management
@@ -220,6 +222,8 @@ The bot has access to these tools when mentioned:
 | **GPT Image 1.5** | High-quality image generation with text | "generate with GPT: a sign saying HELLO" |
 | **Usage Stats** | Check costs and token usage | "how much have I spent today?" |
 | **Bug Report** | Report issues with the bot | "I want to report a bug: image generation fails" |
+| **IRC Commands** | Query IRC services and channel info | "who owns nick foobar", "do you have op here" |
+| **Source Code** | Read bot's own source code | "how do you handle image generation" |
 | **Null Response** | Ask bot to stay silent | "don't respond to this", "shh" |
 
 ### IRC Formatting
@@ -299,6 +303,37 @@ For YouTube clips, the bot automatically:
 3. Uses the clean voice for cloning
 
 Best results with 5-15 seconds of clear speech. Max YouTube clip: 30 seconds.
+
+### IRC Commands
+
+The bot can execute IRC commands and query channel information:
+```
+<you>  lolo: who owns the nick foobar?
+<lolo> foobar is registered to John, last seen 2 days ago...
+
+<you>  lolo: do you have op in here?
+<lolo> No, I don't have op in #channel
+
+<you>  lolo: how many users are in this channel?
+<lolo> #channel has 150 users, 3 ops, 12 voiced
+
+<you>  lolo: does alice have voice?
+<lolo> Yes, alice is voiced in #channel (+v)
+
+<you>  lolo: find channels about python
+<lolo> Found: #python (500 users), #python-offtopic (120 users)...
+```
+
+Available queries (all users):
+- NickServ INFO, ChanServ INFO, ALIS channel search
+- WHOIS, CTCP VERSION/TIME
+- Channel user counts, ops list, voiced list, topics
+- Check if bot has op/voice, find users across channels
+
+Admin/Owner can also use moderation commands through the AI:
+- Kick, ban, quiet users
+- Set channel modes and topics
+- Request op/voice from ChanServ
 
 ### Python Sandbox (Firecracker VM)
 
@@ -443,6 +478,8 @@ usage_stats_enabled = true     # Token usage and cost tracking
 report_status_enabled = true   # Agentic status reporting
 null_response_enabled = true   # Ability to stay silent
 bug_report_enabled = true      # User bug reporting system
+irc_command_enabled = true     # IRC commands and channel queries
+source_code_enabled = true     # Source code introspection
 ```
 
 **Note:** Tools requiring missing API keys will be automatically disabled.

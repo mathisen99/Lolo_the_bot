@@ -44,6 +44,7 @@ type BotConfig struct {
 	Channels      []string `toml:"channels"`
 	APIEndpoint   string   `toml:"api_endpoint"`
 	APITimeout    int      `toml:"api_timeout"`
+	CallbackPort  int      `toml:"callback_port"`
 	TestMode      bool     `toml:"test_mode"`
 }
 

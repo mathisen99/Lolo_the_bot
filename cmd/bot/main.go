@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/yourusername/lolo/internal/callback"
 	"github.com/yourusername/lolo/internal/commands"
 	"github.com/yourusername/lolo/internal/config"
 	"github.com/yourusername/lolo/internal/database"
@@ -188,6 +189,27 @@ func main() {
 	}
 	messageHandler := handler.NewMessageHandler(handlerConfig)
 
+	// Start callback server for Python API to call back (IRC command tool)
+	var callbackServer *callback.Server
+	if cfg.Bot.CallbackPort > 0 {
+		callbackServer = callback.NewServer(connManager.GetClient(), logger, cfg.Bot.CallbackPort)
+		callbackServer.SetDatabase(db) // Enable bot_status and channel_info commands
+		if err := callbackServer.Start(); err != nil {
+			logger.Error("Failed to start callback server: %v", err)
+		} else {
+			logger.Success("Callback server started on port %d", cfg.Bot.CallbackPort)
+
+			// Wire up IRC response handlers to callback server
+			connManager.SetNoticeHandler(callbackServer.HandleServiceResponse)
+			connManager.SetNumericHandler(callbackServer.HandleNumericResponse)
+			connManager.SetCTCPResponseHandler(callbackServer.HandleCTCPResponse)
+		}
+	}
+
+	// Create and wire up channel user tracker for tracking op status, user counts, etc.
+	channelTracker := irc.NewChannelTracker(db, logger, cfg.Server.Nickname)
+	connManager.SetChannelUserTracker(channelTracker)
+
 	// Cache command metadata from Python API (Requirement 31.5)
 	if healthResp != nil {
 		logger.Info("Fetching command metadata from Python API...")
@@ -225,6 +247,16 @@ func main() {
 		}
 		return nil
 	})
+
+	// 3.5. Stop callback server
+	if callbackServer != nil {
+		shutdownHandler.RegisterShutdownFunc(func() error {
+			logger.Info("Stopping callback server...")
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			return callbackServer.Stop(ctx)
+		})
+	}
 
 	// 4. Wait for in-flight API requests (Requirement 10.3)
 	shutdownHandler.RegisterShutdownFunc(func() error {

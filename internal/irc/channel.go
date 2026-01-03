@@ -126,7 +126,7 @@ func (cm *ChannelManager) PartChannel(channel, message string) error {
 // Joins are staggered to avoid excess flood disconnects
 func (cm *ChannelManager) JoinAutoJoinChannels() error {
 	// Wait before starting to join channels (let connection settle)
-	time.Sleep(3 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	for i, channel := range cm.autoJoinList {
 		cm.mu.Lock()
@@ -150,8 +150,9 @@ func (cm *ChannelManager) JoinAutoJoinChannels() error {
 		cm.mu.Unlock()
 
 		// Delay between joins to avoid flood (except after last channel)
+		// Use 2 seconds to be safe with large channels that send lots of NAMES data
 		if i < len(cm.autoJoinList)-1 {
-			time.Sleep(1 * time.Second)
+			time.Sleep(2 * time.Second)
 		}
 	}
 
@@ -162,7 +163,7 @@ func (cm *ChannelManager) JoinAutoJoinChannels() error {
 // Joins are staggered to avoid excess flood disconnects
 func (cm *ChannelManager) RejoinChannels() error {
 	// Wait before starting to rejoin channels (let connection settle)
-	time.Sleep(3 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	// Get list of channels to rejoin
 	cm.mu.RLock()
@@ -194,8 +195,9 @@ func (cm *ChannelManager) RejoinChannels() error {
 		cm.mu.Unlock()
 
 		// Delay between joins to avoid flood (except after last channel)
+		// Use 2 seconds to be safe with large channels
 		if i < len(channels)-1 {
-			time.Sleep(1 * time.Second)
+			time.Sleep(2 * time.Second)
 		}
 	}
 

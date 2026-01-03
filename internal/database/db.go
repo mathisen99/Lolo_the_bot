@@ -24,9 +24,6 @@ func New(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
-	// Check if this is a first-time initialization
-	isFirstRun := !fileExists(dbPath)
-
 	// Open database connection
 	conn, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -50,12 +47,10 @@ func New(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("failed to configure WAL mode: %w", err)
 	}
 
-	// Run migrations on first run or if needed
-	if isFirstRun {
-		if err := db.runMigrations(); err != nil {
-			_ = conn.Close()
-			return nil, fmt.Errorf("failed to run migrations: %w", err)
-		}
+	// Always run migrations to apply any pending ones
+	if err := db.runMigrations(); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
 	return db, nil
@@ -145,10 +140,4 @@ func (db *DB) configureWAL() error {
 	}
 
 	return nil
-}
-
-// fileExists checks if a file exists
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }

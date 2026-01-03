@@ -116,7 +116,8 @@ func DefaultConfig() *Config {
 			CommandPrefix: "!",
 			Channels:      []string{"#yourchannel"},
 			APIEndpoint:   "http://localhost:8000",
-			APITimeout:    240, // 240 seconds for complex multi-tool AI requests
+			APITimeout:    240,  // 240 seconds for complex multi-tool AI requests
+			CallbackPort:  8001, // Port for Python API to call back
 			TestMode:      false,
 		},
 		Limits: LimitsConfig{

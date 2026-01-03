@@ -714,7 +714,7 @@ func (h *MessageHandler) downloadImage(imageURL string) error {
 	if err != nil {
 		return fmt.Errorf("failed to fetch image: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("bad status code: %d", resp.StatusCode)
@@ -733,7 +733,7 @@ func (h *MessageHandler) downloadImage(imageURL string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
-	defer outFile.Close()
+	defer func() { _ = outFile.Close() }()
 
 	// Copy response body to file
 	_, err = io.Copy(outFile, resp.Body)

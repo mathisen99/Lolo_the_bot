@@ -62,9 +62,13 @@ class AIConfig:
         self.usage_stats_enabled: bool = config["tools"].get("usage_stats_enabled", True)
         self.youtube_search_enabled: bool = config["tools"].get("youtube_search_enabled", True)
         self.source_code_enabled: bool = config["tools"].get("source_code_enabled", True)
+        self.irc_command_enabled: bool = config["tools"].get("irc_command_enabled", True)
         
         # Shell execution settings
         self.shell_exec_timeout: int = config.get("shell_exec", {}).get("timeout", 30)
+        
+        # IRC command settings
+        self.irc_command_timeout: int = config.get("irc_command", {}).get("timeout", 30)
         
         # Web search settings
         self.web_search_external_access: bool = config["web_search"]["external_web_access"]
@@ -113,4 +117,6 @@ class AIConfig:
             tools.append("youtube_search")
         if self.source_code_enabled:
             tools.append("source_code")
+        if self.irc_command_enabled:
+            tools.append("irc_command")
         return tools

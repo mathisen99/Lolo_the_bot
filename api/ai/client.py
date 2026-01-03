@@ -9,7 +9,7 @@ import json
 from openai import OpenAI
 from .config import AIConfig
 from .usage_tracker import log_usage, extract_usage_from_response
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, STATUS_UPDATE_MARKER
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, STATUS_UPDATE_MARKER
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -72,6 +72,8 @@ class AIClient:
                         tools_used.append('USAGE_STATS')
                     elif func_name == 'source_code':
                         tools_used.append('SOURCE_CODE')
+                    elif func_name == 'irc_command':
+                        tools_used.append('IRC_COMMAND')
         
         if tools_used:
             tools_str = ', '.join(tools_used)
@@ -166,6 +168,11 @@ class AIClient:
             source_code = SourceCodeTool()
             self.tools[source_code.name] = source_code
             log_info("Source code introspection tool enabled")
+        
+        if self.config.irc_command_enabled:
+            irc_command = IRCCommandTool(timeout=self.config.irc_command_timeout)
+            self.tools[irc_command.name] = irc_command
+            log_info("IRC command tool enabled (permission-based)")
             
         # Report Status tool is always enabled as it's a core feature for long-running tasks
         report_status = ReportStatusTool()
@@ -537,7 +544,7 @@ class AIClient:
                 
                 try:
                     # Inject permission_level/context for specific tools
-                    if func_name in ('manage_user_rules', 'execute_shell', 'bug_report'):
+                    if func_name in ('manage_user_rules', 'execute_shell', 'bug_report', 'irc_command'):
                         func_args['permission_level'] = permission_level
                         if func_name == 'bug_report':
                             func_args['requesting_user'] = nick

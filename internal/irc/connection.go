@@ -2,6 +2,7 @@ package irc
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/yourusername/lolo/internal/config"
@@ -13,6 +14,27 @@ import (
 
 // PrivMsgHandler is a callback function for handling PRIVMSG events
 type PrivMsgHandler func(nick, hostmask, channel, message string, isPM bool)
+
+// NoticeHandler is a callback function for handling NOTICE events (for service responses)
+type NoticeHandler func(source, message string)
+
+// NumericHandler is a callback function for handling numeric IRC responses
+type NumericHandler func(numeric int, params []string)
+
+// CTCPResponseHandler is a callback function for handling CTCP responses
+type CTCPResponseHandler func(source, ctcpType, response string)
+
+// ChannelUserTracker interface for tracking channel users
+type ChannelUserTracker interface {
+	OnNamesReply(channel string, names []string)
+	OnJoin(channel, nick string, isSelf bool)
+	OnPart(channel, nick string, isSelf bool)
+	OnQuit(nick string)
+	OnKick(channel, nick string, isSelf bool)
+	OnMode(channel, nick, mode string, adding bool, isSelf bool)
+	OnNickChange(oldNick, newNick string, isSelf bool)
+	OnTopic(channel, topic string)
+}
 
 // ConnectionManager manages the IRC connection lifecycle
 type ConnectionManager struct {
@@ -28,14 +50,18 @@ type ConnectionManager struct {
 	underscoreCount    int
 	primaryNickReclaim bool
 
-	lastPingTime     time.Time
-	lastPongTime     time.Time
-	reconnectManager *ReconnectionManager
-	kickManager      *KickManager
-	channelManager   *ChannelManager
-	ctcpHandler      *CTCPHandler
-	netsplitDetector *NetsplitDetector
-	privMsgHandler   PrivMsgHandler // Callback for handling PRIVMSG events
+	lastPingTime        time.Time
+	lastPongTime        time.Time
+	reconnectManager    *ReconnectionManager
+	kickManager         *KickManager
+	channelManager      *ChannelManager
+	ctcpHandler         *CTCPHandler
+	netsplitDetector    *NetsplitDetector
+	privMsgHandler      PrivMsgHandler      // Callback for handling PRIVMSG events
+	noticeHandler       NoticeHandler       // Callback for handling NOTICE events
+	numericHandler      NumericHandler      // Callback for handling numeric responses
+	ctcpResponseHandler CTCPResponseHandler // Callback for handling CTCP responses
+	channelUserTracker  ChannelUserTracker  // Tracker for channel user state
 }
 
 // NewConnectionManager creates a new connection manager
@@ -223,6 +249,12 @@ func (cm *ConnectionManager) handleMessage(client *irc.Client, msg *irc.Message)
 	case "KICK":
 		cm.handleKick(msg)
 
+	case "MODE":
+		cm.handleMode(msg)
+
+	case "TOPIC":
+		cm.handleTopicChange(msg)
+
 	case "PING":
 		cm.handlePing(msg)
 
@@ -237,6 +269,10 @@ func (cm *ConnectionManager) handleMessage(client *irc.Client, msg *irc.Message)
 
 	case "ERROR":
 		cm.logger.Error("IRC Error: %s", msg.Trailing())
+
+	default:
+		// Handle numeric responses (WHOIS, WHOWAS, etc.)
+		cm.handleNumericIfApplicable(msg)
 	}
 }
 
@@ -296,9 +332,24 @@ func (cm *ConnectionManager) handleNickChange(msg *irc.Message) {
 				cm.primaryNickReclaim = false
 				cm.logger.Success("Primary nickname reclaimed!")
 			}
+
+			// Notify tracker (bot nick change)
+			if cm.channelUserTracker != nil {
+				cm.channelUserTracker.OnNickChange(oldNick, newNick, true)
+			}
 		} else if oldNick == cm.config.Server.Nickname && newNick != cm.currentNick {
 			// Someone else changed from our primary nickname - try to reclaim it
 			cm.attemptPrimaryNickReclaim()
+
+			// Notify tracker (other user nick change)
+			if cm.channelUserTracker != nil {
+				cm.channelUserTracker.OnNickChange(oldNick, newNick, false)
+			}
+		} else {
+			// Notify tracker (other user nick change)
+			if cm.channelUserTracker != nil {
+				cm.channelUserTracker.OnNickChange(oldNick, newNick, false)
+			}
 		}
 	}
 }
@@ -309,6 +360,11 @@ func (cm *ConnectionManager) handleQuit(msg *irc.Message) {
 
 	// Notify netsplit detector of the quit (for netsplit detection)
 	cm.netsplitDetector.OnQuit(nick)
+
+	// Notify tracker (user quit from all channels)
+	if cm.channelUserTracker != nil {
+		cm.channelUserTracker.OnQuit(nick)
+	}
 
 	// If the user who quit had our primary nickname, try to reclaim it
 	if nick == cm.config.Server.Nickname && cm.currentNick != cm.config.Server.Nickname {
@@ -354,10 +410,20 @@ func (cm *ConnectionManager) handleJoin(msg *irc.Message) {
 			// Reset kick backoff on successful join
 			// This handles both initial joins and rejoins after kicks
 			cm.kickManager.ResetBackoff(channel)
+
+			// Notify tracker (bot joined)
+			if cm.channelUserTracker != nil {
+				cm.channelUserTracker.OnJoin(channel, nick, true)
+			}
 		} else {
 			// Notify netsplit detector of the join (for netsplit recovery detection)
 			cm.netsplitDetector.OnJoin(nick)
 			cm.logger.Info("%s joined %s", nick, channel)
+
+			// Notify tracker (other user joined)
+			if cm.channelUserTracker != nil {
+				cm.channelUserTracker.OnJoin(channel, nick, false)
+			}
 		}
 	}
 }
@@ -371,8 +437,18 @@ func (cm *ConnectionManager) handlePart(msg *irc.Message) {
 		if nick == cm.currentNick {
 			// Notify channel manager
 			cm.channelManager.OnPart(channel)
+
+			// Notify tracker (bot left)
+			if cm.channelUserTracker != nil {
+				cm.channelUserTracker.OnPart(channel, nick, true)
+			}
 		} else {
 			cm.logger.Info("%s left %s", nick, channel)
+
+			// Notify tracker (other user left)
+			if cm.channelUserTracker != nil {
+				cm.channelUserTracker.OnPart(channel, nick, false)
+			}
 		}
 	}
 }
@@ -391,8 +467,18 @@ func (cm *ConnectionManager) handleKick(msg *irc.Message) {
 			// Notify kick manager
 			cm.kickManager.OnKick(channel, reason)
 
+			// Notify tracker (bot was kicked)
+			if cm.channelUserTracker != nil {
+				cm.channelUserTracker.OnKick(channel, kicked, true)
+			}
+
 			// Schedule rejoin attempt
 			go cm.handleKickRejoin(channel)
+		} else {
+			// Notify tracker (other user was kicked)
+			if cm.channelUserTracker != nil {
+				cm.channelUserTracker.OnKick(channel, kicked, false)
+			}
 		}
 	}
 }
@@ -478,7 +564,22 @@ func (cm *ConnectionManager) handleNotice(msg *irc.Message) {
 	if len(msg.Params) >= 2 {
 		from := msg.Name
 		message := msg.Trailing()
+
+		// Check if this is a CTCP response
+		if IsCTCPMessage(message) {
+			ctcpCmd, ctcpArgs, ok := ParseCTCPMessage(message)
+			if ok && cm.ctcpResponseHandler != nil {
+				cm.ctcpResponseHandler(from, ctcpCmd, ctcpArgs)
+				return
+			}
+		}
+
 		cm.logger.Info("Notice from %s: %s", from, message)
+
+		// Route to callback server if set (for IRC command tool responses)
+		if cm.noticeHandler != nil {
+			cm.noticeHandler(from, message)
+		}
 	}
 }
 
@@ -558,4 +659,154 @@ func (cm *ConnectionManager) GetNetsplitDetector() *NetsplitDetector {
 // This allows the bot's message handler to process incoming messages
 func (cm *ConnectionManager) SetPrivMsgHandler(handler PrivMsgHandler) {
 	cm.privMsgHandler = handler
+}
+
+// SetNoticeHandler sets a callback function to handle NOTICE events
+// This is used by the callback server to collect service responses
+func (cm *ConnectionManager) SetNoticeHandler(handler NoticeHandler) {
+	cm.noticeHandler = handler
+}
+
+// SetNumericHandler sets a callback function to handle numeric IRC responses
+// This is used by the callback server to collect WHOIS/WHOWAS responses
+func (cm *ConnectionManager) SetNumericHandler(handler NumericHandler) {
+	cm.numericHandler = handler
+}
+
+// handleNumericIfApplicable checks if a message is a numeric response and routes it
+func (cm *ConnectionManager) handleNumericIfApplicable(msg *irc.Message) {
+	// Try to parse command as numeric
+	if len(msg.Command) == 3 {
+		var numeric int
+		_, err := fmt.Sscanf(msg.Command, "%d", &numeric)
+		if err == nil {
+			// Handle specific numerics for channel tracking
+			switch numeric {
+			case 353: // RPL_NAMREPLY - Names list for a channel
+				// Format: :server 353 <nick> <type> <channel> :<names>
+				// type is = (public), * (private), @ (secret)
+				if len(msg.Params) >= 3 {
+					channel := msg.Params[2]
+					names := strings.Fields(msg.Trailing())
+					if cm.channelUserTracker != nil {
+						cm.channelUserTracker.OnNamesReply(channel, names)
+					}
+				}
+
+			case 366: // RPL_ENDOFNAMES - End of names list
+				// We don't need to do anything special here, names are already processed
+
+			case 332: // RPL_TOPIC - Channel topic
+				// Format: :server 332 <nick> <channel> :<topic>
+				if len(msg.Params) >= 2 {
+					channel := msg.Params[1]
+					topic := msg.Trailing()
+					if cm.channelUserTracker != nil {
+						cm.channelUserTracker.OnTopic(channel, topic)
+					}
+				}
+			}
+
+			// Route to callback server if set
+			if cm.numericHandler != nil {
+				cm.numericHandler(numeric, msg.Params)
+			}
+		}
+	}
+}
+
+// SetCTCPResponseHandler sets a callback function to handle CTCP responses
+// This is used by the callback server to collect VERSION/TIME responses
+func (cm *ConnectionManager) SetCTCPResponseHandler(handler CTCPResponseHandler) {
+	cm.ctcpResponseHandler = handler
+}
+
+// SetChannelUserTracker sets the channel user tracker for tracking user state
+func (cm *ConnectionManager) SetChannelUserTracker(tracker ChannelUserTracker) {
+	cm.channelUserTracker = tracker
+}
+
+// handleMode handles MODE messages for channel user tracking
+func (cm *ConnectionManager) handleMode(msg *irc.Message) {
+	// MODE format: :nick!user@host MODE #channel +o target
+	// or: :nick!user@host MODE #channel +v-o target1 target2
+	if len(msg.Params) < 2 {
+		return
+	}
+
+	target := msg.Params[0]
+
+	// Only handle channel modes (not user modes)
+	if !strings.HasPrefix(target, "#") && !strings.HasPrefix(target, "&") {
+		return
+	}
+
+	channel := target
+	modeString := msg.Params[1]
+	modeArgs := msg.Params[2:] // Targets for the modes
+
+	// Parse mode changes
+	adding := true
+	argIndex := 0
+
+	for _, char := range modeString {
+		switch char {
+		case '+':
+			adding = true
+		case '-':
+			adding = false
+		case 'o', 'h', 'v': // Op, halfop, voice - these take a nick argument
+			if argIndex < len(modeArgs) {
+				nick := modeArgs[argIndex]
+				argIndex++
+
+				// Check if this affects the bot
+				isSelf := strings.EqualFold(nick, cm.currentNick)
+
+				// Notify tracker
+				if cm.channelUserTracker != nil {
+					cm.channelUserTracker.OnMode(channel, nick, string(char), adding, isSelf)
+				}
+
+				// Log the mode change
+				modeChar := string(char)
+				if adding {
+					cm.logger.Info("Mode +%s set on %s in %s", modeChar, nick, channel)
+				} else {
+					cm.logger.Info("Mode -%s removed from %s in %s", modeChar, nick, channel)
+				}
+			}
+		case 'b', 'q', 'e', 'I': // Ban, quiet, exempt, invite - these take a mask argument
+			if argIndex < len(modeArgs) {
+				argIndex++ // Skip the mask, we don't track these
+			}
+		case 'k': // Key - takes argument when adding
+			if adding && argIndex < len(modeArgs) {
+				argIndex++
+			}
+		case 'l': // Limit - takes argument when adding
+			if adding && argIndex < len(modeArgs) {
+				argIndex++
+			}
+			// Other modes (n, t, s, i, etc.) don't take arguments
+		}
+	}
+}
+
+// handleTopicChange handles TOPIC messages
+func (cm *ConnectionManager) handleTopicChange(msg *irc.Message) {
+	// TOPIC format: :nick!user@host TOPIC #channel :new topic
+	if len(msg.Params) < 1 {
+		return
+	}
+
+	channel := msg.Params[0]
+	topic := msg.Trailing()
+
+	cm.logger.Info("Topic in %s changed to: %s", channel, topic)
+
+	// Notify tracker
+	if cm.channelUserTracker != nil {
+		cm.channelUserTracker.OnTopic(channel, topic)
+	}
 }

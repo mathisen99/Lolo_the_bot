@@ -69,11 +69,13 @@ USE FOR past channel activity:
 - "in this channel", "here", "in chat", "earlier", "today", "yesterday"
 - "did anyone say", "what did [nick] say", "who mentioned"
 - Past conversations, what users discussed, activity patterns
+- IRC events: "was X kicked?", "any bans?", "did Y change nick?" - use event_type filter
 
 MODES:
 1. KEYWORD SEARCH (default): Exact text matching
 2. SEMANTIC SEARCH (semantic=true): Finds conceptually related messages via embeddings
 3. TIME-BASED (hours_ago): Messages around a specific point in time
+4. EVENT FILTER (event_type): Filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, MODE, TOPIC, ALL_EVENTS)
 
 USE SEMANTIC SEARCH (semantic=true) WHEN:
 - User asks about topics discussed: "did anyone talk about AI?"

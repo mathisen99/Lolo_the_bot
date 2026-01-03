@@ -51,7 +51,7 @@ class ChatHistoryTool(Tool):
         return {
             "type": "function",
             "name": "query_chat_history",
-            "description": """Query the chat history database for messages or statistics.
+            "description": """Query the chat history database for messages, events, or statistics.
 
 Use this when:
 - User asks about past conversations ("what did we talk about yesterday?")
@@ -62,15 +62,18 @@ Use this when:
 - User asks how many messages someone sent ("how many messages did I send today?")
 - User asks about activity ("how active was the channel today?")
 - User asks about specific actions ("how many times did X try to generate images?") - fetch messages and analyze them
+- User asks about IRC events ("has anyone been kicked?", "who got banned?", "did X change nick?") - use event_type
 - You need more context than the recent 20 messages provided
 
 For counting questions, use count_only=true for efficiency.
 For looking at a specific point in time with context, use hours_ago (returns messages around that time).
 For semantic analysis (like counting image generation attempts), fetch full messages and analyze the content yourself.
+For IRC events (kicks, bans, quits, nick changes), use event_type filter.
 
 Can fetch up to 1000 messages for full day analysis.
 
-New: Use semantic=true to find concepts instead of exact words (e.g. "cats" finds "feline", "kittens").""",
+New: Use semantic=true to find concepts instead of exact words (e.g. "cats" finds "feline", "kittens").
+New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, MODE, TOPIC).""",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -114,6 +117,15 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
                     "semantic": {
                         "type": "boolean",
                         "description": "Use semantic search instead of exact keyword matching. Useful for finding concepts, topics, or vaguely remembered conversations."
+                    },
+                    "event_type": {
+                        "type": ["string", "null"],
+                        "enum": [None, "KICK", "BAN", "UNBAN", "QUIT", "NICK", "JOIN", "PART", "MODE", "TOPIC", "ALL_EVENTS"],
+                        "description": "Filter by IRC event type. Use 'ALL_EVENTS' to get all events (kicks, bans, quits, etc.). Leave empty for regular messages only."
+                    },
+                    "include_events": {
+                        "type": "boolean",
+                        "description": "If true, include IRC events (kicks, bans, quits, nick changes) alongside regular messages. Default: false"
                     }
                 },
                 "required": ["channel"],
@@ -161,7 +173,9 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
         nick: Optional[str],
         search_term: Optional[str],
         include_bot: bool,
-        end_time_str: Optional[str] = None
+        end_time_str: Optional[str] = None,
+        event_type: Optional[str] = None,
+        include_events: bool = False
     ) -> tuple[str, List[Any]]:
         """Build WHERE clause and params for queries."""
         conditions = [
@@ -185,6 +199,22 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
             conditions.append("LOWER(content) LIKE LOWER(?)")
             params.append(f"%{search_term}%")
         
+        # Handle event_type filtering
+        if event_type:
+            if event_type == "ALL_EVENTS":
+                # Get all events (non-null event_type)
+                conditions.append("event_type IS NOT NULL AND event_type != ''")
+            else:
+                # Get specific event type
+                conditions.append("event_type = ?")
+                params.append(event_type)
+        elif include_events:
+            # Include both messages and events - no filter needed
+            pass
+        else:
+            # Default: only regular messages (no events)
+            conditions.append("(event_type IS NULL OR event_type = '')")
+        
         return " AND ".join(conditions), params
     
     def _format_messages(
@@ -193,10 +223,13 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
         total_found: int, 
         limit: int,
         context_mode: bool = False,
-        target_time: Optional[datetime] = None
+        target_time: Optional[datetime] = None,
+        is_event_query: bool = False
     ) -> str:
         """Format messages for output, respecting character limit."""
         if not messages:
+            if is_event_query:
+                return "No events found matching your criteria."
             return "No messages found matching your criteria."
         
         lines = []
@@ -205,7 +238,15 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
         
         for msg in messages:
             timestamp = self._format_timestamp(msg["timestamp"])
-            line = f"[{timestamp}] {msg['nick']}: {msg['content']}"
+            event_type = msg["event_type"] if "event_type" in msg.keys() and msg["event_type"] else None
+            
+            if event_type:
+                # Format as event
+                line = f"[{timestamp}] [{event_type}] {msg['content']}"
+            else:
+                # Format as regular message
+                line = f"[{timestamp}] {msg['nick']}: {msg['content']}"
+            
             line_len = len(line) + 1
             
             if char_count + line_len > self.MAX_CHARS:
@@ -218,15 +259,16 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
         shown = len(lines)
         
         # Build header
+        item_type = "events" if is_event_query else "messages"
         if context_mode and target_time:
             target_str = target_time.strftime("%Y-%m-%d %H:%M")
-            header = f"Messages around {target_str} ({shown} messages)"
+            header = f"{item_type.capitalize()} around {target_str} ({shown} {item_type})"
         elif truncated:
-            header = f"Found {total_found} messages, showing {shown} (truncated for length)"
+            header = f"Found {total_found} {item_type}, showing {shown} (truncated for length)"
         elif total_found > limit:
-            header = f"Found {total_found} messages, showing {shown} most recent"
+            header = f"Found {total_found} {item_type}, showing {shown} most recent"
         else:
-            header = f"Found {total_found} messages"
+            header = f"Found {total_found} {item_type}"
         
         if total_found > shown and not context_mode:
             header += ". Consider narrowing your search with a search_term or shorter time_range."
@@ -242,27 +284,39 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
         search_term: Optional[str],
         include_bot: bool,
         time_desc: str,
-        end_time_str: Optional[str] = None
+        end_time_str: Optional[str] = None,
+        event_type: Optional[str] = None,
+        include_events: bool = False
     ) -> str:
         """Get message count statistics."""
         where_clause, params = self._build_where_clause(
-            channel, start_time_str, nick, search_term, include_bot, end_time_str
+            channel, start_time_str, nick, search_term, include_bot, end_time_str,
+            event_type, include_events
         )
         
         cursor.execute(f"SELECT COUNT(*) FROM messages WHERE {where_clause}", params)
         total_count = cursor.fetchone()[0]
         
-        if nick:
-            result = f"{nick} sent {total_count} message(s) in {channel} ({time_desc})"
+        # Determine what we're counting
+        if event_type == "ALL_EVENTS":
+            item_type = "event(s)"
+        elif event_type:
+            item_type = f"{event_type} event(s)"
         else:
-            result = f"Total: {total_count} message(s) in {channel} ({time_desc})"
+            item_type = "message(s)"
+        
+        if nick:
+            result = f"{nick}: {total_count} {item_type} in {channel} ({time_desc})"
+        else:
+            result = f"Total: {total_count} {item_type} in {channel} ({time_desc})"
         
         if search_term and search_term.strip():
             result += f" containing '{search_term}'"
         
-        if not nick and total_count > 0:
+        if not nick and total_count > 0 and not event_type:
             where_clause_top, params_top = self._build_where_clause(
-                channel, start_time_str, None, search_term, include_bot, end_time_str
+                channel, start_time_str, None, search_term, include_bot, end_time_str,
+                event_type, include_events
             )
             
             top_query = f"""
@@ -293,7 +347,9 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
         nick: Optional[str],
         search_term: Optional[str],
         include_bot: bool,
-        limit: int
+        limit: int,
+        event_type: Optional[str] = None,
+        include_events: bool = False
     ) -> tuple[List[sqlite3.Row], int, datetime]:
         """Query messages around a specific point in time."""
         start_time = target_time - timedelta(minutes=context_minutes)
@@ -303,16 +359,17 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
         end_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
         
         where_clause, params = self._build_where_clause(
-            channel, start_str, nick, search_term, include_bot, end_str
+            channel, start_str, nick, search_term, include_bot, end_str,
+            event_type, include_events
         )
         
         # Get count
         cursor.execute(f"SELECT COUNT(*) FROM messages WHERE {where_clause}", params)
         total_found = cursor.fetchone()[0]
         
-        # Get messages in chronological order
+        # Get messages in chronological order (include event_type in select)
         query = f"""
-            SELECT timestamp, nick, content
+            SELECT timestamp, nick, content, COALESCE(event_type, '') as event_type
             FROM messages
             WHERE {where_clause}
             ORDER BY timestamp ASC
@@ -337,6 +394,8 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
         count_only: bool = False,
         include_bot: bool = False,
         semantic: bool = False,
+        event_type: Optional[str] = None,
+        include_events: bool = False,
         **kwargs
     ) -> str:
         """
@@ -351,10 +410,10 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
             context_minutes: Minutes of context around hours_ago point (default 30)
             limit: Max messages to return
             count_only: If True, return only statistics
-            limit: Max messages to return
-            count_only: If True, return only statistics
             include_bot: If True, include bot messages
             semantic: If True, use semantic search (requires search_term)
+            event_type: Filter by IRC event type (KICK, BAN, QUIT, NICK, etc.)
+            include_events: If True, include events alongside messages
             
         Returns:
             Formatted message history, statistics, or error message
@@ -364,6 +423,9 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
         
         if not channel or not channel.strip():
             return "Error: Channel is required."
+        
+        # Determine if this is an event query
+        is_event_query = bool(event_type)
 
         # Handle Semantic Search
         if semantic:
@@ -462,17 +524,20 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
                             cursor, channel,
                             start_time.strftime("%Y-%m-%d %H:%M:%S"),
                             nick, search_term, include_bot, time_desc,
-                            end_time.strftime("%Y-%m-%d %H:%M:%S")
+                            end_time.strftime("%Y-%m-%d %H:%M:%S"),
+                            event_type, include_events
                         )
                     
                     messages, total_found, target = self._query_around_time(
                         cursor, channel, target_time, context_minutes,
-                        nick, search_term, include_bot, limit
+                        nick, search_term, include_bot, limit,
+                        event_type, include_events
                     )
                     
                     return self._format_messages(
                         messages, total_found, limit,
-                        context_mode=True, target_time=target
+                        context_mode=True, target_time=target,
+                        is_event_query=is_event_query
                     )
                     
             except sqlite3.Error as e:
@@ -500,11 +565,13 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
                     time_desc = time_range.replace("_", " ")
                     return self._get_stats(
                         cursor, channel, start_time_str, nick,
-                        search_term, include_bot, time_desc
+                        search_term, include_bot, time_desc,
+                        None, event_type, include_events
                     )
                 
                 where_clause, params = self._build_where_clause(
-                    channel, start_time_str, nick, search_term, include_bot
+                    channel, start_time_str, nick, search_term, include_bot,
+                    None, event_type, include_events
                 )
                 
                 cursor.execute(
@@ -513,8 +580,9 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
                 )
                 total_found = cursor.fetchone()[0]
                 
+                # Include event_type in select
                 query = f"""
-                    SELECT timestamp, nick, content
+                    SELECT timestamp, nick, content, COALESCE(event_type, '') as event_type
                     FROM messages
                     WHERE {where_clause}
                     ORDER BY timestamp DESC
@@ -525,7 +593,7 @@ New: Use semantic=true to find concepts instead of exact words (e.g. "cats" find
                 cursor.execute(query, params)
                 messages = list(reversed(cursor.fetchall()))
                 
-                return self._format_messages(messages, total_found, limit)
+                return self._format_messages(messages, total_found, limit, is_event_query=is_event_query)
                 
         except sqlite3.Error as e:
             return f"Error querying database: {e}"

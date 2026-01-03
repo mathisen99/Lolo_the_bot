@@ -319,6 +319,15 @@ func (cm *ConnectionManager) handleNickChange(msg *irc.Message) {
 	if len(msg.Params) > 0 {
 		oldNick := msg.Name
 		newNick := msg.Params[0]
+		hostmask := msg.User + "@" + msg.Host
+
+		// Log the nick change event
+		if cm.db != nil {
+			content := fmt.Sprintf("%s is now known as %s", oldNick, newNick)
+			if err := cm.db.LogEvent(database.EventTypeNickChange, "", oldNick, hostmask, content); err != nil {
+				cm.logger.Warning("Failed to log nick change event: %v", err)
+			}
+		}
 
 		// Check if it's our own nick change
 		if oldNick == cm.currentNick {
@@ -357,6 +366,19 @@ func (cm *ConnectionManager) handleNickChange(msg *irc.Message) {
 // handleQuit handles QUIT messages
 func (cm *ConnectionManager) handleQuit(msg *irc.Message) {
 	nick := msg.Name
+	hostmask := msg.User + "@" + msg.Host
+	reason := msg.Trailing()
+
+	// Log the quit event
+	if cm.db != nil {
+		content := fmt.Sprintf("%s has quit", nick)
+		if reason != "" {
+			content = fmt.Sprintf("%s has quit (%s)", nick, reason)
+		}
+		if err := cm.db.LogEvent(database.EventTypeQuit, "", nick, hostmask, content); err != nil {
+			cm.logger.Warning("Failed to log quit event: %v", err)
+		}
+	}
 
 	// Notify netsplit detector of the quit (for netsplit detection)
 	cm.netsplitDetector.OnQuit(nick)
@@ -402,6 +424,7 @@ func (cm *ConnectionManager) handleJoin(msg *irc.Message) {
 	if len(msg.Params) > 0 {
 		channel := msg.Params[0]
 		nick := msg.Name
+		hostmask := msg.User + "@" + msg.Host
 
 		if nick == cm.currentNick {
 			// Notify channel manager
@@ -416,6 +439,14 @@ func (cm *ConnectionManager) handleJoin(msg *irc.Message) {
 				cm.channelUserTracker.OnJoin(channel, nick, true)
 			}
 		} else {
+			// Log the join event
+			if cm.db != nil {
+				content := fmt.Sprintf("%s has joined %s", nick, channel)
+				if err := cm.db.LogEvent(database.EventTypeJoin, channel, nick, hostmask, content); err != nil {
+					cm.logger.Warning("Failed to log join event: %v", err)
+				}
+			}
+
 			// Notify netsplit detector of the join (for netsplit recovery detection)
 			cm.netsplitDetector.OnJoin(nick)
 			cm.logger.Info("%s joined %s", nick, channel)
@@ -433,6 +464,8 @@ func (cm *ConnectionManager) handlePart(msg *irc.Message) {
 	if len(msg.Params) > 0 {
 		channel := msg.Params[0]
 		nick := msg.Name
+		hostmask := msg.User + "@" + msg.Host
+		reason := msg.Trailing()
 
 		if nick == cm.currentNick {
 			// Notify channel manager
@@ -443,6 +476,17 @@ func (cm *ConnectionManager) handlePart(msg *irc.Message) {
 				cm.channelUserTracker.OnPart(channel, nick, true)
 			}
 		} else {
+			// Log the part event
+			if cm.db != nil {
+				content := fmt.Sprintf("%s has left %s", nick, channel)
+				if reason != "" {
+					content = fmt.Sprintf("%s has left %s (%s)", nick, channel, reason)
+				}
+				if err := cm.db.LogEvent(database.EventTypePart, channel, nick, hostmask, content); err != nil {
+					cm.logger.Warning("Failed to log part event: %v", err)
+				}
+			}
+
 			cm.logger.Info("%s left %s", nick, channel)
 
 			// Notify tracker (other user left)
@@ -459,6 +503,19 @@ func (cm *ConnectionManager) handleKick(msg *irc.Message) {
 		channel := msg.Params[0]
 		kicked := msg.Params[1]
 		reason := msg.Trailing()
+		kicker := msg.Name
+		kickerHostmask := msg.User + "@" + msg.Host
+
+		// Log the kick event (for both bot and other users)
+		if cm.db != nil {
+			content := fmt.Sprintf("%s was kicked from %s by %s", kicked, channel, kicker)
+			if reason != "" {
+				content = fmt.Sprintf("%s was kicked from %s by %s (%s)", kicked, channel, kicker, reason)
+			}
+			if err := cm.db.LogEvent(database.EventTypeKick, channel, kicked, kickerHostmask, content); err != nil {
+				cm.logger.Warning("Failed to log kick event: %v", err)
+			}
+		}
 
 		if kicked == cm.currentNick {
 			// Notify channel manager
@@ -744,6 +801,8 @@ func (cm *ConnectionManager) handleMode(msg *irc.Message) {
 	channel := target
 	modeString := msg.Params[1]
 	modeArgs := msg.Params[2:] // Targets for the modes
+	setter := msg.Name
+	setterHostmask := msg.User + "@" + msg.Host
 
 	// Parse mode changes
 	adding := true
@@ -763,6 +822,20 @@ func (cm *ConnectionManager) handleMode(msg *irc.Message) {
 				// Check if this affects the bot
 				isSelf := strings.EqualFold(nick, cm.currentNick)
 
+				// Log the mode change event
+				if cm.db != nil {
+					modeChar := string(char)
+					var content string
+					if adding {
+						content = fmt.Sprintf("%s sets mode +%s on %s", setter, modeChar, nick)
+					} else {
+						content = fmt.Sprintf("%s sets mode -%s on %s", setter, modeChar, nick)
+					}
+					if err := cm.db.LogEvent(database.EventTypeMode, channel, nick, setterHostmask, content); err != nil {
+						cm.logger.Warning("Failed to log mode event: %v", err)
+					}
+				}
+
 				// Notify tracker
 				if cm.channelUserTracker != nil {
 					cm.channelUserTracker.OnMode(channel, nick, string(char), adding, isSelf)
@@ -776,7 +849,28 @@ func (cm *ConnectionManager) handleMode(msg *irc.Message) {
 					cm.logger.Info("Mode -%s removed from %s in %s", modeChar, nick, channel)
 				}
 			}
-		case 'b', 'q', 'e', 'I': // Ban, quiet, exempt, invite - these take a mask argument
+		case 'b': // Ban - log ban/unban events
+			if argIndex < len(modeArgs) {
+				mask := modeArgs[argIndex]
+				argIndex++
+
+				// Log ban/unban events
+				if cm.db != nil {
+					var content string
+					var eventType string
+					if adding {
+						content = fmt.Sprintf("%s sets ban +b %s", setter, mask)
+						eventType = database.EventTypeBan
+					} else {
+						content = fmt.Sprintf("%s removes ban -b %s", setter, mask)
+						eventType = database.EventTypeUnban
+					}
+					if err := cm.db.LogEvent(eventType, channel, mask, setterHostmask, content); err != nil {
+						cm.logger.Warning("Failed to log ban event: %v", err)
+					}
+				}
+			}
+		case 'q', 'e', 'I': // Quiet, exempt, invite - these take a mask argument
 			if argIndex < len(modeArgs) {
 				argIndex++ // Skip the mask, we don't track these
 			}
@@ -802,8 +896,18 @@ func (cm *ConnectionManager) handleTopicChange(msg *irc.Message) {
 
 	channel := msg.Params[0]
 	topic := msg.Trailing()
+	setter := msg.Name
+	setterHostmask := msg.User + "@" + msg.Host
 
 	cm.logger.Info("Topic in %s changed to: %s", channel, topic)
+
+	// Log the topic change event
+	if cm.db != nil {
+		content := fmt.Sprintf("%s changed topic to: %s", setter, topic)
+		if err := cm.db.LogEvent(database.EventTypeTopic, channel, setter, setterHostmask, content); err != nil {
+			cm.logger.Warning("Failed to log topic event: %v", err)
+		}
+	}
 
 	// Notify tracker
 	if cm.channelUserTracker != nil {

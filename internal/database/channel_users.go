@@ -538,3 +538,113 @@ func (db *DB) FindUserChannels(nick string) ([]string, error) {
 
 	return channels, nil
 }
+
+// GetChannelUserNicks returns all nicks in a channel
+func (db *DB) GetChannelUserNicks(channel string) ([]string, error) {
+	channel = strings.ToLower(channel)
+
+	rows, err := db.conn.Query(`
+		SELECT nick FROM channel_users WHERE channel = ? ORDER BY nick
+	`, channel)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query channel user nicks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var nicks []string
+	for rows.Next() {
+		var nick string
+		if err := rows.Scan(&nick); err != nil {
+			return nil, fmt.Errorf("failed to scan nick: %w", err)
+		}
+		nicks = append(nicks, nick)
+	}
+
+	return nicks, nil
+}
+
+// GetChannelRegularUsers returns users without op, halfop, or voice in a channel
+func (db *DB) GetChannelRegularUsers(channel string) ([]string, error) {
+	channel = strings.ToLower(channel)
+
+	rows, err := db.conn.Query(`
+		SELECT nick FROM channel_users 
+		WHERE channel = ? AND is_op = FALSE AND is_halfop = FALSE AND is_voice = FALSE
+		ORDER BY nick
+	`, channel)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query regular users: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var nicks []string
+	for rows.Next() {
+		var nick string
+		if err := rows.Scan(&nick); err != nil {
+			return nil, fmt.Errorf("failed to scan nick: %w", err)
+		}
+		nicks = append(nicks, nick)
+	}
+
+	return nicks, nil
+}
+
+// SearchChannelUsers searches for users in a channel by nick pattern (case-insensitive LIKE)
+func (db *DB) SearchChannelUsers(channel, pattern string) ([]ChannelUser, error) {
+	channel = strings.ToLower(channel)
+
+	rows, err := db.conn.Query(`
+		SELECT id, channel, nick, is_op, is_halfop, is_voice, 
+		       COALESCE(hostmask, ''), COALESCE(account, ''),
+		       joined_at, updated_at
+		FROM channel_users 
+		WHERE channel = ? AND nick LIKE ? COLLATE NOCASE
+		ORDER BY nick
+	`, channel, pattern)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search channel users: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var users []ChannelUser
+	for rows.Next() {
+		var u ChannelUser
+		err := rows.Scan(&u.ID, &u.Channel, &u.Nick, &u.IsOp, &u.IsHalfop, &u.IsVoice,
+			&u.Hostmask, &u.Account, &u.JoinedAt, &u.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan channel user: %w", err)
+		}
+		users = append(users, u)
+	}
+
+	return users, nil
+}
+
+// SearchUsersGlobal searches for users across all channels by nick pattern
+func (db *DB) SearchUsersGlobal(pattern string) ([]ChannelUser, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, channel, nick, is_op, is_halfop, is_voice, 
+		       COALESCE(hostmask, ''), COALESCE(account, ''),
+		       joined_at, updated_at
+		FROM channel_users 
+		WHERE nick LIKE ? COLLATE NOCASE
+		ORDER BY nick, channel
+	`, pattern)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search users globally: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var users []ChannelUser
+	for rows.Next() {
+		var u ChannelUser
+		err := rows.Scan(&u.ID, &u.Channel, &u.Nick, &u.IsOp, &u.IsHalfop, &u.IsVoice,
+			&u.Hostmask, &u.Account, &u.JoinedAt, &u.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan channel user: %w", err)
+		}
+		users = append(users, u)
+	}
+
+	return users, nil
+}

@@ -243,6 +243,12 @@ func (s *Server) executeCommand(req IRCExecuteRequest) (string, error) {
 		return s.executeChannelTopic(req.Args)
 	case "find_user":
 		return s.executeFindUser(req.Args)
+	case "channel_users":
+		return s.executeChannelUsers(req.Args)
+	case "channel_regular_users":
+		return s.executeChannelRegularUsers(req.Args)
+	case "search_users":
+		return s.executeSearchUsers(req.Args)
 
 	default:
 		return "", fmt.Errorf("unknown command: %s", req.Command)
@@ -513,4 +519,126 @@ func (s *Server) executeFindUser(args []string) (string, error) {
 	}
 
 	return fmt.Sprintf("%s is in %d channel(s): %s", nick, len(channels), strings.Join(channels, ", ")), nil
+}
+
+// executeChannelUsers returns all users in a channel
+func (s *Server) executeChannelUsers(args []string) (string, error) {
+	if len(args) < 1 {
+		return "", fmt.Errorf("channel_users requires a channel argument")
+	}
+
+	if s.db == nil {
+		return "", fmt.Errorf("database not available")
+	}
+
+	channel := args[0]
+	nicks, err := s.db.GetChannelUserNicks(channel)
+	if err != nil {
+		return "", fmt.Errorf("failed to get channel users: %w", err)
+	}
+
+	if len(nicks) == 0 {
+		return fmt.Sprintf("No users tracked in %s (bot may not be in channel)", channel), nil
+	}
+
+	return fmt.Sprintf("Users in %s (%d): %s", channel, len(nicks), strings.Join(nicks, ", ")), nil
+}
+
+// executeChannelRegularUsers returns users without op/halfop/voice in a channel
+func (s *Server) executeChannelRegularUsers(args []string) (string, error) {
+	if len(args) < 1 {
+		return "", fmt.Errorf("channel_regular_users requires a channel argument")
+	}
+
+	if s.db == nil {
+		return "", fmt.Errorf("database not available")
+	}
+
+	channel := args[0]
+	nicks, err := s.db.GetChannelRegularUsers(channel)
+	if err != nil {
+		return "", fmt.Errorf("failed to get regular users: %w", err)
+	}
+
+	if len(nicks) == 0 {
+		return fmt.Sprintf("No regular users (without +o/+h/+v) in %s", channel), nil
+	}
+
+	return fmt.Sprintf("Regular users in %s (no +o/+h/+v) (%d): %s", channel, len(nicks), strings.Join(nicks, ", ")), nil
+}
+
+// executeSearchUsers searches for users by nick pattern
+func (s *Server) executeSearchUsers(args []string) (string, error) {
+	if len(args) < 1 {
+		return "", fmt.Errorf("search_users requires a pattern argument (use %% as wildcard)")
+	}
+
+	if s.db == nil {
+		return "", fmt.Errorf("database not available")
+	}
+
+	pattern := args[0]
+	var channel string
+	if len(args) >= 2 {
+		channel = args[1]
+	}
+
+	// Convert * to % for SQL LIKE if user uses glob-style
+	pattern = strings.ReplaceAll(pattern, "*", "%")
+
+	// Ensure pattern has wildcards
+	if !strings.Contains(pattern, "%") {
+		pattern = "%" + pattern + "%"
+	}
+
+	if channel != "" {
+		// Search in specific channel
+		users, err := s.db.SearchChannelUsers(channel, pattern)
+		if err != nil {
+			return "", fmt.Errorf("failed to search users: %w", err)
+		}
+
+		if len(users) == 0 {
+			return fmt.Sprintf("No users matching '%s' in %s", pattern, channel), nil
+		}
+
+		// Build result with modes
+		var results []string
+		for _, u := range users {
+			prefix := ""
+			if u.IsOp {
+				prefix = "@"
+			} else if u.IsHalfop {
+				prefix = "%"
+			} else if u.IsVoice {
+				prefix = "+"
+			}
+			results = append(results, prefix+u.Nick)
+		}
+
+		return fmt.Sprintf("Users matching '%s' in %s (%d): %s", pattern, channel, len(users), strings.Join(results, ", ")), nil
+	}
+
+	// Search globally
+	users, err := s.db.SearchUsersGlobal(pattern)
+	if err != nil {
+		return "", fmt.Errorf("failed to search users: %w", err)
+	}
+
+	if len(users) == 0 {
+		return fmt.Sprintf("No users matching '%s' found", pattern), nil
+	}
+
+	// Group by nick with channels
+	nickChannels := make(map[string][]string)
+	for _, u := range users {
+		nickChannels[u.Nick] = append(nickChannels[u.Nick], u.Channel)
+	}
+
+	var results []string
+	for nick, channels := range nickChannels {
+		results = append(results, fmt.Sprintf("%s (%s)", nick, strings.Join(channels, ", ")))
+	}
+
+	return fmt.Sprintf("Users matching '%s' (%d): %s", pattern, len(nickChannels), strings.Join(results, "; ")), nil
 }

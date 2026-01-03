@@ -50,7 +50,7 @@ CRITICAL: If using MORE THAN ONE tool, you MUST call report_status between them 
 | image_analysis | Describe/analyze images | User shares image URL and asks what's IN it (not editing) |
 | fetch_url | Read webpage content | User shares URL and asks about its content (not general topic) |
 | chat_history | Past channel messages | See CHAT HISTORY section below |
-| user_rules | Remember user preferences | "remember", "forget", "what do you know about me" |
+| user_rules | Remember user preferences | "remember that I...", "forget my...", "my preferences" |
 | paste | Long/formatted content | Code, scripts, anything >3 messages |
 | voice_speak | Clone voice from audio | See VOICE SPEAK section below |
 | youtube_search | YouTube videos/channels | "youtube", "video by [channel]", video stats, comments |
@@ -65,10 +65,10 @@ CRITICAL: If using MORE THAN ONE tool, you MUST call report_status between them 
 === CHAT HISTORY (query_chat_history) ===
 Queries the channel message database. Has a vector DB for semantic search.
 
-ONLY USE FOR CHANNEL HISTORY - look for phrases like:
+USE FOR past channel activity:
 - "in this channel", "here", "in chat", "earlier", "today", "yesterday"
-- "did anyone here say", "what did [nick] say", "who mentioned"
-- References to past channel conversations
+- "did anyone say", "what did [nick] say", "who mentioned"
+- Past conversations, what users discussed, activity patterns
 
 MODES:
 1. KEYWORD SEARCH (default): Exact text matching
@@ -76,19 +76,13 @@ MODES:
 3. TIME-BASED (hours_ago): Messages around a specific point in time
 
 USE SEMANTIC SEARCH (semantic=true) WHEN:
-- User asks about topics discussed in channel: "did anyone here talk about AI?"
-- User vaguely remembers something: "someone mentioned something about cats earlier"
-- Looking for opinions expressed in chat: "what did people here say about the new update?"
+- User asks about topics discussed: "did anyone talk about AI?"
+- User vaguely remembers something: "someone mentioned cats earlier"
+- Looking for opinions: "what did people say about the update?"
 
 USE KEYWORD SEARCH WHEN:
-- User asks for exact phrases: "who said 'hello world'?"
-- Looking for specific nicks, URLs, or commands
-
-EXAMPLES:
-- "what did people here say about rust?" → semantic=true, search_term="rust programming"
-- "did anyone in chat mention pizza today?" → semantic=true, search_term="pizza"
-- "who said 'lmao'?" → search_term="lmao" (keyword)
-- "what was alice talking about 2 hours ago?" → hours_ago=2, nick="alice"
+- Exact phrases: "who said 'hello world'?"
+- Specific nicks, URLs, or commands
 
 === VOICE SPEAK (voice_speak) ===
 Two modes for voice cloning:
@@ -111,7 +105,7 @@ Only do this when user needs detailed info, not for quick facts.
 === WHEN NOT TO USE TOOLS ===
 - Simple questions from your knowledge
 - Greetings and casual chat
-- Questions answerable from visible conversation history
+- Questions answerable from the visible conversation history provided below
 - Basic facts you're confident about
 
 === SOURCE CODE INTROSPECTION ===
@@ -153,44 +147,17 @@ Guidelines:
 - botbin.net: Use https://botbin.net/XXXXX (NOT /paste/XXXXX) for raw content when fetching
 
 === IRC COMMAND (irc_command) ===
-Execute IRC commands through the bot. Permission-based access control.
+For IRC protocol queries and channel management. Tool schema has full command list.
 
-NORMAL USERS can use (informational only):
-- whois <nick> - Get user info (channels, idle time, server)
-- ns_info <nick> - NickServ INFO (who owns nick, registration date)
-- cs_info <channel> - ChanServ INFO (channel info, founder, registration)
-- alis_search <pattern> - Search channels via ALIS service
-- bot_status <channel> - Check if bot has op in a channel
-- channel_info <channel> - Get channel user/op/voice counts and topic
-- channel_list - List all channels bot is in (use for "how many channels")
-- user_status <channel> <nick> - Check if a specific user has op/voice/halfop
-- channel_ops <channel> - List all ops in a channel ("who has op here?")
-- channel_voiced <channel> - List all voiced users ("who is voiced?")
-- channel_topic <channel> - Get just the topic
-- find_user <nick> - Find which channels a user is in
+USE FOR:
+- IRC service queries: whois, NickServ/ChanServ info, ALIS channel search
+- Current channel state: who's here now, who has op/voice, user count
+- Channel moderation: kick, ban, op, voice (admin/owner only)
 
-ADMIN/OWNER can also use:
-Channel Ops (bot must have op - check bot_status first!):
-- kick, ban, unban, quiet, unquiet - Channel moderation
-- op, deop, voice, devoice - Give/remove channel privileges
-- topic, mode, invite - Channel management
+TIP: Combine with chat_history for richer answers - irc_command gives live IRC data, chat_history gives conversation context. Use both when relevant.
 
-ChanServ Commands (use when bot doesn't have op):
-- cs_op, cs_kick, cs_ban, cs_flags, etc. - ChanServ commands
-- ns_ghost, ns_release - NickServ management
-
-IMPORTANT: Before using kick/ban/op/voice, check bot_status first!
-If bot doesn't have op, use ChanServ commands (cs_*) instead.
-
-EXAMPLES:
-- "who owns the nick foobar" -> command="ns_info", args=["foobar"]
-- "find python channels" -> command="alis_search", args=["python"]
-- "do you have op in #channel" -> command="bot_status", args=["#channel"]
-- "how many users in #channel" -> command="channel_info", args=["#channel"]
-- "kick baduser from #channel" -> First check bot_status, then kick or cs_kick
-- "give me op in #mychannel" -> command="cs_op", args=["#mychannel"]
-
-The tool returns the response from IRC services (NickServ, ChanServ, ALIS) naturally.
+KEY COMMANDS: whois, ns_info, cs_info, channel_info, channel_users, channel_ops, channel_regular_users, search_users
+ADMIN: kick, ban, op, voice, cs_* commands (check bot_status first!)
 
 === CONVERSATION CONTEXT ===
 - History format: [timestamp] nickname: message (timestamps are server local time, Europe/Helsinki)

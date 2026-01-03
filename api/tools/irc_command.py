@@ -28,6 +28,7 @@ NORMAL_USER_COMMANDS = {
     # Bot channel/user database queries (anyone can ask)
     "bot_status", "channel_info", "channel_list", "user_status",
     "channel_ops", "channel_voiced", "channel_topic", "find_user",
+    "channel_users", "channel_regular_users", "search_users",
 }
 
 # Commands that require admin or owner
@@ -98,6 +99,10 @@ NORMAL USERS can use:
 - channel_voiced <channel> - List all voiced users in a channel
 - channel_topic <channel> - Get just the topic of a channel
 - find_user <nick> - Find which channels a user is in
+- channel_users <channel> - List ALL users in a channel
+- channel_regular_users <channel> - List users WITHOUT op/halfop/voice (regular users)
+- search_users <pattern> [channel] - Search users by nick pattern (* as wildcard)
+  Example: search_users "math*" or search_users "*bot*" "#mychannel"
 
 ADMIN/OWNER can also use:
 Channel Ops (bot must have op - use bot_status to check first!):
@@ -142,7 +147,10 @@ Examples:
 - "do you have op in #channel" -> command="bot_status", args=["#channel"]
 - "how many users in #channel" -> command="channel_info", args=["#channel"]
 - "kick baduser from #channel" -> First check bot_status, then kick or cs_kick
-- "give me op in #mychannel" -> command="cs_op", args=["#mychannel"]""",
+- "give me op in #mychannel" -> command="cs_op", args=["#mychannel"]
+- "list all users in #channel" -> command="channel_users", args=["#channel"]
+- "who doesn't have voice or op" -> command="channel_regular_users", args=["#channel"]
+- "find users with 'test' in nick" -> command="search_users", args=["*test*"]""",
             "parameters": {
                 "type": "object",
                 "properties": {

@@ -120,7 +120,7 @@ Returns a URL to the generated/edited image.""",
         prompt: str,
         input_image_urls: Optional[List[str]] = None,
         aspect_ratio: str = "1:1",
-        resolution: str = "2K",
+        resolution: str = "1K",
         **kwargs
     ) -> str:
         """

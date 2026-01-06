@@ -72,7 +72,7 @@ Returns a URL to the generated/edited image.""",
                     "resolution": {
                         "type": "string",
                         "enum": ["1K", "2K", "4K"],
-                        "description": "Output resolution. Higher = better quality but slower. Default: 2K"
+                        "description": "Output resolution. Higher = better quality but slower. Default: 1K"
                     }
                 },
                 "required": ["prompt"],

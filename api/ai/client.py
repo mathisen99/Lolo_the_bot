@@ -9,7 +9,7 @@ import json
 from openai import OpenAI
 from .config import AIConfig
 from .usage_tracker import log_usage, extract_usage_from_response
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, STATUS_UPDATE_MARKER
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, STATUS_UPDATE_MARKER
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -68,6 +68,8 @@ class AIClient:
                         tools_used.append('BUG_REPORT')
                     elif func_name == 'gpt_image':
                         tools_used.append('GPT_IMAGE')
+                    elif func_name == 'gemini_image':
+                        tools_used.append('GEMINI_IMAGE')
                     elif func_name == 'usage_stats':
                         tools_used.append('USAGE_STATS')
                     elif func_name == 'source_code':
@@ -153,6 +155,11 @@ class AIClient:
             gpt_image = GPTImageTool()
             self.tools[gpt_image.name] = gpt_image
             log_info("GPT Image tool enabled (gpt-image-1.5)")
+        
+        if self.config.gemini_image_enabled:
+            gemini_image = GeminiImageTool()
+            self.tools[gemini_image.name] = gemini_image
+            log_info("Gemini Image tool enabled (gemini-3-pro-image-preview)")
         
         if self.config.usage_stats_enabled:
             usage_stats = UsageStatsTool()

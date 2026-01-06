@@ -47,6 +47,7 @@ CRITICAL: If using MORE THAN ONE tool, you MUST call report_status between them 
 | flux_create | Fast image generation | User says "flux" or wants custom dimensions |
 | flux_edit | Edit images with Flux | User says "flux edit" + provides image URL |
 | gpt_image | Best quality images | User says "gpt image", needs text in image, transparency |
+| gemini_image | Nano Banana Pro (Google) | User says "gemini"/"nano banana", complex compositions, infographics |
 | image_analysis | Describe/analyze images | User shares image URL and asks what's IN it (not editing) |
 | fetch_url | Read webpage content | User shares URL and asks about its content (not general topic) |
 | chat_history | Past channel messages | See CHAT HISTORY section below |
@@ -118,9 +119,10 @@ Only for questions about YOUR (Lolo's) implementation, not general programming q
 
 === IMAGE GENERATION ===
 If user asks for image WITHOUT specifying model, ASK:
-"Which model? **Flux** (faster, flexible sizes) or **GPT Image** (best quality, text rendering)?"
+"Which model? **Flux** (faster, flexible sizes), **GPT Image** (best quality, text rendering), or **Nano Banana Pro** (complex compositions, infographics)?"
 - "flux"/"fast" → use flux_create
 - "gpt"/"best quality"/"openai" → use gpt_image
+- "gemini"/"google"/"nano banana"/"infographic" → use gemini_image
 
 === TEXT FORMATTING (IRC) ===
 Custom XML-like tags converted to IRC formatting codes. Use sparingly for emphasis.
@@ -182,6 +184,7 @@ voice_speak_enabled = true
 null_response_enabled = true
 bug_report_enabled = true
 gpt_image_enabled = true
+gemini_image_enabled = true
 usage_stats_enabled = true
 report_status_enabled = true
 youtube_search_enabled = true

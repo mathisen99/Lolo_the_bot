@@ -59,6 +59,7 @@ class AIConfig:
         self.null_response_enabled: bool = config["tools"].get("null_response_enabled", True)
         self.bug_report_enabled: bool = config["tools"].get("bug_report_enabled", True)
         self.gpt_image_enabled: bool = config["tools"].get("gpt_image_enabled", True)
+        self.gemini_image_enabled: bool = config["tools"].get("gemini_image_enabled", True)
         self.usage_stats_enabled: bool = config["tools"].get("usage_stats_enabled", True)
         self.youtube_search_enabled: bool = config["tools"].get("youtube_search_enabled", True)
         self.source_code_enabled: bool = config["tools"].get("source_code_enabled", True)
@@ -113,6 +114,8 @@ class AIConfig:
             tools.append("bug_report")
         if self.gpt_image_enabled:
             tools.append("gpt_image")
+        if self.gemini_image_enabled:
+            tools.append("gemini_image")
         if self.youtube_search_enabled:
             tools.append("youtube_search")
         if self.source_code_enabled:

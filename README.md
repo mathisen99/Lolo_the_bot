@@ -10,7 +10,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **Usage Tracking** - Track token usage and costs
 - **Web Search** - Real-time information lookup via Brave Search
 - **URL Fetching** - Retrieve and analyze web page content
-- **Image Generation** - Create images from text prompts (Flux AI, GPT Image 1.5)
+- **Image Generation** - Create images from text prompts (Flux AI, GPT Image 1.5, Nano Banana Pro)
 - **Image Editing** - Modify existing images with text instructions
 - **Image Analysis** - Describe images, solve visual puzzles, OCR text recognition
 - **Image Archiving** - Auto-download images from configured channels to local `img/` folder
@@ -48,6 +48,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **OpenAI API key** - For AI conversations and reasoning ([platform.openai.com](https://platform.openai.com))
 - **Black Forest Labs API key** - For Flux AI image generation/editing ([api.bfl.ml](https://api.bfl.ml))
 - **Botbin API key** - For file hosting (images, audio, text) - sign up at [botbin.net](https://botbin.net)
+- **Gemini API Key** - For Nano Banana Pro image generation ([ai.google.dev](https://ai.google.dev))
 - **Google API Key** - For YouTube Search (enable YouTube Data API v3 on Google Cloud Console)
 
 ### Installation
@@ -144,18 +145,23 @@ BFL_API_KEY=your-black-forest-labs-key-here
 
 # Required for file hosting (images, audio, text)
 BOTBIN_API_KEY=your-botbin-api-key-here
+
+# Required for Nano Banana Pro image generation (Gemini)
+GEMINI_API_KEY=your-gemini-api-key-here
 ```
 
 **Where to get API keys:**
 - **OpenAI**: Sign up at [platform.openai.com](https://platform.openai.com) → API Keys
 - **Black Forest Labs**: Get free credits at [api.bfl.ml](https://api.bfl.ml) → Sign up
 - **Botbin**: Sign up at [botbin.net](https://botbin.net) → Request token from dashboard
+- **Gemini**: Get API key at [ai.google.dev](https://ai.google.dev) → Get API key
 
 Alternatively, export them as environment variables:
 ```bash
 export OPENAI_API_KEY="sk-your-openai-key-here"
 export BFL_API_KEY="your-black-forest-labs-key-here"
 export BOTBIN_API_KEY="your-botbin-api-key-here"
+export GEMINI_API_KEY="your-gemini-api-key-here"
 export GOOGLE_API_KEY="your-google-api-key-here"
 ```
 
@@ -220,6 +226,7 @@ The bot has access to these tools when mentioned:
 | **Voice Cloning** | Clone voices and generate speech | "clone this voice and say hello" |
 | **YouTube Search** | Search videos and comments | "search youtube for funny cats" |
 | **GPT Image 1.5** | High-quality image generation with text | "generate with GPT: a sign saying HELLO" |
+| **Nano Banana Pro** | Google's advanced image generation | "generate with gemini: an infographic about AI" |
 | **Usage Stats** | Check costs and token usage | "how much have I spent today?" |
 | **Bug Report** | Report issues with the bot | "I want to report a bug: image generation fails" |
 | **IRC Commands** | Query IRC services and channel info | "who owns nick foobar", "do you have op here" |
@@ -396,6 +403,7 @@ Edit `.env` and add your API keys:
 OPENAI_API_KEY=sk-your-actual-key-here
 BFL_API_KEY=your-actual-bfl-key-here
 BOTBIN_API_KEY=your-actual-botbin-key-here
+GEMINI_API_KEY=your-actual-gemini-key-here
 GOOGLE_API_KEY=your-actual-google-key-here
 ```
 
@@ -466,6 +474,7 @@ fetch_url_enabled = true       # URL content retrieval
 flux_create_enabled = true     # Image generation (Flux)
 flux_edit_enabled = true       # Image editing (Flux)
 gpt_image_enabled = true       # High quality image generation (GPT Image 1.5)
+gemini_image_enabled = true    # Nano Banana Pro image generation (Gemini)
 image_analysis_enabled = true  # Image analysis/OCR
 python_exec_enabled = true     # Python code execution
 paste_enabled = true           # Text pasting to botbin.net
@@ -488,7 +497,7 @@ source_code_enabled = true     # Source code introspection
 
 | File | Purpose | Required |
 |------|---------|----------|
-| `.env` | API keys (OpenAI, BFL, Botbin, Google) | Yes |
+| `.env` | API keys (OpenAI, BFL, Botbin, Gemini, Google) | Yes |
 | `config/bot.toml` | IRC server, nickname, channels, auth | Yes |
 | `api/config/ai_settings.toml` | AI personality, tools, system prompt | Optional (has defaults) |
 

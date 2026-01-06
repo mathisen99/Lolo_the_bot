@@ -1,7 +1,7 @@
 """
 Tools module for AI assistant.
 
-Provides web search, Python execution, image generation/editing, image analysis, URL fetching, user rules, chat history, paste, shell execution, voice cloning, null response, bug reporting, GPT image, usage statistics, source code introspection, and IRC command capabilities.
+Provides web search, Python execution, image generation/editing, image analysis, URL fetching, user rules, chat history, paste, shell execution, voice cloning, null response, bug reporting, GPT image, Gemini image, usage statistics, source code introspection, and IRC command capabilities.
 """
 
 from .web_search import WebSearchTool
@@ -18,10 +18,11 @@ from .voice_speak import VoiceSpeakTool
 from .null_response import NullResponseTool, NULL_RESPONSE_MARKER
 from .bug_report import BugReportTool
 from .gpt_image import GPTImageTool
+from .gemini_image import GeminiImageTool
 from .usage_stats import UsageStatsTool
 from .report_status import ReportStatusTool, STATUS_UPDATE_MARKER
 from .youtube_search import YouTubeSearchTool
 from .source_code import SourceCodeTool
 from .irc_command import IRCCommandTool
 
-__all__ = ["WebSearchTool", "PythonExecTool", "FluxCreateTool", "FluxEditTool", "ImageAnalysisTool", "FetchUrlTool", "UserRulesTool", "ChatHistoryTool", "PasteTool", "ShellExecTool", "VoiceSpeakTool", "NullResponseTool", "NULL_RESPONSE_MARKER", "BugReportTool", "GPTImageTool", "UsageStatsTool", "ReportStatusTool", "YouTubeSearchTool", "SourceCodeTool", "IRCCommandTool", "STATUS_UPDATE_MARKER", "Tool"]
+__all__ = ["WebSearchTool", "PythonExecTool", "FluxCreateTool", "FluxEditTool", "ImageAnalysisTool", "FetchUrlTool", "UserRulesTool", "ChatHistoryTool", "PasteTool", "ShellExecTool", "VoiceSpeakTool", "NullResponseTool", "NULL_RESPONSE_MARKER", "BugReportTool", "GPTImageTool", "GeminiImageTool", "UsageStatsTool", "ReportStatusTool", "YouTubeSearchTool", "SourceCodeTool", "IRCCommandTool", "STATUS_UPDATE_MARKER", "Tool"]

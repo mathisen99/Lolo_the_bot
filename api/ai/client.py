@@ -9,7 +9,7 @@ import json
 from openai import OpenAI
 from .config import AIConfig
 from .usage_tracker import log_usage, extract_usage_from_response
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, STATUS_UPDATE_MARKER
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -550,6 +550,18 @@ class AIClient:
                 log_info(f"[{request_id}] Executing {func_name} with args: {func_args}")
                 
                 try:
+                    # Check image rate limit for image tools
+                    if is_image_tool(func_name):
+                        allowed, rate_limit_msg = check_image_rate_limit(permission_level)
+                        if not allowed:
+                            log_warning(f"[{request_id}] Image rate limit reached for {func_name}")
+                            function_outputs.append({
+                                "type": "function_call_output",
+                                "call_id": call_id,
+                                "output": rate_limit_msg
+                            })
+                            continue
+                    
                     # Inject permission_level/context for specific tools
                     if func_name in ('manage_user_rules', 'execute_shell', 'bug_report', 'irc_command'):
                         func_args['permission_level'] = permission_level
@@ -559,6 +571,10 @@ class AIClient:
                     
                     # Execute the tool
                     result = tool.execute(**func_args)
+                    
+                    # Record successful image generation for rate limiting
+                    if is_image_tool(func_name) and not result.startswith("Error"):
+                        record_image_generation()
                     
                     # Check for status updates
                     if func_name == 'report_status' and result.startswith(STATUS_UPDATE_MARKER):

@@ -461,25 +461,69 @@ New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, 
                 if not include_bot:
                     conditions.append({"is_bot": False})
                 
-                where_clause = conditions[0] if len(conditions) == 1 else {"$and": conditions}
+                # Calculate time filter
+                start_time = self._get_start_time(time_range)
+                start_timestamp = int(start_time.timestamp())
+                
+                # Try to use timestamp_unix filter (for newer indexed messages)
+                # Fall back to post-filtering for older messages without this field
+                conditions.append({"timestamp_unix": {"$gte": start_timestamp}})
+                
+                where_clause = {"$and": conditions}
 
-                # Query
+                # Query - fetch more results to account for time filtering
+                fetch_limit = min((limit or 10) * 3, 100)
                 results = collection.query(
                     query_embeddings=[query_embedding],
-                    n_results=min(limit or 10, 20), # Cap semantic results for relevance
+                    n_results=fetch_limit,
                     where=where_clause,
                     include=['documents', 'metadatas', 'distances']
                 )
 
+                # If no results with timestamp_unix filter, try without it (older data)
                 if not results['documents'] or not results['documents'][0]:
-                    return "No relevant messages found."
+                    # Remove timestamp_unix condition and post-filter
+                    conditions = [c for c in conditions if 'timestamp_unix' not in str(c)]
+                    where_clause = {"$and": conditions} if len(conditions) > 1 else conditions[0]
+                    
+                    results = collection.query(
+                        query_embeddings=[query_embedding],
+                        n_results=fetch_limit,
+                        where=where_clause,
+                        include=['documents', 'metadatas', 'distances']
+                    )
+                    
+                    # Post-filter by timestamp string
+                    if results['documents'] and results['documents'][0]:
+                        start_time_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
+                        filtered_docs = []
+                        filtered_metas = []
+                        
+                        for i, doc in enumerate(results['documents'][0]):
+                            meta = results['metadatas'][0][i]
+                            ts = meta.get('timestamp', '')[:19]
+                            if ts >= start_time_str:
+                                filtered_docs.append(doc)
+                                filtered_metas.append(meta)
+                        
+                        results['documents'][0] = filtered_docs
+                        results['metadatas'][0] = filtered_metas
 
-                # Format results
+                if not results['documents'] or not results['documents'][0]:
+                    return f"No relevant messages found in {time_range.replace('_', ' ')}."
+
+                # Format results (limit to requested amount)
                 lines = []
-                lines.append(f"Semantic Search Results for '{search_term}':\n")
+                time_desc = time_range.replace('_', ' ')
+                result_limit = limit or 10
                 
-                for i, doc in enumerate(results['documents'][0]):
-                    meta = results['metadatas'][0][i]
+                docs_to_show = results['documents'][0][:result_limit]
+                metas_to_show = results['metadatas'][0][:result_limit]
+                
+                lines.append(f"Semantic Search Results for '{search_term}' ({time_desc}, {len(docs_to_show)} results):\n")
+                
+                for i, doc in enumerate(docs_to_show):
+                    meta = metas_to_show[i]
                     # Format timestamp
                     ts = meta.get('timestamp', 'Unknown')
                     if len(ts) >= 19: ts = ts[:19]

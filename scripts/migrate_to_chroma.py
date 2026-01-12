@@ -102,6 +102,7 @@ def migrate(limit=None, batch_size=100):
                 metadatas.append({
                     "original_id": msg_id,
                     "timestamp": timestamp,
+                    "timestamp_unix": int(time.mktime(time.strptime(timestamp[:19], "%Y-%m-%d %H:%M:%S"))) if timestamp else 0,
                     "channel": channel if channel else "PM",
                     "nick": nick,
                     "is_bot": bool(is_bot)

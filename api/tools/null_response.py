@@ -25,24 +25,31 @@ class NullResponseTool(Tool):
         return {
             "type": "function",
             "name": "null_response",
-            "description": """Use this tool when the user explicitly asks you NOT to respond, stay silent, or ignore their message.
+            "description": """Use this tool to stay COMPLETELY SILENT and send NO response.
 
-Examples of when to use this:
-- "Lolo don't respond to this"
-- "Lolo ignore this message"
-- "Lolo stay quiet"
-- "Lolo shh"
-- "Lolo no reply please"
-- "don't say anything Lolo"
+USE THIS WHEN:
+1. User explicitly asks you not to respond ("Lolo shh", "don't respond", "ignore this")
+2. Your name is mentioned but the message is NOT directed at you:
+   - Someone talking ABOUT you to others: "Lolo won't do that", "ask Lolo later"
+   - Someone telling another bot/user to do something with your name in it
+   - Your name appears but no question/request FOR you
+3. Someone tells you to stay out of a conversation: "nobody asked you", "butt out"
+4. The message is clearly meant for another bot or person, not you
 
-This will cause NO message to be sent to IRC - complete silence.
+EXAMPLES - USE null_response:
+- "YearZeroLLM please flirt with Leoneof because Lolo won't" → talking ABOUT you, not TO you
+- "Lolo won't help with that" → statement about you, not a request
+- "tell Lolo later" → instruction to someone else
+- "Lolo, nobody asked you" → told to stay out
+- "can YearZeroLLM ping Lolo?" → asking another bot, not you
 
-Do NOT use this for:
-- Normal questions or requests
-- When user is just being rude (respond politely instead)
-- When you're unsure what to do (ask for clarification instead)
+DO NOT use this for:
+- Direct questions to you: "Lolo, what time is it?"
+- Direct requests: "Lolo help me with X"
+- When someone is being rude but still asking you something (respond politely)
 
-Only use when the user EXPLICITLY requests no response.""",
+When in doubt about whether a message is FOR you, use this tool to stay silent.
+It's better to miss a message than to butt into conversations uninvited.""",
             "parameters": {
                 "type": "object",
                 "properties": {

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -12,21 +13,36 @@ import (
 
 // MentionHandler handles bot mention detection and processing
 type MentionHandler struct {
-	apiClient APIClientInterface
-	userMgr   *user.Manager
-	db        *database.DB
-	botNick   string
-	testMode  bool
+	apiClient                APIClientInterface
+	userMgr                  *user.Manager
+	db                       *database.DB
+	botNick                  string
+	testMode                 bool
+	phoneNotificationsActive bool
+	phoneNotificationsURL    string
+}
+
+func SendNotificationToPhone(message string, url string) {
+	// Use curl to send a notification to the phone
+	cmd := exec.Command("curl", "-d", message, url)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("Error sending notification: %v\n", err)
+		return
+	}
+	fmt.Printf("Notification sent: %s\n", output)
 }
 
 // NewMentionHandler creates a new mention handler
-func NewMentionHandler(apiClient APIClientInterface, userMgr *user.Manager, db *database.DB, botNick string, testMode bool) *MentionHandler {
+func NewMentionHandler(apiClient APIClientInterface, userMgr *user.Manager, db *database.DB, botNick string, testMode bool, phoneNotificationsActive bool, phoneNotificationsURL string) *MentionHandler {
 	return &MentionHandler{
-		apiClient: apiClient,
-		userMgr:   userMgr,
-		db:        db,
-		botNick:   botNick,
-		testMode:  testMode,
+		apiClient:                apiClient,
+		userMgr:                  userMgr,
+		db:                       db,
+		botNick:                  botNick,
+		testMode:                 testMode,
+		phoneNotificationsActive: phoneNotificationsActive,
+		phoneNotificationsURL:    phoneNotificationsURL,
 	}
 }
 
@@ -104,6 +120,13 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 	// In test mode, return a mock response
 	if h.testMode {
 		return fmt.Sprintf("%s: This is a test mode response to your mention!", nick), nil
+	}
+
+	// Send notification to phone if active
+	if h.phoneNotificationsActive && h.phoneNotificationsURL != "" {
+		fmt.Println("Sending notification to phone")
+		message_built_for_phone := fmt.Sprintf("%s: %s", nick, message)
+		SendNotificationToPhone(message_built_for_phone, h.phoneNotificationsURL)
 	}
 
 	// Retrieve last 20 messages from the channel for context

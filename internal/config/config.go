@@ -143,6 +143,10 @@ func DefaultConfig() *Config {
 			MaxRetries:              3,
 			RetryBackoffMS:          100, // initial backoff, doubles each retry
 		},
+		PhoneNotifications: PhoneNotificationsConfig{
+			Active: false,
+			URL:    "",
+		},
 	}
 }
 

@@ -175,17 +175,19 @@ func main() {
 
 	// Create message handler
 	handlerConfig := &handler.MessageHandlerConfig{
-		Dispatcher:            dispatcher,
-		APIClient:             apiClient,
-		UserManager:           userMgr,
-		DB:                    db,
-		Logger:                logger,
-		ErrorHandler:          errorHandler,
-		Splitter:              msgSplitter,
-		BotNick:               cfg.Server.Nickname,
-		CommandPrefix:         cfg.Bot.CommandPrefix,
-		TestMode:              cfg.Bot.TestMode,
-		ImageDownloadChannels: cfg.Images.DownloadChannels,
+		Dispatcher:               dispatcher,
+		APIClient:                apiClient,
+		UserManager:              userMgr,
+		DB:                       db,
+		Logger:                   logger,
+		ErrorHandler:             errorHandler,
+		Splitter:                 msgSplitter,
+		BotNick:                  cfg.Server.Nickname,
+		CommandPrefix:            cfg.Bot.CommandPrefix,
+		TestMode:                 cfg.Bot.TestMode,
+		ImageDownloadChannels:    cfg.Images.DownloadChannels,
+		PhoneNotificationsActive: cfg.PhoneNotifications.Active,
+		PhoneNotificationsURL:    cfg.PhoneNotifications.URL,
 	}
 	messageHandler := handler.NewMessageHandler(handlerConfig)
 

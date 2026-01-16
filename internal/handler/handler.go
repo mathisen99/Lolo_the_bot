@@ -40,17 +40,19 @@ type MessageHandler struct {
 
 // MessageHandlerConfig contains configuration for the message handler
 type MessageHandlerConfig struct {
-	Dispatcher            *commands.Dispatcher
-	APIClient             APIClientInterface
-	UserManager           *user.Manager
-	DB                    *database.DB
-	Logger                output.Logger
-	ErrorHandler          *errors.ErrorHandler
-	Splitter              *splitter.Splitter
-	BotNick               string
-	CommandPrefix         string
-	TestMode              bool
-	ImageDownloadChannels []string
+	Dispatcher               *commands.Dispatcher
+	APIClient                APIClientInterface
+	UserManager              *user.Manager
+	DB                       *database.DB
+	Logger                   output.Logger
+	ErrorHandler             *errors.ErrorHandler
+	Splitter                 *splitter.Splitter
+	BotNick                  string
+	CommandPrefix            string
+	TestMode                 bool
+	ImageDownloadChannels    []string
+	PhoneNotificationsActive bool
+	PhoneNotificationsURL    string
 }
 
 // NewMessageHandler creates a new message handler
@@ -61,6 +63,8 @@ func NewMessageHandler(config *MessageHandlerConfig) *MessageHandler {
 		config.DB,
 		config.BotNick,
 		config.TestMode,
+		config.PhoneNotificationsActive,
+		config.PhoneNotificationsURL,
 	)
 
 	return &MessageHandler{

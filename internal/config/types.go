@@ -4,19 +4,26 @@ import "time"
 
 // Config represents the complete bot configuration
 type Config struct {
-	Server   ServerConfig   `toml:"server"`
-	Auth     AuthConfig     `toml:"auth"`
-	Bot      BotConfig      `toml:"bot"`
-	Limits   LimitsConfig   `toml:"limits"`
-	Database DatabaseConfig `toml:"database"`
-	Logging  LoggingConfig  `toml:"logging"`
-	API      APIConfig      `toml:"api"`
-	Images   ImagesConfig   `toml:"images"`
+	Server             ServerConfig             `toml:"server"`
+	Auth               AuthConfig               `toml:"auth"`
+	Bot                BotConfig                `toml:"bot"`
+	Limits             LimitsConfig             `toml:"limits"`
+	Database           DatabaseConfig           `toml:"database"`
+	Logging            LoggingConfig            `toml:"logging"`
+	API                APIConfig                `toml:"api"`
+	Images             ImagesConfig             `toml:"images"`
+	PhoneNotifications PhoneNotificationsConfig `toml:"phone_notifications"`
 }
 
 // ImagesConfig contains image download settings
 type ImagesConfig struct {
 	DownloadChannels []string `toml:"download_channels"`
+}
+
+// PhoneNotificationsConfig contains phone notification settings
+type PhoneNotificationsConfig struct {
+	Active bool   `toml:"active"`
+	URL    string `toml:"url"`
 }
 
 // ServerConfig contains IRC server connection settings

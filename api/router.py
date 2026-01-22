@@ -60,6 +60,7 @@ class MentionRequest(BaseModel):
     message: str = Field(..., description="Full message containing the mention")
     permission_level: str = Field(default="normal", description="User permission level: owner, admin, normal, ignored")
     history: Optional[List[HistoryMessage]] = Field(default=None, description="Recent conversation history")
+    deep_mode: bool = Field(default=False, description="Enable deep research mode with high reasoning")
 
 
 class MentionResponse(BaseModel):
@@ -364,7 +365,8 @@ async def handle_mention_stream(request: MentionRequest):
     import queue
     
     console.print(f"[cyan]→[/cyan] Streaming mention request [dim]{request.request_id}[/dim]: "
-                  f"from {request.nick} in {request.channel}")
+                  f"from {request.nick} in {request.channel}" + 
+                  (" [DEEP MODE]" if request.deep_mode else ""))
     
     async def generate_chunks():
         """Async generator that yields mention response chunks."""
@@ -387,7 +389,8 @@ async def handle_mention_stream(request: MentionRequest):
                     channel=request.channel,
                     conversation_history=request.history if request.history else [],
                     permission_level=request.permission_level,
-                    request_id=request.request_id
+                    request_id=request.request_id,
+                    deep_mode=request.deep_mode
                 )
                 
                 for event in generator:

@@ -136,10 +136,20 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 		// Strip the flag from the message
 		message = strings.ReplaceAll(message, "--no-context", "")
 		message = strings.TrimSpace(message)
-		// Clean up any double spaces left behind
-		for strings.Contains(message, "  ") {
-			message = strings.ReplaceAll(message, "  ", " ")
-		}
+	}
+
+	// Check for --deep flag (deep research mode)
+	deepMode := false
+	if strings.Contains(message, "--deep") {
+		deepMode = true
+		// Strip the flag from the message
+		message = strings.ReplaceAll(message, "--deep", "")
+		message = strings.TrimSpace(message)
+	}
+
+	// Clean up any double spaces left behind from flag removal
+	for strings.Contains(message, "  ") {
+		message = strings.ReplaceAll(message, "  ", " ")
 	}
 
 	// Retrieve conversation history unless --no-context was specified
@@ -160,7 +170,7 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 	startTime := time.Now()
 
 	// Use SendMentionStream to get updates
-	respChan, err := h.apiClient.SendMentionStream(ctx, message, nick, hostmask, channel, permissionLevel, conversationHistory)
+	respChan, err := h.apiClient.SendMentionStream(ctx, message, nick, hostmask, channel, permissionLevel, conversationHistory, deepMode)
 	if err != nil {
 		// Record error metric (Requirement 30.3)
 		if errRecordErr := h.db.RecordError("mention_api_failed"); errRecordErr != nil {

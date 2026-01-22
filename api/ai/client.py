@@ -249,16 +249,33 @@ class AIClient:
         channel: str,
         conversation_history: list,
         permission_level: str,
-        request_id: str
+        request_id: str,
+        deep_mode: bool = False
     ):
         """
         Generate AI response with conversation context, streaming updates.
+        
+        Args:
+            deep_mode: If True, uses high reasoning effort and deep research instructions
         
         Yields:
             Dict containing 'status' and 'message' keys.
             status: "processing" for intermediate updates, "success" or "error" for final
         """
-        log_info(f"[{request_id}] Generating AI response with context (permission: {permission_level})")
+        log_info(f"[{request_id}] Generating AI response with context (permission: {permission_level})" +
+                 (" [DEEP MODE]" if deep_mode else ""))
+        
+        # Check deep mode rate limit before proceeding
+        if deep_mode:
+            from api.tools.deep_mode_limit import check_deep_mode_limit, record_deep_mode_usage
+            allowed, limit_msg = check_deep_mode_limit(nick, permission_level)
+            if not allowed:
+                log_warning(f"[{request_id}] Deep mode rate limit reached for {nick}")
+                yield {
+                    "status": "error",
+                    "message": limit_msg
+                }
+                return
         
         try:
             # Build tool definitions
@@ -269,18 +286,25 @@ class AIClient:
                 user_message, 
                 nick, 
                 channel, 
-                conversation_history
+                conversation_history,
+                deep_mode=deep_mode
             )
+            
+            # Override settings for deep mode
+            reasoning_effort = "high" if deep_mode else self.config.reasoning_effort
+            max_tokens = 16000 if deep_mode else self.config.max_output_tokens
+            # Deep mode gets 8 minute timeout (vs 4 min normal) for thorough research
+            request_timeout = 480 if deep_mode else self.config.timeout
             
             # Make API request with extended cache retention for better prefix caching
             response = self.client.responses.create(
                 model=self.config.model_name,
                 input=full_input,
-                reasoning={"effort": self.config.reasoning_effort},
+                reasoning={"effort": reasoning_effort},
                 text={"verbosity": self.config.verbosity},
-                max_output_tokens=self.config.max_output_tokens,
+                max_output_tokens=max_tokens,
                 tools=tool_defs if tool_defs else None,
-                timeout=self.config.timeout,
+                timeout=request_timeout,
                 prompt_cache_retention="24h"
             )
             
@@ -289,7 +313,7 @@ class AIClient:
             
             # Handle function calls with streaming support
             response_generator = self._handle_function_calls_stream(
-                response, full_input, request_id, permission_level, nick, channel
+                response, full_input, request_id, permission_level, nick, channel, deep_mode
             )
             
             final_response = None
@@ -360,6 +384,13 @@ class AIClient:
                 return
             
             log_info(f"[{request_id}] AI response generated successfully")
+            
+            # Record deep mode usage after successful completion
+            if deep_mode:
+                from api.tools.deep_mode_limit import record_deep_mode_usage
+                record_deep_mode_usage(nick, permission_level)
+                log_info(f"[{request_id}] Deep mode usage recorded for {nick}")
+            
             yield {
                 "status": "success",
                 "message": cleaned_text
@@ -381,14 +412,15 @@ class AIClient:
         channel: str,
         conversation_history: list,
         permission_level: str,
-        request_id: str
+        request_id: str,
+        deep_mode: bool = False
     ) -> str:
         """
         Legacy blocking method for backward compatibility.
         Wraps the streaming method and just returns the final result.
         """
         generator = self.generate_response_with_context_stream(
-            user_message, nick, channel, conversation_history, permission_level, request_id
+            user_message, nick, channel, conversation_history, permission_level, request_id, deep_mode
         )
         
         final_message = "I couldn't generate a proper response."
@@ -417,14 +449,15 @@ class AIClient:
         
         return final_response, null_triggered, total_usage
 
-    def _handle_function_calls_stream(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal", nick: str = "", channel: str = ""):
+    def _handle_function_calls_stream(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal", nick: str = "", channel: str = "", deep_mode: bool = False):
         """
         Handle function calls in the response using multi-turn tool calling.
         Yields status events during execution.
         """
         import json
         
-        MAX_TOOL_ITERATIONS = 18  # Safety limit to prevent infinite loops
+        # Deep mode gets more iterations for thorough research (30 vs 18)
+        MAX_TOOL_ITERATIONS = 30 if deep_mode else 18
         iteration = 0
         null_response_triggered = False
         
@@ -711,7 +744,8 @@ class AIClient:
         user_message: str, 
         nick: str, 
         channel: str,
-        conversation_history: list
+        conversation_history: list,
+        deep_mode: bool = False
     ) -> str:
         """
         Build a prompt with conversation context.
@@ -726,12 +760,57 @@ class AIClient:
             nick: User who mentioned the bot
             channel: Channel where mention occurred
             conversation_history: List of recent messages
+            deep_mode: If True, inject deep research instructions
             
         Returns:
             Formatted prompt with context
         """
         # System prompt is static (no datetime injection) for better caching
         prompt_parts = [self.config.system_prompt, ""]
+        
+        # Inject deep research instructions if deep_mode is enabled
+        if deep_mode:
+            deep_instructions = """=== DEEP RESEARCH MODE ACTIVATED ===
+You are in DEEP RESEARCH MODE. This means the user wants a thorough, well-researched answer.
+
+**PROGRESS UPDATES (REQUIRED):**
+Use the report_status tool to announce what you're doing at each major step:
+- "Searching for information on [topic]..."
+- "Found relevant sources, analyzing..."
+- "Researching [specific aspect]..."
+- "Compiling findings into comprehensive answer..."
+This keeps the user informed during the longer research process.
+
+**THOROUGH RESEARCH:**
+Perform AT LEAST 2-3 web searches on different aspects of the topic:
+- Search for the main topic/question
+- Search for related concepts, alternatives, or comparisons  
+- Search for recent developments or expert opinions
+- Use fetch_url to read full articles when snippets aren't enough
+
+**USE ALL AVAILABLE TOOLS:**
+You have access to ALL tools in deep mode - use them as needed:
+- Web search for current information
+- Python execution for calculations, data analysis, code examples
+- Image analysis if images are involved
+- fetch_url to read full web pages
+- Any other tool that helps answer the question thoroughly
+
+**HIGH QUALITY OUTPUT:**
+- Include multiple perspectives where relevant
+- Cite sources and provide links
+- Structure with headers and sections
+- Include examples, explanations, and context
+
+**USE PASTE TOOL FOR FINAL ANSWER:**
+Your response will likely be long. Use the paste tool to create a formatted document 
+with your full answer. Return only the paste URL to IRC with a brief summary.
+
+Remember: Quality over speed. The user specifically requested deep research with --deep flag.
+=== END DEEP RESEARCH MODE ===
+"""
+            prompt_parts.append(deep_instructions)
+            prompt_parts.append("")
         
         # Inject user-specific rules if they exist and are enabled
         # Note: User rules are semi-stable (change rarely) so they're part of the prefix

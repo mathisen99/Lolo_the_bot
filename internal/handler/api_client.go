@@ -20,8 +20,8 @@ import (
 type APIClientInterface interface {
 	SendCommand(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool, timeout time.Duration) (*APIResponse, error)
 	SendCommandStream(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool, timeout time.Duration) (<-chan *APIResponse, error)
-	SendMention(ctx context.Context, message, nick, hostmask, channel, permissionLevel string, history []*database.Message) (*APIResponse, error)
-	SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel string, history []*database.Message) (<-chan *APIResponse, error)
+	SendMention(ctx context.Context, message, nick, hostmask, channel, permissionLevel string, history []*database.Message, deepMode bool) (*APIResponse, error)
+	SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel string, history []*database.Message, deepMode bool) (<-chan *APIResponse, error)
 	CheckHealth(ctx context.Context) (*HealthResponse, error)
 	GetCommands(ctx context.Context) (*CommandsResponse, error)
 	WaitForInflightRequests(timeout time.Duration) bool
@@ -86,6 +86,7 @@ type MentionRequest struct {
 	Channel         string           `json:"channel"`
 	PermissionLevel string           `json:"permission_level"`
 	History         []HistoryMessage `json:"history,omitempty"`
+	DeepMode        bool             `json:"deep_mode,omitempty"`
 }
 
 // APIResponse represents a response from the Python API
@@ -195,7 +196,7 @@ func (c *APIClient) SendCommandStream(ctx context.Context, command string, args 
 }
 
 // SendMention sends a mention request to the Python API with conversation history
-func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, channel, permissionLevel string, history []*database.Message) (*APIResponse, error) {
+func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, channel, permissionLevel string, history []*database.Message, deepMode bool) (*APIResponse, error) {
 	requestID := uuid.New().String()
 
 	// Convert database messages to API format
@@ -216,6 +217,7 @@ func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, ch
 		Channel:         channel,
 		PermissionLevel: permissionLevel,
 		History:         historyMessages,
+		DeepMode:        deepMode,
 	}
 
 	var response *APIResponse
@@ -237,7 +239,7 @@ func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, ch
 
 // SendMentionStream sends a streaming mention request to the Python API with conversation history
 // Returns a channel that receives response chunks as they arrive
-func (c *APIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel string, history []*database.Message) (<-chan *APIResponse, error) {
+func (c *APIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel string, history []*database.Message, deepMode bool) (<-chan *APIResponse, error) {
 	requestID := uuid.New().String()
 
 	// Convert database messages to API format
@@ -258,6 +260,7 @@ func (c *APIClient) SendMentionStream(ctx context.Context, message, nick, hostma
 		Channel:         channel,
 		PermissionLevel: permissionLevel,
 		History:         historyMessages,
+		DeepMode:        deepMode,
 	}
 
 	// Create channel for responses

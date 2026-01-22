@@ -23,8 +23,10 @@ func (cm *ConnectionManager) SetupBotMessageHandler(messageHandler *handler.Mess
 				handlerChannel = ""
 			}
 
-			// Process the message with timeout (4 minutes for complex multi-tool AI requests)
-			ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
+			// Process the message with timeout
+			// Use 8 minutes to accommodate --deep mode which does thorough research
+			// Normal requests complete much faster, deep mode is rate-limited (3/day)
+			ctx, cancel := context.WithTimeout(context.Background(), 480*time.Second)
 			defer cancel()
 
 			// Send responses back to IRC

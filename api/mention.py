@@ -42,6 +42,7 @@ def handle_mention(request: MentionRequest) -> MentionResponse:
     - Python execution for calculations and code examples
     - Concise responses optimized for IRC (max 3 messages)
     - Conversation history for context-aware responses
+    - Deep research mode for thorough, well-researched answers
     
     Args:
         request: MentionRequest containing mention details and conversation history
@@ -49,7 +50,8 @@ def handle_mention(request: MentionRequest) -> MentionResponse:
     Returns:
         MentionResponse with the bot's AI-generated reply
     """
-    log_info(f"[{request.request_id}] Processing mention from {request.nick} in {request.channel}")
+    log_info(f"[{request.request_id}] Processing mention from {request.nick} in {request.channel}" + 
+             (" [DEEP MODE]" if request.deep_mode else ""))
     
     # Log conversation history if provided
     if request.history:
@@ -66,7 +68,8 @@ def handle_mention(request: MentionRequest) -> MentionResponse:
             channel=request.channel,
             conversation_history=request.history,
             permission_level=request.permission_level,
-            request_id=request.request_id
+            request_id=request.request_id,
+            deep_mode=request.deep_mode
         )
         
         # Check for null response (user requested silence)

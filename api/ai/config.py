@@ -124,5 +124,5 @@ class AIConfig:
         if self.irc_command_enabled:
             tools.append("irc_command")
         if self.claude_code_enabled:
-            tools.append("claude_code")
+            tools.append("claude_tech")
         return tools

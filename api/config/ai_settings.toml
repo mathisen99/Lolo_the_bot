@@ -80,7 +80,7 @@ CRITICAL: If using MORE THAN ONE tool, you MUST call report_status between them 
 | usage_stats | Token/cost tracking | "my usage", "how much spent" |
 | bug_report | Report/manage bugs and feature requests | "report bug", "something broken", "this feature would be good to add" |
 | irc_command | IRC commands & services | See IRC COMMAND section below |
-| claude_code | Expert coding help | Complex programming questions, code review, debugging, architecture |
+| claude_tech | Expert tech help (Claude Opus) | Complex coding, Linux/Unix, networking, DevOps, sysadmin, debugging |
 | shell_exec | System commands | OWNER ONLY - server admin tasks |
 | null_response | Stay silent | Message not directed at you, told to stay out, name mentioned but not asked |
 | report_status | Progress updates | Between multiple tool calls, long tasks |

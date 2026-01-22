@@ -1,7 +1,8 @@
 """
-Claude Code tool implementation.
+Claude Tech tool implementation.
 
-Provides coding assistance using Claude Opus via AWS Bedrock.
+Provides expert technical assistance using Claude Opus via AWS Bedrock.
+Covers coding, Linux/Unix, networking, DevOps, sysadmin, and general tech.
 Long responses are automatically pasted to botbin.
 """
 
@@ -14,7 +15,7 @@ from .base import Tool
 
 
 class ClaudeCodeTool(Tool):
-    """Claude Opus coding assistant via AWS Bedrock."""
+    """Claude Opus technical expert via AWS Bedrock."""
     
     BEDROCK_REGION = "eu-west-1"
     BEDROCK_MODEL = "eu.anthropic.claude-opus-4-5-20251101-v1:0"
@@ -24,35 +25,45 @@ class ClaudeCodeTool(Tool):
     PASTE_THRESHOLD = 800
     
     def __init__(self):
-        """Initialize Claude code tool."""
+        """Initialize Claude tech tool."""
         self.bearer_token = os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
         self.botbin_key = os.environ.get("BOTBIN_API_KEY")
         self.bedrock_url = f"https://bedrock-runtime.{self.BEDROCK_REGION}.amazonaws.com/model/{self.BEDROCK_MODEL}/converse"
     
     @property
     def name(self) -> str:
-        return "claude_code"
+        return "claude_tech"
     
     def get_definition(self) -> Dict[str, Any]:
         """Get tool definition for OpenAI API."""
         return {
             "type": "function",
-            "name": "claude_code",
-            "description": "Ask Claude Opus (Anthropic's most capable model) for help with coding questions, code review, debugging, architecture advice, or complex programming problems. Returns detailed explanations with full code examples. Long responses are automatically pasted to botbin for easy viewing. Use this for in-depth coding assistance.",
+            "name": "claude_tech",
+            "description": """Ask Claude Opus 4.5 (Anthropic's most capable model) for expert technical help. Use for:
+- Programming: code review, debugging, architecture, algorithms, any language
+- Linux/Unix: shell commands, bash scripting, system administration, permissions
+- Networking: TCP/IP, DNS, firewalls, routing, troubleshooting connectivity
+- DevOps: Docker, Kubernetes, CI/CD, infrastructure as code, deployment
+- Databases: SQL, NoSQL, query optimization, schema design
+- Security: encryption, authentication, hardening, vulnerability analysis
+- Hardware: PC building, components, troubleshooting, compatibility
+- CLI tools: git, vim, tmux, awk, sed, grep, find, and other command-line utilities
+
+Returns detailed explanations with examples. Long responses auto-paste to botbin.""",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": "The coding question or request. Be specific about the language, framework, and what you're trying to achieve."
+                        "description": "The technical question or request. Be specific about what you're trying to achieve."
                     },
                     "context": {
                         "type": "string",
-                        "description": "Optional additional context like existing code, error messages, or constraints."
+                        "description": "Optional additional context: error messages, current setup, OS/distro, constraints, what you've tried."
                     },
-                    "language": {
+                    "topic": {
                         "type": "string",
-                        "description": "Primary programming language (e.g., 'python', 'go', 'javascript', 'rust'). Helps Claude provide idiomatic code."
+                        "description": "Primary topic area (e.g., 'linux', 'python', 'networking', 'docker', 'git'). Helps focus the response."
                     }
                 },
                 "required": ["question"],
@@ -171,16 +182,18 @@ class ClaudeCodeTool(Tool):
         self,
         question: str,
         context: str = "",
-        language: str = "",
+        topic: str = "",
+        language: str = "",  # Keep for backward compat
         **kwargs
     ) -> str:
         """
-        Get coding help from Claude Opus.
+        Get technical help from Claude Opus.
         
         Args:
-            question: The coding question
+            question: The technical question
             context: Optional additional context
-            language: Primary programming language
+            topic: Primary topic area (or language for code)
+            language: Alias for topic (backward compat)
             
         Returns:
             Response with paste URL if long, or direct response if short
@@ -188,16 +201,25 @@ class ClaudeCodeTool(Tool):
         if not self.bearer_token:
             return "Error: AWS_BEARER_TOKEN_BEDROCK not configured"
         
+        # Use language as topic if topic not specified (backward compat)
+        effective_topic = topic or language
+        
         # Build the prompt
         prompt_parts = [
-            "You are an expert programmer helping with a coding question.",
-            "Provide clear, well-documented code examples with explanations.",
-            "Use best practices and idiomatic patterns for the language.",
+            "You are an expert technical assistant with deep knowledge of:",
+            "- Programming (all languages, frameworks, best practices)",
+            "- Linux/Unix systems, shell scripting, system administration", 
+            "- Networking, protocols, troubleshooting",
+            "- DevOps, containers, CI/CD, cloud infrastructure",
+            "- Databases, security, hardware",
+            "",
+            "Provide clear, practical answers with examples and commands where relevant.",
+            "For code, use best practices and explain your reasoning.",
             ""
         ]
         
-        if language:
-            prompt_parts.append(f"Primary language: {language}")
+        if effective_topic:
+            prompt_parts.append(f"Primary topic: {effective_topic}")
         
         if context:
             prompt_parts.append(f"\nContext:\n{context}")

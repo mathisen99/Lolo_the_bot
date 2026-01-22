@@ -14,7 +14,7 @@ class FetchUrlTool(Tool):
     """URL fetching tool with bot protection bypass and content extraction."""
     
     # Max characters to return (roughly 1 token = 4 chars, aim for ~3000 tokens max)
-    MAX_CONTENT_LENGTH = 12000
+    MAX_CONTENT_LENGTH = 25000
     
     # Request timeout in seconds
     REQUEST_TIMEOUT = 15
@@ -39,7 +39,22 @@ class FetchUrlTool(Tool):
         return {
             "type": "function",
             "name": "fetch_url",
-            "description": "Fetch content from a URL. Works with web pages (extracts readable text), PDFs (extracts text), code files (Python, JS, etc.), JSON, XML, YAML, Markdown, and other text-based content. Use when a user shares a link. Content is truncated at ~12000 characters. Use search_term to extract only relevant sections from large files.",
+            "description": """Fetch content from a URL. Works with web pages (extracts readable text), PDFs, code files (Python, JS, etc.), JSON, XML, YAML, Markdown, and other text-based content.
+
+TRUNCATION HANDLING (~25000 char limit):
+When content is truncated (indicated by [TRUNCATED] at the end), you can retrieve more content by:
+1. Note the last topic/heading/function/paragraph shown before truncation
+2. Call fetch_url again with the SAME url but use search_term with a keyword from that last section or the next expected topic
+3. Repeat if needed to gather all relevant information
+
+Example workflow for large documents:
+- First fetch returns: "...Chapter 3: Authentication\n[TRUNCATED]"
+- Follow-up: fetch_url(url, search_term="Chapter 4") or fetch_url(url, search_term="Authorization")
+- This retrieves the next relevant section without re-fetching already seen content
+
+For code files: Use function names, class names, or unique identifiers from the truncation point.
+For articles: Use section headings, key terms, or phrases visible near the end.
+For PDFs: Use page numbers like "Page 5" or section titles.""",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -49,7 +64,7 @@ class FetchUrlTool(Tool):
                     },
                     "search_term": {
                         "type": ["string", "null"],
-                        "description": "Optional: Search for specific content and return only matching sections. Use when user asks about a specific function, topic, or section in a large file. Extracts the full code block/paragraph containing matches. Case-insensitive."
+                        "description": "Search for specific content and return only matching sections. Use to: (1) Find specific functions/topics/sections in large files, (2) Continue reading truncated content by searching for the next section/heading/function after the cutoff point, (3) Jump to relevant parts without re-reading already seen content. Extracts full code blocks or paragraphs containing matches. Case-insensitive."
                     }
                 },
                 "required": ["url"],

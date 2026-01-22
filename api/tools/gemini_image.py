@@ -4,10 +4,12 @@ Gemini Image tool implementation.
 Provides image generation and editing using Google's Gemini 3 Pro Image Preview model.
 """
 
+import io
 import os
 import base64
 import requests
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from PIL import Image
 from .base import Tool
 from api.utils.botbin import upload_to_botbin
 
@@ -15,8 +17,20 @@ from api.utils.botbin import upload_to_botbin
 class GeminiImageTool(Tool):
     """Image generation and editing tool using Google's Gemini 3 Pro Image Preview model."""
     
-    # Valid options
+    # Valid options - stored as (ratio_string, width/height_value) for matching
     VALID_ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]
+    ASPECT_RATIO_VALUES = {
+        "1:1": 1.0,
+        "2:3": 2/3,
+        "3:2": 3/2,
+        "3:4": 3/4,
+        "4:3": 4/3,
+        "4:5": 4/5,
+        "5:4": 5/4,
+        "9:16": 9/16,
+        "16:9": 16/9,
+        "21:9": 21/9,
+    }
     VALID_RESOLUTIONS = ["1K", "2K", "4K"]
     
     def __init__(self):
@@ -44,6 +58,9 @@ CAPABILITIES:
 - Advanced reasoning for complex compositions
 - Grounding with Google Search for real-time data
 
+ASPECT RATIO PRESERVATION:
+When editing images, the original aspect ratio is automatically detected and matched to the closest supported ratio. ONLY specify aspect_ratio if user explicitly requests a different one.
+
 USE THIS WHEN:
 - User wants Google/Gemini image generation
 - User needs complex multi-image compositions
@@ -66,8 +83,8 @@ Returns a URL to the generated/edited image.""",
                     },
                     "aspect_ratio": {
                         "type": "string",
-                        "enum": ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
-                        "description": "Output aspect ratio. Default: 1:1"
+                        "enum": ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "auto"],
+                        "description": "Output aspect ratio. Use 'auto' (default) to preserve input image aspect ratio when editing. Only specify explicitly if user requests a different ratio."
                     },
                     "resolution": {
                         "type": "string",
@@ -85,6 +102,32 @@ Returns a URL to the generated/edited image.""",
         response = requests.get(url, timeout=30)
         response.raise_for_status()
         return response.content
+    
+    def _get_image_dimensions(self, img_bytes: bytes) -> Optional[Tuple[int, int]]:
+        """Extract image dimensions from bytes. Returns (width, height) or None."""
+        try:
+            img = Image.open(io.BytesIO(img_bytes))
+            return img.size
+        except Exception:
+            return None
+    
+    def _find_closest_aspect_ratio(self, width: int, height: int) -> str:
+        """Find the closest supported aspect ratio for given dimensions."""
+        if height == 0:
+            return "1:1"
+        
+        target_ratio = width / height
+        
+        best_match = "1:1"
+        best_diff = float('inf')
+        
+        for ratio_str, ratio_val in self.ASPECT_RATIO_VALUES.items():
+            diff = abs(target_ratio - ratio_val)
+            if diff < best_diff:
+                best_diff = diff
+                best_match = ratio_str
+        
+        return best_match
     
     def _get_mime_type(self, url: str, img_bytes: bytes) -> str:
         """Determine MIME type from URL or image bytes."""
@@ -119,7 +162,7 @@ Returns a URL to the generated/edited image.""",
         self,
         prompt: str,
         input_image_urls: Optional[List[str]] = None,
-        aspect_ratio: str = "1:1",
+        aspect_ratio: str = "auto",
         resolution: str = "1K",
         **kwargs
     ) -> str:
@@ -129,7 +172,7 @@ Returns a URL to the generated/edited image.""",
         Args:
             prompt: Text description of image to generate or edit to apply
             input_image_urls: Optional list of input image URLs for editing
-            aspect_ratio: Output aspect ratio
+            aspect_ratio: Output aspect ratio (or "auto" to detect from input)
             resolution: Output resolution (1K, 2K, 4K)
             
         Returns:
@@ -138,11 +181,30 @@ Returns a URL to the generated/edited image.""",
         if not self.api_key:
             return "Error: GEMINI_API_KEY not configured"
         
-        # Validate parameters
-        if aspect_ratio not in self.VALID_ASPECT_RATIOS:
-            return f"Error: Invalid aspect_ratio. Must be one of: {', '.join(self.VALID_ASPECT_RATIOS)}"
+        # Validate resolution
         if resolution not in self.VALID_RESOLUTIONS:
             return f"Error: Invalid resolution. Must be one of: {', '.join(self.VALID_RESOLUTIONS)}"
+        
+        # Handle aspect ratio - detect from input if "auto" and editing
+        detected_ratio = None
+        if aspect_ratio == "auto":
+            if input_image_urls:
+                # Detect from first input image
+                try:
+                    first_img_bytes = self._download_image(input_image_urls[0])
+                    dims = self._get_image_dimensions(first_img_bytes)
+                    if dims:
+                        detected_ratio = self._find_closest_aspect_ratio(dims[0], dims[1])
+                        print(f"[gemini_image] Detected aspect ratio {dims[0]}x{dims[1]} -> {detected_ratio}")
+                except Exception as e:
+                    print(f"[gemini_image] Failed to detect aspect ratio: {e}")
+            
+            # Default to 1:1 for generation or if detection failed
+            aspect_ratio = detected_ratio or "1:1"
+        
+        # Validate aspect ratio
+        if aspect_ratio not in self.VALID_ASPECT_RATIOS:
+            return f"Error: Invalid aspect_ratio. Must be one of: {', '.join(self.VALID_ASPECT_RATIOS)}"
         
         try:
             # Build content parts

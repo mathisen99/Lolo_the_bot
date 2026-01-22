@@ -4,10 +4,12 @@ Flux image editing tool implementation.
 Provides image editing using BFL's Flux API.
 """
 
+import io
 import os
 import time
 import requests
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
+from PIL import Image
 from .base import Tool
 from api.utils.botbin import upload_to_botbin
 
@@ -33,7 +35,7 @@ class FluxEditTool(Tool):
         return {
             "type": "function",
             "name": "flux_edit_image",
-            "description": "Edit images using text prompts with Flux AI. Can download images from URLs shared in IRC. Returns a URL to the edited image. Default model is flux-2-pro (fast). By default matches input image dimensions. Dimensions must be multiples of 16.",
+            "description": "Edit images using text prompts with Flux AI. Can download images from URLs shared in IRC. Returns a URL to the edited image. Default model is flux-2-pro (fast). PRESERVES ORIGINAL ASPECT RATIO by default - only specify width/height if user explicitly requests a different size. Dimensions must be multiples of 16.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -47,11 +49,11 @@ class FluxEditTool(Tool):
                     },
                     "width": {
                         "type": "integer",
-                        "description": "Output width in pixels (must be multiple of 16, min 64, max 4096). If omitted, matches input image width"
+                        "description": "Output width in pixels (must be multiple of 16, min 64, max 4096). ONLY set if user explicitly requests a different size - otherwise original dimensions are preserved automatically"
                     },
                     "height": {
                         "type": "integer",
-                        "description": "Output height in pixels (must be multiple of 16, min 64, max 4096). If omitted, matches input image height"
+                        "description": "Output height in pixels (must be multiple of 16, min 64, max 4096). ONLY set if user explicitly requests a different size - otherwise original dimensions are preserved automatically"
                     },
                     "model": {
                         "type": "string",
@@ -68,6 +70,25 @@ class FluxEditTool(Tool):
                 "additionalProperties": False
             }
         }
+    
+    def _get_image_dimensions(self, url: str) -> Optional[Tuple[int, int]]:
+        """
+        Download image and extract dimensions.
+        Returns (width, height) or None if unable to determine.
+        """
+        try:
+            response = requests.get(url, timeout=15)
+            response.raise_for_status()
+            img = Image.open(io.BytesIO(response.content))
+            return img.size  # (width, height)
+        except Exception as e:
+            print(f"[flux_edit] Failed to get image dimensions: {e}")
+            return None
+    
+    def _round_to_multiple(self, value: int, multiple: int = 16) -> int:
+        """Round value to nearest multiple, clamped to valid range."""
+        rounded = round(value / multiple) * multiple
+        return max(64, min(4096, rounded))
     
     def execute(self, prompt: str, input_image_url: str, width: Optional[int] = None, 
                 height: Optional[int] = None, model: str = "flux-2-pro", 
@@ -89,6 +110,21 @@ class FluxEditTool(Tool):
         """
         if not self.api_key:
             return "Error: BFL_API_KEY not configured"
+        
+        # If dimensions not provided, detect from input image to preserve aspect ratio
+        if width is None or height is None:
+            detected_dims = self._get_image_dimensions(input_image_url)
+            if detected_dims:
+                orig_width, orig_height = detected_dims
+                # Round to multiples of 16 (API requirement)
+                if width is None:
+                    width = self._round_to_multiple(orig_width)
+                if height is None:
+                    height = self._round_to_multiple(orig_height)
+                print(f"[flux_edit] Preserving aspect ratio: {orig_width}x{orig_height} -> {width}x{height}")
+            else:
+                # Fallback: let API decide (not ideal but better than failing)
+                print("[flux_edit] WARNING: Could not detect input dimensions, API will choose output size")
         
         # Validate dimensions if provided
         if width is not None:

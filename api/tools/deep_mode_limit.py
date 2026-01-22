@@ -11,7 +11,7 @@ from threading import Lock
 from datetime import datetime, timedelta
 
 # Global rate limit: 3 deep queries per day per user
-MAX_DEEP_PER_DAY = 3
+MAX_DEEP_PER_DAY = 5
 
 # Thread-safe storage for deep mode usage per user
 # Format: {nick: [timestamp1, timestamp2, ...]}

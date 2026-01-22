@@ -129,12 +129,31 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 		SendNotificationToPhone(message_built_for_phone, h.phoneNotificationsURL)
 	}
 
-	// Retrieve last 20 messages from the channel for context
-	conversationHistory, err := h.getConversationHistory(channel, 20)
-	if err != nil {
-		// Log error but continue without history
-		fmt.Printf("Warning: Failed to retrieve conversation history: %v\n", err)
+	// Check for --no-context flag (context-free mode)
+	noContext := false
+	if strings.Contains(message, "--no-context") {
+		noContext = true
+		// Strip the flag from the message
+		message = strings.ReplaceAll(message, "--no-context", "")
+		message = strings.TrimSpace(message)
+		// Clean up any double spaces left behind
+		for strings.Contains(message, "  ") {
+			message = strings.ReplaceAll(message, "  ", " ")
+		}
+	}
+
+	// Retrieve conversation history unless --no-context was specified
+	var conversationHistory []*database.Message
+	if noContext {
 		conversationHistory = nil
+	} else {
+		var err error
+		conversationHistory, err = h.getConversationHistory(channel, 20)
+		if err != nil {
+			// Log error but continue without history
+			fmt.Printf("Warning: Failed to retrieve conversation history: %v\n", err)
+			conversationHistory = nil
+		}
 	}
 
 	// Send streaming mention to Python API

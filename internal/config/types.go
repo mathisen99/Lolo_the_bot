@@ -57,12 +57,13 @@ type BotConfig struct {
 
 // LimitsConfig contains rate limiting and backoff settings
 type LimitsConfig struct {
-	RateLimitMessages int `toml:"rate_limit_messages"`
-	RateLimitWindow   int `toml:"rate_limit_window"`
-	MaxMessageQueue   int `toml:"max_message_queue"`
-	ReconnectDelayMin int `toml:"reconnect_delay_min"`
-	ReconnectDelayMax int `toml:"reconnect_delay_max"`
-	CommandCooldown   int `toml:"command_cooldown"`
+	RateLimitMessages       int `toml:"rate_limit_messages"`
+	RateLimitWindow         int `toml:"rate_limit_window"`
+	MaxMessageQueue         int `toml:"max_message_queue"`
+	ReconnectDelayMin       int `toml:"reconnect_delay_min"`
+	ReconnectDelayMax       int `toml:"reconnect_delay_max"`
+	CommandCooldown         int `toml:"command_cooldown"`
+	MentionAggregateDelayMS int `toml:"mention_aggregate_delay_ms"` // Delay to wait for overflow messages (default: 1000ms)
 }
 
 // DatabaseConfig contains database settings
@@ -104,6 +105,15 @@ func (c *LimitsConfig) GetReconnectDelayMaxDuration() time.Duration {
 // GetCommandCooldownDuration returns the command cooldown as a time.Duration
 func (c *LimitsConfig) GetCommandCooldownDuration() time.Duration {
 	return time.Duration(c.CommandCooldown) * time.Second
+}
+
+// GetMentionAggregateDelayDuration returns the mention aggregate delay as a time.Duration
+// Returns 1 second if not configured
+func (c *LimitsConfig) GetMentionAggregateDelayDuration() time.Duration {
+	if c.MentionAggregateDelayMS <= 0 {
+		return 1 * time.Second // Default to 1 second
+	}
+	return time.Duration(c.MentionAggregateDelayMS) * time.Millisecond
 }
 
 // GetVacuumIntervalDuration returns the vacuum interval as a time.Duration

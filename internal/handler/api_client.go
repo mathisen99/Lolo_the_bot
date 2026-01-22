@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -38,11 +39,40 @@ type APIClient struct {
 
 // NewAPIClient creates a new API client with the specified endpoint and timeout
 func NewAPIClient(endpoint string, timeout time.Duration) *APIClient {
+	// Create HTTP client WITHOUT a global timeout.
+	// Global http.Client.Timeout applies to the entire request/response cycle,
+	// which is problematic for streaming responses that can legitimately take longer.
+	// Instead, we use:
+	// 1. Transport-level timeouts for connection establishment
+	// 2. Context-based timeouts for per-request control (passed to each request)
+	transport := &http.Transport{
+		// Connection establishment timeouts
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second, // Time to establish TCP connection
+			KeepAlive: 30 * time.Second, // Keep-alive probe interval
+		}).DialContext,
+		TLSHandshakeTimeout: 10 * time.Second, // Time for TLS handshake
+
+		// Connection pool settings for concurrent requests
+		MaxIdleConns:        100,              // Max idle connections across all hosts
+		MaxIdleConnsPerHost: 10,               // Max idle connections per host
+		IdleConnTimeout:     90 * time.Second, // How long idle connections stay in pool
+
+		// Response header timeout (time to receive response headers after sending request)
+		// This does NOT affect streaming body reads
+		ResponseHeaderTimeout: 30 * time.Second,
+
+		// Disable compression for streaming to avoid buffering issues
+		DisableCompression: false,
+	}
+
 	client := &APIClient{
 		endpoint: endpoint,
 		timeout:  timeout,
 		httpClient: &http.Client{
-			Timeout: timeout,
+			// NO global Timeout - this is critical for streaming!
+			// Timeout: timeout would kill long-running streams
+			Transport: transport,
 		},
 	}
 
@@ -553,9 +583,11 @@ func findSubstring(s, substr string) bool {
 }
 
 // SetTimeout updates the client timeout
+// Note: This only affects the stored timeout value used for context-based timeouts.
+// The HTTP client no longer uses a global timeout (for streaming compatibility).
 func (c *APIClient) SetTimeout(timeout time.Duration) {
 	c.timeout = timeout
-	c.httpClient.Timeout = timeout
+	// Note: We no longer set httpClient.Timeout as it interferes with streaming
 }
 
 // GetEndpoint returns the API endpoint

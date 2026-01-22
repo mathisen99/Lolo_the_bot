@@ -25,6 +25,7 @@ import (
 type MessageHandler struct {
 	dispatcher            *commands.Dispatcher
 	mentionHandler        *MentionHandler
+	mentionAggregator     *MentionAggregator // Aggregates overflow messages for mentions
 	apiClient             APIClientInterface
 	userManager           *user.Manager
 	db                    *database.DB
@@ -34,8 +35,9 @@ type MessageHandler struct {
 	splitTracker          *splitter.StateTracker // Tracks split message state for error recovery
 	commandPrefix         string
 	testMode              bool
-	commandMetadata       map[string]*CommandMetadata // Cache of API command metadata
-	imageDownloadChannels []string                    // Channels to auto-download images from
+	commandMetadata       map[string]*CommandMetadata        // Cache of API command metadata
+	imageDownloadChannels []string                           // Channels to auto-download images from
+	sendMessageFunc       func(target, message string) error // Callback to send IRC messages
 }
 
 // MessageHandlerConfig contains configuration for the message handler
@@ -53,6 +55,7 @@ type MessageHandlerConfig struct {
 	ImageDownloadChannels    []string
 	PhoneNotificationsActive bool
 	PhoneNotificationsURL    string
+	MentionAggregateDelay    time.Duration // How long to wait for overflow messages (default: 1s)
 }
 
 // NewMessageHandler creates a new message handler
@@ -67,9 +70,16 @@ func NewMessageHandler(config *MessageHandlerConfig) *MessageHandler {
 		config.PhoneNotificationsURL,
 	)
 
+	// Default aggregate delay to 1 second if not specified
+	aggregateDelay := config.MentionAggregateDelay
+	if aggregateDelay == 0 {
+		aggregateDelay = 1 * time.Second
+	}
+
 	return &MessageHandler{
 		dispatcher:            config.Dispatcher,
 		mentionHandler:        mentionHandler,
+		mentionAggregator:     NewMentionAggregator(aggregateDelay),
 		apiClient:             config.APIClient,
 		userManager:           config.UserManager,
 		db:                    config.DB,
@@ -145,7 +155,17 @@ func (h *MessageHandler) HandleMessage(ctx context.Context, nick, hostmask, chan
 
 	// Check if this is a mention (only in channels, not PMs)
 	if !isPM && h.mentionHandler.ContainsMention(message) {
-		return h.handleMention(ctx, nick, hostmask, channel, message, statusCallback)
+		// Use the aggregator to handle potential overflow messages
+		h.mentionAggregator.AddMention(ctx, nick, hostmask, channel, message, h.processMention, statusCallback)
+		// Return nil - the aggregator will send responses via callback
+		return nil, nil
+	}
+
+	// Check if this might be an overflow message for a pending mention
+	// (same nick, same channel, no mention, arrives shortly after a mention)
+	if !isPM && h.mentionAggregator.AddFollowUpMessage(channel, nick, message) {
+		h.logger.Info("Added overflow message from %s to pending mention", nick)
+		return nil, nil
 	}
 
 	// Not a command or mention, no response needed
@@ -459,6 +479,41 @@ func (h *MessageHandler) handleMention(ctx context.Context, nick, hostmask, chan
 	}
 
 	return messages, nil
+}
+
+// processMention is the callback for the mention aggregator
+// It processes the aggregated mention and sends responses via the sendMessageFunc
+func (h *MessageHandler) processMention(ctx context.Context, nick, hostmask, channel, fullMessage string, statusCallback func(string)) ([]string, error) {
+	h.logger.Info("Processing aggregated mention from %s in %s (message length: %d)", nick, channel, len(fullMessage))
+
+	responses, err := h.handleMention(ctx, nick, hostmask, channel, fullMessage, statusCallback)
+	if err != nil {
+		return nil, err
+	}
+
+	// Send responses via the callback if set
+	if h.sendMessageFunc != nil && len(responses) > 0 {
+		for _, response := range responses {
+			if err := h.sendMessageFunc(channel, response); err != nil {
+				h.logger.Error("Failed to send mention response to %s: %v", channel, err)
+			}
+		}
+	}
+
+	return responses, nil
+}
+
+// SetSendMessageFunc sets the callback function for sending IRC messages
+// This is needed for the mention aggregator to send responses asynchronously
+func (h *MessageHandler) SetSendMessageFunc(fn func(target, message string) error) {
+	h.sendMessageFunc = fn
+}
+
+// Shutdown cleans up resources used by the message handler
+func (h *MessageHandler) Shutdown() {
+	if h.mentionAggregator != nil {
+		h.mentionAggregator.Shutdown()
+	}
 }
 
 // isCoreCommand checks if a command is a core command (implemented in Go)

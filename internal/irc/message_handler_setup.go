@@ -12,6 +12,12 @@ import (
 // SetupBotMessageHandler configures the connection manager to process bot commands and messages
 // This must be called before Connect()
 func (cm *ConnectionManager) SetupBotMessageHandler(messageHandler *handler.MessageHandler, cfg *config.Config, logger output.Logger) {
+	// Set up the send message callback for the mention aggregator
+	// This allows asynchronous mention responses to be sent back to IRC
+	messageHandler.SetSendMessageFunc(func(target, message string) error {
+		return cm.client.SendMessage(target, message)
+	})
+
 	// Set up the PRIVMSG handler callback
 	cm.SetPrivMsgHandler(func(nick, hostmask, channel, message string, isPM bool) {
 		// Process messages in a goroutine to avoid blocking the IRC event loop
@@ -60,6 +66,8 @@ func (cm *ConnectionManager) SetupBotMessageHandler(messageHandler *handler.Mess
 			}
 
 			// Send final responses back to IRC
+			// Note: For mentions, responses may be nil because the aggregator
+			// handles sending them asynchronously after collecting overflow messages
 			for _, response := range responses {
 				if err := cm.client.SendMessage(target, response); err != nil {
 					logger.Error("Failed to send message to %s: %v", target, err)

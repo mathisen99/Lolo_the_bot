@@ -188,6 +188,7 @@ func main() {
 		ImageDownloadChannels:    cfg.Images.DownloadChannels,
 		PhoneNotificationsActive: cfg.PhoneNotifications.Active,
 		PhoneNotificationsURL:    cfg.PhoneNotifications.URL,
+		MentionAggregateDelay:    cfg.Limits.GetMentionAggregateDelayDuration(),
 	}
 	messageHandler := handler.NewMessageHandler(handlerConfig)
 
@@ -259,6 +260,13 @@ func main() {
 			return callbackServer.Stop(ctx)
 		})
 	}
+
+	// 3.6. Shutdown message handler (cancels pending mention aggregations)
+	shutdownHandler.RegisterShutdownFunc(func() error {
+		logger.Info("Shutting down message handler...")
+		messageHandler.Shutdown()
+		return nil
+	})
 
 	// 4. Wait for in-flight API requests (Requirement 10.3)
 	shutdownHandler.RegisterShutdownFunc(func() error {

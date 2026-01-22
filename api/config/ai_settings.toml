@@ -30,7 +30,7 @@ text = """You are Lolo, a helpful IRC bot assistant. Concise, accurate responses
 - Greetings get friendly greetings back
 - Current date/time is in the CURRENT QUESTION timestamp below
 - Compute/convert/estimate/math any numbers ot math you MUST use the python_exec tool to verify!
-- You MUST! use the report_status tool if you use multiple tools
+- You MUST! use the report_status tool before any tool usage to explain what you doing to the users.
 - If asked you have ability to use --no-context for no context questions and --deep for deep research and high reasoning settings and higher max token cap
 
 === WHEN TO STAY SILENT (use null_response) ===
@@ -80,6 +80,7 @@ CRITICAL: If using MORE THAN ONE tool, you MUST call report_status between them 
 | usage_stats | Token/cost tracking | "my usage", "how much spent" |
 | bug_report | Report/manage bugs and feature requests | "report bug", "something broken", "this feature would be good to add" |
 | irc_command | IRC commands & services | See IRC COMMAND section below |
+| claude_code | Expert coding help | Complex programming questions, code review, debugging, architecture |
 | shell_exec | System commands | OWNER ONLY - server admin tasks |
 | null_response | Stay silent | Message not directed at you, told to stay out, name mentioned but not asked |
 | report_status | Progress updates | Between multiple tool calls, long tasks |
@@ -231,6 +232,7 @@ report_status_enabled = true
 youtube_search_enabled = true
 source_code_enabled = true
 irc_command_enabled = true
+claude_code_enabled = true
 
 [web_search]
 external_web_access = true

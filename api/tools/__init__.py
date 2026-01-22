@@ -1,7 +1,7 @@
 """
 Tools module for AI assistant.
 
-Provides web search, Python execution, image generation/editing, image analysis, URL fetching, user rules, chat history, paste, shell execution, voice cloning, null response, bug reporting, GPT image, Gemini image, usage statistics, source code introspection, and IRC command capabilities.
+Provides web search, Python execution, image generation/editing, image analysis, URL fetching, user rules, chat history, paste, shell execution, voice cloning, null response, bug reporting, GPT image, Gemini image, usage statistics, source code introspection, IRC command, and Claude coding capabilities.
 """
 
 from .web_search import WebSearchTool
@@ -24,6 +24,7 @@ from .report_status import ReportStatusTool, STATUS_UPDATE_MARKER
 from .youtube_search import YouTubeSearchTool
 from .source_code import SourceCodeTool
 from .irc_command import IRCCommandTool
+from .claude_code import ClaudeCodeTool
 from .image_rate_limit import is_image_tool, check_image_rate_limit, record_image_generation
 
-__all__ = ["WebSearchTool", "PythonExecTool", "FluxCreateTool", "FluxEditTool", "ImageAnalysisTool", "FetchUrlTool", "UserRulesTool", "ChatHistoryTool", "PasteTool", "ShellExecTool", "VoiceSpeakTool", "NullResponseTool", "NULL_RESPONSE_MARKER", "BugReportTool", "GPTImageTool", "GeminiImageTool", "UsageStatsTool", "ReportStatusTool", "YouTubeSearchTool", "SourceCodeTool", "IRCCommandTool", "STATUS_UPDATE_MARKER", "Tool", "is_image_tool", "check_image_rate_limit", "record_image_generation"]
+__all__ = ["WebSearchTool", "PythonExecTool", "FluxCreateTool", "FluxEditTool", "ImageAnalysisTool", "FetchUrlTool", "UserRulesTool", "ChatHistoryTool", "PasteTool", "ShellExecTool", "VoiceSpeakTool", "NullResponseTool", "NULL_RESPONSE_MARKER", "BugReportTool", "GPTImageTool", "GeminiImageTool", "UsageStatsTool", "ReportStatusTool", "YouTubeSearchTool", "SourceCodeTool", "IRCCommandTool", "ClaudeCodeTool", "STATUS_UPDATE_MARKER", "Tool", "is_image_tool", "check_image_rate_limit", "record_image_generation"]

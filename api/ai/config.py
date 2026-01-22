@@ -64,6 +64,7 @@ class AIConfig:
         self.youtube_search_enabled: bool = config["tools"].get("youtube_search_enabled", True)
         self.source_code_enabled: bool = config["tools"].get("source_code_enabled", True)
         self.irc_command_enabled: bool = config["tools"].get("irc_command_enabled", True)
+        self.claude_code_enabled: bool = config["tools"].get("claude_code_enabled", True)
         
         # Shell execution settings
         self.shell_exec_timeout: int = config.get("shell_exec", {}).get("timeout", 30)
@@ -122,4 +123,6 @@ class AIConfig:
             tools.append("source_code")
         if self.irc_command_enabled:
             tools.append("irc_command")
+        if self.claude_code_enabled:
+            tools.append("claude_code")
         return tools

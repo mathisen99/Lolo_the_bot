@@ -9,7 +9,7 @@ import json
 from openai import OpenAI
 from .config import AIConfig
 from .usage_tracker import log_usage, extract_usage_from_response
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, ClaudeCodeTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -76,6 +76,8 @@ class AIClient:
                         tools_used.append('SOURCE_CODE')
                     elif func_name == 'irc_command':
                         tools_used.append('IRC_COMMAND')
+                    elif func_name == 'claude_code':
+                        tools_used.append('CLAUDE_CODE')
         
         if tools_used:
             tools_str = ', '.join(tools_used)
@@ -180,6 +182,11 @@ class AIClient:
             irc_command = IRCCommandTool(timeout=self.config.irc_command_timeout)
             self.tools[irc_command.name] = irc_command
             log_info("IRC command tool enabled (permission-based)")
+        
+        if self.config.claude_code_enabled:
+            claude_code = ClaudeCodeTool()
+            self.tools[claude_code.name] = claude_code
+            log_info("Claude code tool enabled (Opus via Bedrock)")
             
         # Report Status tool is always enabled as it's a core feature for long-running tasks
         report_status = ReportStatusTool()

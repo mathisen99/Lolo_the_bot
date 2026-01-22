@@ -235,13 +235,15 @@ For PDFs: Use page numbers like "Page 5" or section titles.""",
             # Check content type - allow any text-based content
             content_type = response.headers.get('content-type', '').lower()
             
-            # Block binary/media content types (but allow PDF)
-            blocked_types = ['image/', 'video/', 'audio/', 'application/octet-stream', 
-                           'application/zip', 'application/gzip',
-                           'application/x-tar', 'application/x-rar', 'font/']
-            for blocked in blocked_types:
-                if blocked in content_type:
-                    return False, f"Cannot fetch binary content: {content_type}", ""
+            # Block binary/media content types (but allow PDF and SVG)
+            # SVG is XML-based text, not binary, so we allow it
+            if 'image/svg+xml' not in content_type:
+                blocked_types = ['image/', 'video/', 'audio/', 'application/octet-stream', 
+                               'application/zip', 'application/gzip',
+                               'application/x-tar', 'application/x-rar', 'font/']
+                for blocked in blocked_types:
+                    if blocked in content_type:
+                        return False, f"Cannot fetch binary content: {content_type}", ""
             
             # Handle PDF separately (return raw bytes marker)
             if 'application/pdf' in content_type or url.lower().endswith('.pdf'):
@@ -640,6 +642,8 @@ For PDFs: Use page numbers like "Page 5" or section titles.""",
             # Try to determine content type for context
             if 'json' in content_type or 'application/json' in content_type:
                 title = "JSON Content"
+            elif 'image/svg+xml' in content_type or url.endswith('.svg'):
+                title = "SVG Image (XML)"
             elif 'python' in content_type or url.endswith('.py'):
                 title = "Python Code"
             elif 'javascript' in content_type or url.endswith('.js'):

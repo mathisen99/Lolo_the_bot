@@ -279,7 +279,17 @@ Returns a URL to the generated/edited image.""",
                     img_b64 = inline_data.get("data")
                     if img_b64:
                         img_bytes = base64.b64decode(img_b64)
-                        image_url = self._upload_image(img_bytes, "png")
+                        # Detect format from mimeType or default to png
+                        mime_type = inline_data.get("mimeType", "image/png")
+                        ext_map = {
+                            "image/png": "png",
+                            "image/jpeg": "jpeg",
+                            "image/jpg": "jpeg",
+                            "image/webp": "webp",
+                            "image/gif": "gif",
+                        }
+                        ext = ext_map.get(mime_type, "png")
+                        image_url = self._upload_image(img_bytes, ext)
             
             if image_url:
                 if text_response:

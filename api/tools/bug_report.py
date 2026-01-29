@@ -65,7 +65,7 @@ Actions:
 - list: List bug reports (admin/owner only, or user can see their own)
 - update: Update bug status/priority (admin/owner only)
 - delete: Delete a bug report (admin/owner only)
-- resolve: Mark a bug as resolved with a note (admin/owner only)
+- resolve: Mark a bug as resolved with a note (admin/owner, or the reporter)
 
 Use this when:
 - User wants to report a bug or issue with the bot
@@ -218,15 +218,22 @@ Example triggers:
         log_info(f"[BUG_REPORT] Bug #{bug_id} updated by {updater}")
         return f"Bug #{bug_id} updated successfully."
     
-    def _resolve_bug(self, bug_id: int, resolution_note: str, resolver: str) -> str:
-        """Mark a bug as resolved."""
+    def _resolve_bug(self, bug_id: int, resolution_note: str, resolver: str, permission_level: str) -> str:
+        """Mark a bug as resolved. Allows admin/owner or the original reporter."""
         conn = sqlite3.connect(str(self.DB_PATH))
         cursor = conn.cursor()
         
-        cursor.execute("SELECT id FROM bugs WHERE id = ?", (bug_id,))
-        if not cursor.fetchone():
+        cursor.execute("SELECT id, reporter FROM bugs WHERE id = ?", (bug_id,))
+        row = cursor.fetchone()
+        if not row:
             conn.close()
             return f"Error: Bug #{bug_id} not found."
+        
+        reporter = row[1]
+        # Permission check: admin/owner OR original reporter
+        if permission_level not in ("owner", "admin") and resolver != reporter:
+            conn.close()
+            return f"Permission denied: Only the reporter ({reporter}) or an admin can resolve this bug."
         
         now = datetime.utcnow().isoformat()
         cursor.execute("""
@@ -290,11 +297,9 @@ Example triggers:
             return self._update_bug(bug_id, status, priority, requesting_user)
         
         elif action == "resolve":
-            if permission_level not in ("owner", "admin"):
-                return "Permission denied: Only admins and owners can resolve bugs."
             if not bug_id:
                 return "Error: Please specify a bug ID to resolve."
-            return self._resolve_bug(bug_id, resolution_note or "", requesting_user)
+            return self._resolve_bug(bug_id, resolution_note or "", requesting_user, permission_level)
         
         elif action == "delete":
             if permission_level not in ("owner", "admin"):

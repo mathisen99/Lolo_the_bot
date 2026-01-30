@@ -9,7 +9,7 @@ import json
 from openai import OpenAI
 from .config import AIConfig
 from .usage_tracker import log_usage, extract_usage_from_response
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, ClaudeTechTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, ClaudeTechTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation, KnowledgeBaseLearnTool, KnowledgeBaseSearchTool, KnowledgeBaseListTool, KnowledgeBaseForgetTool
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -192,6 +192,27 @@ class AIClient:
         report_status = ReportStatusTool()
         self.tools[report_status.name] = report_status
         log_info("Report status tool enabled")
+        
+        # Knowledge Base tools
+        if self.config.kb_learn_enabled:
+            kb_learn = KnowledgeBaseLearnTool()
+            self.tools[kb_learn.name] = kb_learn
+            log_info("Knowledge Base learn tool enabled")
+        
+        if self.config.kb_search_enabled:
+            kb_search = KnowledgeBaseSearchTool()
+            self.tools[kb_search.name] = kb_search
+            log_info("Knowledge Base search tool enabled")
+        
+        if self.config.kb_list_enabled:
+            kb_list = KnowledgeBaseListTool()
+            self.tools[kb_list.name] = kb_list
+            log_info("Knowledge Base list tool enabled")
+        
+        if self.config.kb_forget_enabled:
+            kb_forget = KnowledgeBaseForgetTool()
+            self.tools[kb_forget.name] = kb_forget
+            log_info("Knowledge Base forget tool enabled")
     
     def generate_response(self, user_message: str, request_id: str) -> str:
         """

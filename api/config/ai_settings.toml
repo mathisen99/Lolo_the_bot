@@ -84,6 +84,20 @@ CRITICAL: If using MORE THAN ONE tool, you MUST call report_status between them 
 | shell_exec | System commands | OWNER ONLY - server admin tasks |
 | null_response | Stay silent | Message not directed at you, told to stay out, name mentioned but not asked |
 | report_status | Progress updates | Between multiple tool calls, long tasks |
+| kb_learn | Store URL in memory | "learn this", "remember this URL", user links paper/doc for future reference |
+| kb_search | Recall learned content | "what did that paper say", "do you know about X" (internal knowledge only) |
+| kb_list | Show stored sources | "what have you learned", "what's in your memory" |
+| kb_forget | Remove from memory | "forget this URL", "remove from memory" |
+
+=== KNOWLEDGE BASE (kb_learn, kb_search, kb_list, kb_forget) ===
+Your personal memory for documents. When a user shares a PDF or article URL and says "learn this" / "remember this", use kb_learn to store it.
+
+WORKFLOW:
+1. User shares URL → kb_learn to ingest it
+2. Later, user asks about that content → kb_search to find relevant info
+3. "What do you know?" → kb_list to show stored sources
+
+IMPORTANT: kb_search is for YOUR learned content only, not general web. If user asks about something that wasn't previously learned, use web_search instead.
 
 === CHAT HISTORY (query_chat_history) ===
 Queries the channel message database. Has a vector DB for semantic search.
@@ -235,6 +249,10 @@ youtube_search_enabled = true
 source_code_enabled = true
 irc_command_enabled = true
 claude_code_enabled = true
+kb_learn_enabled = true
+kb_search_enabled = true
+kb_list_enabled = true
+kb_forget_enabled = true
 
 [web_search]
 external_web_access = true

@@ -22,6 +22,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **IRC Commands** - Execute IRC commands via AI (whois, NickServ, ChanServ, channel queries)
 - **Source Code Introspection** - AI can read and explain its own source code
 - **Agentic Status Reporting** - Real-time status updates for complex tasks
+- **Knowledge Base (RAG)** - Learn from PDFs/articles and answer questions about them
 
 ### Bot Management
 - **User Memories** - Per-user memories and custom personas that persist across conversations
@@ -232,6 +233,26 @@ The bot has access to these tools when mentioned:
 | **IRC Commands** | Query IRC services and channel info | "who owns nick foobar", "do you have op here" |
 | **Source Code** | Read bot's own source code | "how do you handle image generation" |
 | **Null Response** | Ask bot to stay silent | "don't respond to this", "shh" |
+| **Knowledge Base** | Learn and recall documents | "learn this URL", "what did that paper say about X" |
+
+### Knowledge Base (RAG)
+
+Teach the bot to remember documents (PDFs, articles) and query them later:
+```
+<you>  lolo: learn this https://arxiv.org/pdf/2511.09030v1
+<lolo> Done — I've learned that arXiv PDF. Ask me about it anytime!
+
+<you>  lolo: what have you learned?
+<lolo> I've learned 1 source: "Solving a Million-Step LLM Task" https://arxiv.org/pdf/2511.09030v1
+
+<you>  lolo: what does that paper say about error recovery?
+<lolo> KB hit: it proposes modular error correction with "red-flagging" unreliable outputs...
+
+<you>  lolo: forget https://arxiv.org/pdf/2511.09030v1
+<lolo> Removed from knowledge base.
+```
+
+Supports PDFs and web pages. Content is chunked and embedded for semantic search.
 
 ### IRC Formatting
 

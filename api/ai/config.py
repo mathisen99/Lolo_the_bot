@@ -66,6 +66,12 @@ class AIConfig:
         self.irc_command_enabled: bool = config["tools"].get("irc_command_enabled", True)
         self.claude_code_enabled: bool = config["tools"].get("claude_code_enabled", True)
         
+        # Knowledge Base tools
+        self.kb_learn_enabled: bool = config["tools"].get("kb_learn_enabled", True)
+        self.kb_search_enabled: bool = config["tools"].get("kb_search_enabled", True)
+        self.kb_list_enabled: bool = config["tools"].get("kb_list_enabled", True)
+        self.kb_forget_enabled: bool = config["tools"].get("kb_forget_enabled", True)
+        
         # Shell execution settings
         self.shell_exec_timeout: int = config.get("shell_exec", {}).get("timeout", 30)
         

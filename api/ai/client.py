@@ -9,7 +9,7 @@ import json
 from openai import OpenAI
 from .config import AIConfig
 from .usage_tracker import log_usage, extract_usage_from_response
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, ClaudeTechTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation, KnowledgeBaseLearnTool, KnowledgeBaseSearchTool, KnowledgeBaseListTool, KnowledgeBaseForgetTool
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, ClaudeTechTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation, KnowledgeBaseLearnTool, KnowledgeBaseSearchTool, KnowledgeBaseListTool, KnowledgeBaseForgetTool, MoltbookPostTool
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -78,6 +78,8 @@ class AIClient:
                         tools_used.append('IRC_COMMAND')
                     elif func_name == 'claude_tech':
                         tools_used.append('CLAUDE_TECH')
+                    elif func_name == 'moltbook_post':
+                        tools_used.append('MOLTBOOK_POST')
         
         if tools_used:
             tools_str = ', '.join(tools_used)
@@ -213,6 +215,12 @@ class AIClient:
             kb_forget = KnowledgeBaseForgetTool()
             self.tools[kb_forget.name] = kb_forget
             log_info("Knowledge Base forget tool enabled")
+        
+        # Moltbook posting
+        if self.config.moltbook_post_enabled:
+            moltbook_post = MoltbookPostTool()
+            self.tools[moltbook_post.name] = moltbook_post
+            log_info("Moltbook post tool enabled")
     
     def generate_response(self, user_message: str, request_id: str) -> str:
         """

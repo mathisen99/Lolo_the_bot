@@ -72,6 +72,9 @@ class AIConfig:
         self.kb_list_enabled: bool = config["tools"].get("kb_list_enabled", True)
         self.kb_forget_enabled: bool = config["tools"].get("kb_forget_enabled", True)
         
+        # Moltbook posting
+        self.moltbook_post_enabled: bool = config["tools"].get("moltbook_post_enabled", True)
+        
         # Shell execution settings
         self.shell_exec_timeout: int = config.get("shell_exec", {}).get("timeout", 30)
         

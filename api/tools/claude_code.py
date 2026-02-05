@@ -18,7 +18,7 @@ class ClaudeCodeTool(Tool):
     """Claude Opus technical expert via AWS Bedrock."""
     
     BEDROCK_REGION = "eu-west-1"
-    BEDROCK_MODEL = "eu.anthropic.claude-opus-4-5-20251101-v1:0"
+    BEDROCK_MODEL = "eu.anthropic.claude-opus-4-6-v1"
     BOTBIN_URL = "https://botbin.net/upload"
     
     # Threshold for pasting (characters) - IRC messages are ~400 bytes
@@ -39,7 +39,7 @@ class ClaudeCodeTool(Tool):
         return {
             "type": "function",
             "name": "claude_tech",
-            "description": """Ask Claude Opus 4.5 (Anthropic's most capable model) for expert technical help. Use for:
+            "description": """Ask Claude Opus 4.6 (Anthropic's most capable model) for expert technical help. Use for:
 - Programming: code review, debugging, architecture, algorithms, any language
 - Linux/Unix: shell commands, bash scripting, system administration, permissions
 - Networking: TCP/IP, DNS, firewalls, routing, troubleshooting connectivity

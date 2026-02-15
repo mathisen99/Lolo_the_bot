@@ -17,6 +17,7 @@ import (
 	"github.com/yourusername/lolo/internal/maintenance"
 	"github.com/yourusername/lolo/internal/mockapi"
 	"github.com/yourusername/lolo/internal/output"
+	"github.com/yourusername/lolo/internal/reminder"
 	"github.com/yourusername/lolo/internal/shutdown"
 	"github.com/yourusername/lolo/internal/splitter"
 	"github.com/yourusername/lolo/internal/user"
@@ -212,6 +213,13 @@ func main() {
 	// Create and wire up channel user tracker for tracking op status, user counts, etc.
 	channelTracker := irc.NewChannelTracker(db, logger, cfg.Server.Nickname)
 	connManager.SetChannelUserTracker(channelTracker)
+
+	// Create and wire up reminder checker for on-join reminder delivery
+	if !cfg.Bot.TestMode {
+		reminderChecker := reminder.NewChecker(cfg.Bot.APIEndpoint, connManager.GetClient(), logger)
+		connManager.SetJoinHandler(reminderChecker.OnJoinAsync)
+		logger.Success("Reminder checker initialized (on-join delivery enabled)")
+	}
 
 	// Cache command metadata from Python API (Requirement 31.5)
 	if healthResp != nil {

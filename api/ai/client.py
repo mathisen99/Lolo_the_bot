@@ -9,7 +9,7 @@ import json
 from openai import OpenAI
 from .config import AIConfig
 from .usage_tracker import log_usage, extract_usage_from_response
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, ClaudeTechTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation, KnowledgeBaseLearnTool, KnowledgeBaseSearchTool, KnowledgeBaseListTool, KnowledgeBaseForgetTool, MoltbookPostTool
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, ClaudeTechTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation, KnowledgeBaseLearnTool, KnowledgeBaseSearchTool, KnowledgeBaseListTool, KnowledgeBaseForgetTool, MoltbookPostTool, ReminderTool
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -80,6 +80,8 @@ class AIClient:
                         tools_used.append('CLAUDE_TECH')
                     elif func_name == 'moltbook_post':
                         tools_used.append('MOLTBOOK_POST')
+                    elif func_name == 'reminder':
+                        tools_used.append('REMINDER')
         
         if tools_used:
             tools_str = ', '.join(tools_used)
@@ -221,6 +223,14 @@ class AIClient:
             moltbook_post = MoltbookPostTool()
             self.tools[moltbook_post.name] = moltbook_post
             log_info("Moltbook post tool enabled")
+        
+        # Reminder tool
+        if self.config.reminder_enabled:
+            from api.tools.reminder import set_reminder_tool
+            reminder = ReminderTool()
+            self.tools[reminder.name] = reminder
+            set_reminder_tool(reminder)  # Register global instance for join-check endpoint
+            log_info("Reminder tool enabled")
     
     def generate_response(self, user_message: str, request_id: str) -> str:
         """
@@ -632,9 +642,12 @@ class AIClient:
                             continue
                     
                     # Inject permission_level/context for specific tools
-                    if func_name in ('manage_user_rules', 'execute_shell', 'bug_report', 'irc_command'):
+                    if func_name in ('manage_user_rules', 'execute_shell', 'bug_report', 'irc_command', 'reminder'):
                         func_args['permission_level'] = permission_level
                         if func_name == 'bug_report':
+                            func_args['requesting_user'] = nick
+                            func_args['channel'] = channel
+                        if func_name == 'reminder':
                             func_args['requesting_user'] = nick
                             func_args['channel'] = channel
                     

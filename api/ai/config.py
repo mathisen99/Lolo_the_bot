@@ -75,6 +75,9 @@ class AIConfig:
         # Moltbook posting
         self.moltbook_post_enabled: bool = config["tools"].get("moltbook_post_enabled", True)
         
+        # Reminder tool
+        self.reminder_enabled: bool = config["tools"].get("reminder_enabled", True)
+        
         # Shell execution settings
         self.shell_exec_timeout: int = config.get("shell_exec", {}).get("timeout", 30)
         
@@ -134,4 +137,6 @@ class AIConfig:
             tools.append("irc_command")
         if self.claude_code_enabled:
             tools.append("claude_tech")
+        if self.reminder_enabled:
+            tools.append("reminder")
         return tools

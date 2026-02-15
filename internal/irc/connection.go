@@ -24,6 +24,9 @@ type NumericHandler func(numeric int, params []string)
 // CTCPResponseHandler is a callback function for handling CTCP responses
 type CTCPResponseHandler func(source, ctcpType, response string)
 
+// JoinHandler is a callback function for handling JOIN events (for reminders, etc.)
+type JoinHandler func(nick, channel string)
+
 // ChannelUserTracker interface for tracking channel users
 type ChannelUserTracker interface {
 	OnNamesReply(channel string, names []string)
@@ -62,6 +65,7 @@ type ConnectionManager struct {
 	numericHandler      NumericHandler      // Callback for handling numeric responses
 	ctcpResponseHandler CTCPResponseHandler // Callback for handling CTCP responses
 	channelUserTracker  ChannelUserTracker  // Tracker for channel user state
+	joinHandler         JoinHandler         // Callback for handling JOIN events (reminders)
 }
 
 // NewConnectionManager creates a new connection manager
@@ -455,6 +459,11 @@ func (cm *ConnectionManager) handleJoin(msg *irc.Message) {
 			if cm.channelUserTracker != nil {
 				cm.channelUserTracker.OnJoin(channel, nick, false)
 			}
+
+			// Notify join handler (for reminder delivery, etc.)
+			if cm.joinHandler != nil {
+				cm.joinHandler(nick, channel)
+			}
 		}
 	}
 }
@@ -781,6 +790,11 @@ func (cm *ConnectionManager) SetCTCPResponseHandler(handler CTCPResponseHandler)
 // SetChannelUserTracker sets the channel user tracker for tracking user state
 func (cm *ConnectionManager) SetChannelUserTracker(tracker ChannelUserTracker) {
 	cm.channelUserTracker = tracker
+}
+
+// SetJoinHandler sets the callback for JOIN events (used for reminder delivery)
+func (cm *ConnectionManager) SetJoinHandler(handler JoinHandler) {
+	cm.joinHandler = handler
 }
 
 // handleMode handles MODE messages for channel user tracking

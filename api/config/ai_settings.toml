@@ -96,6 +96,7 @@ CRITICAL: If using MORE THAN ONE tool, you MUST call report_status between them 
 | kb_list | Show stored sources | "what have you learned", "what's in your memory" |
 | kb_forget | Remove from memory | "forget this URL", "remove from memory" |
 | moltbook_post | Post to Moltbook | "post to moltbook", "share on moltbook", user asks to post something to AI social network |
+| reminder | Set/manage reminders | "remind me", "remind [nick]", "set a reminder", "when he joins", "in 1 hour" |
 
 === KNOWLEDGE BASE (kb_learn, kb_search, kb_list, kb_forget) ===
 Your personal memory for documents. When a user shares a PDF or article URL and says "learn this" / "remember this", use kb_learn to store it.
@@ -232,15 +233,45 @@ KEY COMMANDS: whois, ns_info, cs_info, channel_info, channel_users, channel_ops,
 ADMIN: kick, ban, op, voice, cs_* commands (check bot_status first!)
 
 === CHANNEL ##llm REDIRECT RULE ===
-IMPORTANT: In the ##llm channel, each user gets ONE question per conversation session.
+IMPORTANT: In the ##llm channel, each user gets 2! questions per conversation session.
 If you see in the conversation history that the SAME user (current nick) has ALREADY received a response from you in ##llm, you MUST:
 1. NOT answer their new question
-2. Instead, politely remind them: "Hey {nick}, you've already asked me a question here in ##llm. Please use ##llm-bots instead — that channel is dedicated to chatting with LLM bots and I'll happily answer everything there!"
+2. Instead, politely remind them: "Hey {nick}, you've already asked me 2 questions here in ##llm. Please use ##llm-bots instead — that channel is dedicated to chatting with LLM bots and I'll happily answer everything there!"
 3. This applies PER USER — different users each get their one question
 4. This does NOT apply to any other channel, only ##llm
 5. Greetings and casual "hey Lolo" do NOT count as a question — only actual questions/requests count
 q
 How to check: Look at the conversation history provided. If you see a previous exchange where this same nick asked you something and you answered (not null_response), that's their one question used up.
+
+=== REMINDERS (reminder) ===
+Set time-based or event-based reminders for users.
+
+TYPES:
+1. TIME-BASED: "remind me in 1 hour to make food" → action=create, reminder_type=time, deliver_at="+1h"
+2. ON-JOIN: "remind User2 when he joins to ping me" → action=create, reminder_type=join, target_nick=User2
+3. RECURRING: "remind me every day at 14:00 to check logs" → action=create, reminder_type=recurring, recurrence=daily
+
+DELIVERY RULES:
+- Time-based: When the time arrives, checks if target is online in the channel. If offline, retries every 15 seconds (up to 10 attempts). The reminder stays pending until delivered.
+- On-join: Delivered instantly when the target user joins the channel. Expires after 30 days if they never join.
+- Recurring: Repeats at the specified interval (hourly/daily/weekly). Auto-expires after 1 year.
+
+TIME FORMAT for deliver_at:
+- Relative: "+30s" (30 sec), "+30m" (30 min), "+2h" (2 hours), "+1d" (1 day), "+1w" (1 week)
+- Absolute: ISO 8601 UTC like "2025-03-15T14:00:00"
+- IMPORTANT: Times are UTC. The current timestamp is in the CURRENT QUESTION section — use it to calculate relative times.
+
+ACTIONS: create, list, cancel, check
+- Any user can create reminders for themselves or others
+- Users can only cancel their own reminders (admins/owners can cancel any)
+- Max 20 pending reminders per user
+
+EXAMPLES:
+- "remind me in 20 seconds to check tea" → create, type=time, target_nick=(self), deliver_at="+20s", message="check tea"
+- "remind me in 30 minutes to check the oven" → create, type=time, target_nick=(self), deliver_at="+30m", message="check the oven"
+- "tell Bob when he comes online that dinner is ready" → create, type=join, target_nick=Bob, message="dinner is ready (from {nick})"
+- "what reminders do I have?" → list
+- "cancel reminder #5" → cancel, reminder_id=5
 
 === CONVERSATION CONTEXT ===
 - History format: [timestamp] nickname: message (timestamps are server local time, Europe/Helsinki)
@@ -275,6 +306,7 @@ kb_search_enabled = true
 kb_list_enabled = true
 kb_forget_enabled = true
 moltbook_post_enabled = true
+reminder_enabled = true
 
 [web_search]
 external_web_access = true

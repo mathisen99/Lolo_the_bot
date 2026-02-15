@@ -490,3 +490,32 @@ async def get_commands() -> CommandsResponse:
             metadata_list.append(metadata)
     
     return CommandsResponse(commands=metadata_list)
+
+
+# ---- Reminder endpoints (called by Go bot on JOIN events) ----
+
+class ReminderCheckRequest(BaseModel):
+    """Request model for checking join-based reminders."""
+    nick: str = Field(..., description="Nick of the user who joined")
+    channel: str = Field(..., description="Channel the user joined")
+
+
+class ReminderCheckResponse(BaseModel):
+    """Response model for join-based reminder check."""
+    messages: List[str] = Field(default_factory=list, description="Messages to deliver to IRC")
+
+
+@router.post("/reminders/check_join", response_model=ReminderCheckResponse)
+async def check_join_reminders(request: ReminderCheckRequest) -> ReminderCheckResponse:
+    """
+    Check for pending on-join reminders when a user joins a channel.
+    Called by the Go bot on JOIN events.
+    """
+    from api.tools.reminder import get_reminder_tool
+
+    tool = get_reminder_tool()
+    if tool is None:
+        return ReminderCheckResponse(messages=[])
+
+    messages = tool.check_join_reminders(request.nick, request.channel)
+    return ReminderCheckResponse(messages=messages)

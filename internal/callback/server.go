@@ -226,6 +226,10 @@ func (s *Server) executeCommand(req IRCExecuteRequest) (string, error) {
 	case "invite":
 		return s.executeInvite(req.Args)
 
+	// Send message to a channel/user (used by reminder scheduler, etc.)
+	case "send_message":
+		return s.executeSendMessage(req.Args)
+
 	// Bot status commands (local database queries)
 	case "bot_status":
 		return s.executeBotStatus(req.Args)
@@ -641,4 +645,21 @@ func (s *Server) executeSearchUsers(args []string) (string, error) {
 	}
 
 	return fmt.Sprintf("Users matching '%s' (%d): %s", pattern, len(nickChannels), strings.Join(results, "; ")), nil
+}
+
+// executeSendMessage sends a PRIVMSG to a channel or user
+// Args: [target, message]
+func (s *Server) executeSendMessage(args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("send_message requires target and message arguments")
+	}
+
+	target := args[0]
+	message := strings.Join(args[1:], " ")
+
+	if err := s.executor.SendMessage(target, message); err != nil {
+		return "", fmt.Errorf("failed to send message: %w", err)
+	}
+
+	return fmt.Sprintf("Message sent to %s", target), nil
 }

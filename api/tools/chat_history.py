@@ -179,7 +179,7 @@ New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, 
     ) -> tuple[str, List[Any]]:
         """Build WHERE clause and params for queries."""
         conditions = [
-            "channel = ?",
+            "LOWER(channel) = LOWER(?)",
             "substr(timestamp, 1, 19) >= ?"
         ]
         params: List[Any] = [channel, start_time_str]
@@ -396,6 +396,8 @@ New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, 
         semantic: bool = False,
         event_type: Optional[str] = None,
         include_events: bool = False,
+        _current_channel: str = "",
+        _permission_level: str = "normal",
         **kwargs
     ) -> str:
         """
@@ -414,6 +416,8 @@ New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, 
             semantic: If True, use semantic search (requires search_term)
             event_type: Filter by IRC event type (KICK, BAN, QUIT, NICK, etc.)
             include_events: If True, include events alongside messages
+            _current_channel: Injected by system - the channel the user is currently in
+            _permission_level: Injected by system - user's permission level
             
         Returns:
             Formatted message history, statistics, or error message
@@ -423,6 +427,16 @@ New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, 
         
         if not channel or not channel.strip():
             return "Error: Channel is required."
+        
+        # Normalize channel for case-insensitive matching
+        channel = channel.strip()
+        
+        # Access control: normal users can only query the channel they're currently in
+        from api.utils.output import log_info as _log
+        _log(f"[CHAT_HISTORY_ACL] permission_level='{_permission_level}', current_channel='{_current_channel}', requested_channel='{channel}'")
+        if _permission_level not in ("owner", "admin") and _current_channel:
+            if channel.strip().lower() != _current_channel.strip().lower():
+                return f"Error: You can only view chat history for the channel you're currently in ({_current_channel}). Cross-channel history is restricted to admins."
         
         # Determine if this is an event query
         is_event_query = bool(event_type)
@@ -452,8 +466,13 @@ New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, 
                 )
                 query_embedding = response.data[0].embedding
 
-                # Build filters
-                conditions = [{"channel": channel}]
+                # Build filters - try case-insensitive channel matching
+                # ChromaDB doesn't support LOWER(), so we match common case variants
+                channel_lower = channel.lower()
+                conditions = [{"$or": [
+                    {"channel": channel},
+                    {"channel": channel_lower},
+                ]}]
                 
                 if nick:
                     conditions.append({"nick": nick})

@@ -638,6 +638,11 @@ class AIClient:
                             func_args['requesting_user'] = nick
                             func_args['channel'] = channel
                     
+                    # Inject current channel and permission for chat history access control
+                    if func_name == 'query_chat_history':
+                        func_args['_current_channel'] = channel
+                        func_args['_permission_level'] = permission_level
+                    
                     # Execute the tool
                     result = tool.execute(**func_args)
                     

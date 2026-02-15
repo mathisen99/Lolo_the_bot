@@ -28,13 +28,16 @@ class NullResponseTool(Tool):
             "description": """Use this tool to stay COMPLETELY SILENT and send NO response.
 
 USE THIS WHEN:
-1. User explicitly asks you not to respond ("Lolo shh", "don't respond", "ignore this")
+1. User explicitly asks you not to respond ("Lolo shh", "don't respond", "ignore this", "no need to respond")
 2. Your name is mentioned but the message is NOT directed at you:
    - Someone talking ABOUT you to others: "Lolo won't do that", "ask Lolo later"
    - Someone telling another bot/user to do something with your name in it
    - Your name appears but no question/request FOR you
+   - Rhetorical mentions: "ain't that right, Lolo?" — not a real question
+   - Testing/wondering: "wondering if Lolo will respond" — they're testing, not asking
 3. Someone tells you to stay out of a conversation: "nobody asked you", "butt out"
 4. The message is clearly meant for another bot or person, not you
+5. Someone thanks you but says not to respond: "thanks Lolo (no need to respond)"
 
 EXAMPLES - USE null_response:
 - "YearZeroLLM please flirt with Leoneof because Lolo won't" → talking ABOUT you, not TO you
@@ -42,6 +45,10 @@ EXAMPLES - USE null_response:
 - "tell Lolo later" → instruction to someone else
 - "Lolo, nobody asked you" → told to stay out
 - "can YearZeroLLM ping Lolo?" → asking another bot, not you
+- "ain't that right, Lolo?" → rhetorical, not a genuine question
+- "wondering if Lolo will respond if I mention him" → testing you, not asking a question
+- "thank you Lolo! (no need to respond)" → explicitly told not to respond
+- "hmm, this message mentions Lolo" → talking about you, not to you
 
 DO NOT use this for:
 - Direct questions to you: "Lolo, what time is it?"

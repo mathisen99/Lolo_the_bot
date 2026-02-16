@@ -51,7 +51,7 @@ class SoraVideoTool(Tool):
                     },
                     "seconds": {
                         "type": "integer",
-                        "description": "Video duration in seconds (4 or 8). Default: 4. Owner can also use 12."
+                        "description": "Video duration in seconds (4 or 8 or 12s for owner only). Default: 4. Owner can also use 12."
                     },
                     "orientation": {
                         "type": "string",

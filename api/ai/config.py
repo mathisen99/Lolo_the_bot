@@ -78,6 +78,9 @@ class AIConfig:
         # Reminder tool
         self.reminder_enabled: bool = config["tools"].get("reminder_enabled", True)
         
+        # Sora video tool
+        self.sora_video_enabled: bool = config["tools"].get("sora_video_enabled", True)
+        
         # Shell execution settings
         self.shell_exec_timeout: int = config.get("shell_exec", {}).get("timeout", 30)
         
@@ -139,4 +142,6 @@ class AIConfig:
             tools.append("claude_tech")
         if self.reminder_enabled:
             tools.append("reminder")
+        if self.sora_video_enabled:
+            tools.append("sora_video")
         return tools

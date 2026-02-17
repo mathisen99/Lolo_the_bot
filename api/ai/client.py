@@ -915,7 +915,7 @@ Remember: Quality over speed. The user specifically requested deep research with
             prompt_parts.append("=== END OF CONTEXT ===")
         
         prompt_parts.append("")
-        prompt_parts.append("Please respond to the CURRENT QUESTION above. Use the conversation context if relevant, but focus on answering what was just asked.")
+        prompt_parts.append("First, decide if this message is genuinely directed at you (see WHEN TO STAY SILENT rules). If not, use null_response. If it IS for you, respond to the CURRENT QUESTION. Use the conversation context if relevant.")
         
         return "\n".join(prompt_parts)
     

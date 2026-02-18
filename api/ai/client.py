@@ -9,7 +9,7 @@ import json
 from openai import OpenAI
 from .config import AIConfig
 from .usage_tracker import log_usage, extract_usage_from_response
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, ClaudeTechTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation, KnowledgeBaseLearnTool, KnowledgeBaseSearchTool, KnowledgeBaseListTool, KnowledgeBaseForgetTool, MoltbookPostTool, ReminderTool, SoraVideoTool
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, ClaudeTechTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation, KnowledgeBaseLearnTool, KnowledgeBaseSearchTool, KnowledgeBaseListTool, KnowledgeBaseForgetTool, MoltbookPostTool, ReminderTool, SoraVideoTool, LogAnalyzerTool
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -84,6 +84,8 @@ class AIClient:
                         tools_used.append('REMINDER')
                     elif func_name == 'sora_video':
                         tools_used.append('SORA_VIDEO')
+                    elif func_name == 'log_analyzer':
+                        tools_used.append('LOG_ANALYZER')
         
         if tools_used:
             tools_str = ', '.join(tools_used)
@@ -239,6 +241,12 @@ class AIClient:
             sora_video = SoraVideoTool()
             self.tools[sora_video.name] = sora_video
             log_info("Sora video tool enabled (sora-2)")
+        
+        # Log analyzer
+        if self.config.log_analyzer_enabled:
+            log_analyzer = LogAnalyzerTool()
+            self.tools[log_analyzer.name] = log_analyzer
+            log_info("Log analyzer tool enabled")
     
     def generate_response(self, user_message: str, request_id: str) -> str:
         """
@@ -650,7 +658,7 @@ class AIClient:
                             continue
                     
                     # Inject permission_level/context for specific tools
-                    if func_name in ('manage_user_rules', 'execute_shell', 'bug_report', 'irc_command', 'reminder', 'sora_video'):
+                    if func_name in ('manage_user_rules', 'execute_shell', 'bug_report', 'irc_command', 'reminder', 'sora_video', 'log_analyzer'):
                         func_args['permission_level'] = permission_level
                         if func_name == 'bug_report':
                             func_args['requesting_user'] = nick

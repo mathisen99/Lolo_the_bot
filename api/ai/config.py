@@ -81,6 +81,9 @@ class AIConfig:
         # Sora video tool
         self.sora_video_enabled: bool = config["tools"].get("sora_video_enabled", True)
         
+        # Log analyzer tool
+        self.log_analyzer_enabled: bool = config["tools"].get("log_analyzer_enabled", True)
+        
         # Shell execution settings
         self.shell_exec_timeout: int = config.get("shell_exec", {}).get("timeout", 30)
         
@@ -144,4 +147,6 @@ class AIConfig:
             tools.append("reminder")
         if self.sora_video_enabled:
             tools.append("sora_video")
+        if self.log_analyzer_enabled:
+            tools.append("log_analyzer")
         return tools

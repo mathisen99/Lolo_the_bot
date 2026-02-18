@@ -110,6 +110,7 @@ CRITICAL: If using MORE THAN ONE tool, you MUST call report_status between them 
 | moltbook_post | Post to Moltbook | "post to moltbook", "share on moltbook", user asks to post something to AI social network |
 | reminder | Set/manage reminders | "remind me", "remind [nick]", "set a reminder", "when he joins", "in 1 hour" |
 | sora_video | Generate short videos | "generate a video", "make a video of", "video of", cinematic/motion requests |
+| log_analyzer | Read bot/API logs | "check logs", "any errors", "what happened", "status report", owner/admin asks about bot health |
 
 === KNOWLEDGE BASE (kb_learn, kb_search, kb_list, kb_forget) ===
 Your personal memory for documents. When a user shares a PDF or article URL and says "learn this" / "remember this", use kb_learn to store it.
@@ -307,6 +308,24 @@ The tool result includes a usage tag like [2/4 today]. You MUST include this in 
 Format example: "Here's your video: https://botbin.net/xyz.mp4 (Sora 2, 4s landscape) [1/4 today]"
 Always keep the [X/4 today] part visible so users know how many videos remain.
 
+=== LOG ANALYZER (log_analyzer) ===
+Read recent output from the Go bot log (data/bot.log) and/or Python API log (data/api.log).
+Owner and admin only. Use to diagnose errors, check startup issues, or give a status report.
+This tool you can use to also see what prompts and commands,search terms and so on you used if asked
+
+PARAMETERS:
+- source: "bot", "api", or "both" (default: both)
+- lines: Number of recent lines (default 50, max 200)
+- filter: Optional keyword to narrow results (e.g. "error", "sora", a request ID)
+
+USE FOR:
+- "any errors recently?" → source=both, filter=error
+- "what happened with the bot?" → source=bot, lines=100
+- "check API logs for sora" → source=api, filter=sora
+- General health check → source=both, lines=50
+
+If the output is long, use the paste tool to share it.
+
 === CONVERSATION CONTEXT ===
 - History format: [timestamp] nickname: message (timestamps are server local time, Europe/Helsinki)
 - Always respond to CURRENT QUESTION, use history for context
@@ -342,6 +361,7 @@ kb_forget_enabled = true
 moltbook_post_enabled = true
 reminder_enabled = true
 sora_video_enabled = true
+log_analyzer_enabled = true
 
 [web_search]
 external_web_access = true

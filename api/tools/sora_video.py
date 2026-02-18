@@ -185,7 +185,15 @@ class SoraVideoTool(Tool):
             # 7. Log cost to usage DB
             _log_video_cost(requesting_user, channel, cost, seconds)
 
-            return f"{url} (Sora 2, {seconds}s {orientation})"
+            # 8. Build usage counter
+            from .video_rate_limit import get_remaining_video_quota, MAX_VIDEOS_PER_DAY
+            if permission_level == "owner":
+                usage_tag = ""
+            else:
+                used = MAX_VIDEOS_PER_DAY - get_remaining_video_quota()
+                usage_tag = f" [{used}/{MAX_VIDEOS_PER_DAY} today]"
+
+            return f"{url} (Sora 2, {seconds}s {orientation}){usage_tag}"
 
         except requests.Timeout:
             return "Error: Request timed out communicating with Sora API."

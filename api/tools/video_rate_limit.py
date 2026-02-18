@@ -37,7 +37,7 @@ def check_video_rate_limit(permission_level: str) -> Tuple[bool, str]:
             remaining = int((_video_timestamps[0] + WINDOW_SECONDS) - now)
             hours = remaining // 3600
             minutes = (remaining % 3600) // 60
-            return False, f"Video rate limit reached ({MAX_VIDEOS_PER_DAY}/day). Try again in ~{hours}h {minutes}m."
+            return False, f"All {MAX_VIDEOS_PER_DAY} of {MAX_VIDEOS_PER_DAY} videos used today. Try again in ~{hours}h {minutes}m."
 
         return True, ""
 

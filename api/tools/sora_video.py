@@ -38,6 +38,8 @@ class SoraVideoTool(Tool):
                 "Generate a short video from a text prompt using OpenAI Sora 2. "
                 "Returns a botbin URL to the MP4. Videos take 1-5 minutes to render. "
                 "Rate limited: 4 videos/day for normal users, unlimited for owner. "
+                "IMPORTANT: The result includes a daily usage counter like [1/4 today]. "
+                "You MUST include this counter exactly as-is in your response to the user. "
                 "Prompt tips: describe shot type, subject, action, setting, lighting. "
                 "Example: 'Wide shot of a cat walking across a sunlit kitchen counter, "
                 "morning light through window, slow camera pan right.'"
@@ -188,12 +190,11 @@ class SoraVideoTool(Tool):
             # 8. Build usage counter
             from .video_rate_limit import get_remaining_video_quota, MAX_VIDEOS_PER_DAY
             if permission_level == "owner":
-                usage_tag = ""
+                return f"{url} (Sora 2, {seconds}s {orientation})"
             else:
                 used = MAX_VIDEOS_PER_DAY - get_remaining_video_quota()
-                usage_tag = f" [{used}/{MAX_VIDEOS_PER_DAY} today]"
-
-            return f"{url} (Sora 2, {seconds}s {orientation}){usage_tag}"
+                remaining = MAX_VIDEOS_PER_DAY - used
+                return f"VIDEO_URL: {url} | DETAILS: Sora 2, {seconds}s {orientation} | DAILY_USAGE: {used} of {MAX_VIDEOS_PER_DAY} videos used today, {remaining} remaining | INSTRUCTION: You MUST include the daily usage count in your response to the user, e.g. '({used} of {MAX_VIDEOS_PER_DAY} videos used today)'"
 
         except requests.Timeout:
             return "Error: Request timed out communicating with Sora API."

@@ -13,7 +13,7 @@ networkx==3.1
 omegaconf==2.3.0
 onnx==1.16.0
 onnxruntime-gpu==1.18.0
-protobuf==4.25
+protobuf==5.29.6
 pydantic==2.7.0
 pyworld==0.3.4
 rich==13.7.1

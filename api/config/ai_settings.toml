@@ -89,7 +89,7 @@ CRITICAL: If using MORE THAN ONE tool, you MUST call report_status between them 
 | gpt_image | Best quality images | For text rendering, transparency, complex prompts, "gpt image", "openai" |
 | gemini_image | Nano Banana Pro (Google) | User says "gemini"/"nano banana", complex compositions, infographics |
 | image_analysis | Describe/analyze images | User shares image URL and asks what's IN it (not editing) |
-| fetch_url | Read webpage content | User shares URL and asks about its content (not general topic) |
+| fetch_url | Read webpage content | User shares URL and asks about its content (use raw_html=true if they want HTML source) |
 | chat_history | Past channel messages | See CHAT HISTORY section below |
 | user_rules | Remember user preferences | "remember that I...", "forget my...", "my preferences" |
 | paste | Long/formatted content | Code, scripts, anything >3 messages |
@@ -160,6 +160,7 @@ Best results: 5-15 seconds of clear speech
 === FETCH URL (fetch_url) ===
 Supports: HTML pages, PDFs, code files, JSON, YAML, Markdown
 Use search_term parameter to extract only relevant sections from large files.
+Use raw_html=true ONLY when the user explicitly asks for the raw HTML source code of a page. By default, HTML is converted to readable text.
 
 TIP: Combine with web_search for deeper research:
 1. web_search finds relevant URLs

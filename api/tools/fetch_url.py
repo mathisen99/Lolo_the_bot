@@ -65,6 +65,10 @@ For PDFs: Use page numbers like "Page 5" or section titles.""",
                     "search_term": {
                         "type": ["string", "null"],
                         "description": "Search for specific content and return only matching sections. Use to: (1) Find specific functions/topics/sections in large files, (2) Continue reading truncated content by searching for the next section/heading/function after the cutoff point, (3) Jump to relevant parts without re-reading already seen content. Extracts full code blocks or paragraphs containing matches. Case-insensitive."
+                    },
+                    "raw_html": {
+                        "type": "boolean",
+                        "description": "If true, return the raw HTML source of the page instead of extracted readable text. Only affects HTML pages. Default: false."
                     }
                 },
                 "required": ["url"],
@@ -542,13 +546,14 @@ For PDFs: Use page numbers like "Page 5" or section titles.""",
             
             return ''.join(result_parts)
 
-    def execute(self, url: str, search_term: Optional[str] = None, **kwargs) -> str:
+    def execute(self, url: str, search_term: Optional[str] = None, raw_html: bool = False, **kwargs) -> str:
         """
         Fetch and extract content from a URL.
         
         Args:
             url: The URL to fetch
             search_term: Optional search term to extract only matching sections
+            raw_html: If True, return raw HTML source instead of extracted text
             **kwargs: Additional parameters (ignored)
             
         Returns:
@@ -622,18 +627,25 @@ For PDFs: Use page numbers like "Page 5" or section titles.""",
         
         # Handle content based on type
         if self._is_html_content(content_type, content):
-            # Extract text from HTML (pass URL for resolving relative links)
-            try:
-                text = self._extract_text_bs4(content, base_url=url)
-            except Exception:
-                text = self._extract_text_simple(content)
+            if raw_html:
+                # Return raw HTML source as-is
+                text = content
+                title_match = re.search(r'<title[^>]*>([^<]+)</title>', content, re.IGNORECASE)
+                title = (title_match.group(1).strip() + " (Raw HTML)") if title_match else "Raw HTML"
+            else:
+                # Extract text from HTML (pass URL for resolving relative links)
+                try:
+                    text = self._extract_text_bs4(content, base_url=url)
+                except Exception:
+                    text = self._extract_text_simple(content)
+                
+                if not text:
+                    return "Error: No readable content found on page"
             
-            if not text:
-                return "Error: No readable content found on page"
-            
-            # Get page title if possible
-            title_match = re.search(r'<title[^>]*>([^<]+)</title>', content, re.IGNORECASE)
-            title = title_match.group(1).strip() if title_match else None
+            # Get page title if possible (skip if already set by raw_html)
+            if not raw_html:
+                title_match = re.search(r'<title[^>]*>([^<]+)</title>', content, re.IGNORECASE)
+                title = title_match.group(1).strip() if title_match else None
         else:
             # Non-HTML content (code, JSON, plain text, etc.) - return as-is
             text = content.strip()

@@ -37,7 +37,7 @@ class GeminiImageTool(Tool):
         """Initialize Gemini Image tool."""
         self.api_key = os.environ.get("GEMINI_API_KEY")
         self.base_url = "https://generativelanguage.googleapis.com/v1beta/models"
-        self.model = "gemini-3-pro-image-preview"
+        self.model = "gemini-3.1-flash-image-preview"
     
     @property
     def name(self) -> str:
@@ -48,7 +48,7 @@ class GeminiImageTool(Tool):
         return {
             "type": "function",
             "name": "gemini_image",
-            "description": """Generate or edit images using Google's Gemini 3 Pro Image Preview model.
+            "description": """Generate or edit images using Google's Gemini 3.1 flash image Preview model.
 
 CAPABILITIES:
 - Generate high-quality images from text prompts

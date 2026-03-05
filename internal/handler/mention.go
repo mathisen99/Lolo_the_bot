@@ -51,8 +51,9 @@ func (h *MentionHandler) UpdateBotNick(nick string) {
 	h.botNick = nick
 }
 
-// ContainsMention checks if a message contains a mention of the bot
-// Only matches if the nickname is a complete word (surrounded by whitespace or at boundaries)
+// ContainsMention checks if a message contains a mention of the bot.
+// Matches the bot nick as a complete word, plus one bridge exception:
+// "<botNick>/libera".
 func (h *MentionHandler) ContainsMention(message string) bool {
 	if h.botNick == "" {
 		return false
@@ -61,6 +62,7 @@ func (h *MentionHandler) ContainsMention(message string) bool {
 	// Case-insensitive check
 	lowerMessage := strings.ToLower(message)
 	lowerNick := strings.ToLower(h.botNick)
+	bridgeNick := lowerNick + "/libera"
 
 	// Split message into words (by whitespace only)
 	words := strings.Fields(lowerMessage)
@@ -69,7 +71,7 @@ func (h *MentionHandler) ContainsMention(message string) bool {
 		// Strip common trailing punctuation from the word
 		word = strings.TrimRight(word, ".,!?;:'\"")
 
-		if word == lowerNick {
+		if word == lowerNick || word == bridgeNick {
 			return true
 		}
 	}

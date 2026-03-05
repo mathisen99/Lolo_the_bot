@@ -14,16 +14,7 @@ from .base import Tool
 
 class UsageStatsTool(Tool):
     """Tool for querying AI usage statistics and costs."""
-    
-    # Pricing per 1M tokens (gpt-5.2)
-    PRICING = {
-        "gpt-5.2": {
-            "input": 1.75,      # $1.75 per 1M input tokens
-            "cached": 0.175,   # $0.175 per 1M cached tokens
-            "output": 14.00,   # $14.00 per 1M output tokens
-        }
-    }
-    
+
     TIME_RANGES = {
         "today": "today",
         "last_hour": "hour",

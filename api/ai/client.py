@@ -1,5 +1,5 @@
 """
-AI client for GPT-5.1 integration.
+AI client for OpenAI Responses API integration.
 
 Handles communication with OpenAI API and tool execution.
 """
@@ -14,7 +14,7 @@ from api.utils.output import log_info, log_error, log_debug, log_success, log_wa
 
 
 class AIClient:
-    """Client for interacting with GPT-5.1 API."""
+    """Client for interacting with the configured OpenAI model."""
     
     def __init__(self, config: Optional[AIConfig] = None):
         """
@@ -766,7 +766,7 @@ class AIClient:
                 tool_defs = [t.get_definition() for t in self.tools.values()]
                 
                 # Use previous_response_id for multi-turn - this enables CoT passing
-                # and better caching as documented in GPT-5.2 guide
+                # and better caching as documented in GPT-5.x Responses guidance
                 response = self.client.responses.create(
                     model=self.config.model_name,
                     input=function_outputs,

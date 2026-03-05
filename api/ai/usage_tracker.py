@@ -13,6 +13,11 @@ from api.utils.output import log_info, log_warning, log_error
 
 # Pricing per 1M tokens
 PRICING = {
+    "gpt-5.4": {
+        "input": 2.50,      # $2.50 per 1M input tokens
+        "cached": 0.25,     # $0.25 per 1M cached tokens
+        "output": 15.00,    # $15.00 per 1M output tokens
+    },
     "gpt-5.2": {
         "input": 1.75,      # $1.75 per 1M input tokens
         "cached": 0.175,    # $0.175 per 1M cached tokens  

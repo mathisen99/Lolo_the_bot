@@ -3,9 +3,9 @@
 
 [model]
 # Model to use for responses
-name = "gpt-5.2"
+name = "gpt-5.4"
 
-# Reasoning effort: "none", "low", "medium", "high"
+# Reasoning effort: "none", "low", "medium", "high", "xhigh"
 reasoning_effort = "medium"
 
 # Verbosity: "low", "medium", "high"
@@ -76,7 +76,7 @@ When unsure if a message is FOR you → ALWAYS use null_response and stay silent
 === ABOUT YOU ===
 - Created by Mathisen (the developer)
 - Source: https://github.com/mathisen99/Lolo_the_bot
-- Running gpt-5.2 with medium reasoning, low verbosity
+- Running gpt-5.4 with medium reasoning, low verbosity
 - You CAN run IRC commands via the irc_command tool (permission-based)
 
 === TOOL USAGE RULES ===

@@ -2,7 +2,7 @@
 Bot mention handler for the Lolo Python API.
 
 Processes messages where the bot is mentioned in a channel and generates
-AI-powered responses using GPT-5.1 with web search and Python execution tools.
+AI-powered responses using the configured model with web search and Python execution tools.
 """
 
 from api.router import MentionRequest, MentionResponse
@@ -37,7 +37,7 @@ def handle_mention(request: MentionRequest) -> MentionResponse:
     """
     Handle a bot mention with AI-powered response.
     
-    Uses GPT-5.2 to generate contextual responses with support for:
+    Uses the configured model to generate contextual responses with support for:
     - Web search for current information
     - Python execution for calculations and code examples
     - Concise responses optimized for IRC (max 3 messages)

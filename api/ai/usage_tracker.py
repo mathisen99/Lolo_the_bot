@@ -40,6 +40,13 @@ PRICING = {
 WEB_SEARCH_COST = 0.01       # $10/1k calls = $0.01 each
 # Note: code_interpreter removed - now using self-hosted Firecracker (free)
 
+# GPT-5.4 long-context pricing tier:
+# If input exceeds 272K tokens, apply higher rates for the full session.
+HIGH_CONTEXT_TIER_MODELS = {"gpt-5.4", "gpt-5.4-pro"}
+HIGH_CONTEXT_INPUT_THRESHOLD = 272_000
+HIGH_CONTEXT_INPUT_MULTIPLIER = 2.0
+HIGH_CONTEXT_OUTPUT_MULTIPLIER = 1.5
+
 
 def calculate_cost(model: str, input_tokens: int, cached_tokens: int, output_tokens: int) -> float:
     """
@@ -50,14 +57,22 @@ def calculate_cost(model: str, input_tokens: int, cached_tokens: int, output_tok
     """
     pricing = PRICING.get(model, PRICING["default"])
     
-    # Cached tokens are a subset of input tokens, not additional
-    # Uncached = total input - cached portion
-    uncached_tokens = input_tokens - cached_tokens
+    # Cached tokens are a subset of input tokens, not additional.
+    # Clamp to avoid negative values from malformed usage payloads.
+    cached_tokens = max(0, min(cached_tokens, input_tokens))
+    uncached_tokens = max(0, input_tokens - cached_tokens)
+
+    # GPT-5.4 pricing tier for large-context sessions.
+    input_multiplier = 1.0
+    output_multiplier = 1.0
+    if model in HIGH_CONTEXT_TIER_MODELS and input_tokens > HIGH_CONTEXT_INPUT_THRESHOLD:
+        input_multiplier = HIGH_CONTEXT_INPUT_MULTIPLIER
+        output_multiplier = HIGH_CONTEXT_OUTPUT_MULTIPLIER
     
     # Cost calculation (pricing is per 1M tokens)
-    uncached_cost = (uncached_tokens / 1_000_000) * pricing["input"]
-    cached_cost = (cached_tokens / 1_000_000) * pricing["cached"]
-    output_cost = (output_tokens / 1_000_000) * pricing["output"]
+    uncached_cost = (uncached_tokens / 1_000_000) * pricing["input"] * input_multiplier
+    cached_cost = (cached_tokens / 1_000_000) * pricing["cached"] * input_multiplier
+    output_cost = (output_tokens / 1_000_000) * pricing["output"] * output_multiplier
     
     return uncached_cost + cached_cost + output_cost
 

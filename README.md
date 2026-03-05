@@ -5,7 +5,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 ## Features
 
 ### AI-Powered Tools
-- **AI Conversations** - GPT-5.2 powered responses when mentioned
+- **AI Conversations** - GPT-5.4 powered responses when mentioned
 - **YouTube Search** - Search videos, channels, and read comments
 - **Usage Tracking** - Track token usage and costs
 - **Web Search** - Real-time information lookup via Brave Search
@@ -484,7 +484,8 @@ Edit `api/config/ai_settings.toml` to personalize your bot. Key things to custom
 **AI Behavior:**
 ```toml
 [model]
-reasoning_effort = "low"  # low/medium/high - affects AI thinking depth
+name = "gpt-5.4"          # Main model for AI conversations
+reasoning_effort = "low"  # none/low/medium/high/xhigh - affects AI thinking depth
 verbosity = "low"         # low/medium/high - response detail level
 ```
 

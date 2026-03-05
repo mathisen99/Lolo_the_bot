@@ -8,9 +8,10 @@ Long responses are automatically pasted to botbin.
 
 import os
 import json
+import re
 import tempfile
 import requests
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from .base import Tool
 
 
@@ -23,6 +24,58 @@ class ClaudeCodeTool(Tool):
     
     # Threshold for pasting (characters) - IRC messages are ~400 bytes
     PASTE_THRESHOLD = 800
+
+    # Map common markdown language tags to file extensions
+    LANGUAGE_EXTENSIONS = {
+        "python": "py",
+        "py": "py",
+        "javascript": "js",
+        "js": "js",
+        "node": "js",
+        "nodejs": "js",
+        "typescript": "ts",
+        "ts": "ts",
+        "c": "c",
+        "cpp": "cpp",
+        "c++": "cpp",
+        "cc": "cpp",
+        "cxx": "cpp",
+        "csharp": "cs",
+        "c#": "cs",
+        "cs": "cs",
+        "go": "go",
+        "golang": "go",
+        "rust": "rs",
+        "rs": "rs",
+        "java": "java",
+        "kotlin": "kt",
+        "kt": "kt",
+        "swift": "swift",
+        "php": "php",
+        "ruby": "rb",
+        "rb": "rb",
+        "bash": "sh",
+        "sh": "sh",
+        "shell": "sh",
+        "zsh": "sh",
+        "powershell": "ps1",
+        "ps1": "ps1",
+        "sql": "sql",
+        "html": "html",
+        "css": "css",
+        "scss": "scss",
+        "sass": "sass",
+        "json": "json",
+        "yaml": "yml",
+        "yml": "yml",
+        "toml": "toml",
+        "xml": "xml",
+        "markdown": "md",
+        "md": "md",
+        "lua": "lua",
+        "perl": "pl",
+        "r": "r",
+    }
     
     def __init__(self):
         """Initialize Claude tech tool."""
@@ -126,7 +179,8 @@ Returns detailed explanations with examples. Long responses auto-paste to botbin
             return None
         
         try:
-            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".md") as tmp:
+            file_suffix = os.path.splitext(filename)[1] or ".txt"
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=file_suffix) as tmp:
                 tmp.write(content)
                 tmp_path = tmp.name
             
@@ -150,6 +204,101 @@ Returns detailed explanations with examples. Long responses auto-paste to botbin
             pass
         
         return None
+
+    def _normalize_language_tag(self, tag: str) -> str:
+        """Normalize a markdown code fence language tag."""
+        if not tag:
+            return ""
+        normalized = tag.strip().lower()
+        normalized = normalized.strip("{}").lstrip(".")
+        if normalized.startswith("language-"):
+            normalized = normalized[len("language-"):]
+        # Drop extra metadata like "python title=foo.py"
+        normalized = normalized.split()[0]
+        return normalized
+
+    def _language_to_extension(self, language: str) -> Optional[str]:
+        """Map a language hint to a file extension."""
+        normalized = self._normalize_language_tag(language)
+        if not normalized:
+            return None
+        return self.LANGUAGE_EXTENSIONS.get(normalized)
+
+    def _guess_extension_from_hints(self, *hints: str) -> Optional[str]:
+        """Guess file extension from free-form topic/question hints."""
+        for hint in hints:
+            if not hint:
+                continue
+            tokens = re.findall(r"[a-zA-Z0-9+#_.-]+", hint.lower())
+            for token in tokens:
+                ext = self._language_to_extension(token)
+                if ext:
+                    return ext
+        return None
+
+    def _extract_fenced_code_blocks(self, text: str) -> List[Tuple[str, str]]:
+        """Extract all triple-backtick fenced code blocks."""
+        blocks: List[Tuple[str, str]] = []
+        in_block = False
+        language = ""
+        current_lines: List[str] = []
+
+        for line in text.splitlines():
+            stripped = line.strip()
+
+            if not in_block:
+                if stripped.startswith("```"):
+                    in_block = True
+                    language = stripped[3:].strip()
+                    current_lines = []
+                continue
+
+            if stripped.startswith("```"):
+                code = "\n".join(current_lines).strip("\n")
+                if code:
+                    blocks.append((language, code))
+                in_block = False
+                language = ""
+                current_lines = []
+                continue
+
+            current_lines.append(line)
+
+        # Keep content if Claude forgets to close the final fence
+        if in_block and current_lines:
+            code = "\n".join(current_lines).strip("\n")
+            if code:
+                blocks.append((language, code))
+
+        return blocks
+
+    def _build_paste_payload(self, response: str, topic_hint: str, question_hint: str) -> Tuple[str, str]:
+        """
+        Build clean paste payload from Claude response.
+
+        If fenced code blocks are present, remove fences and paste raw code.
+        """
+        code_blocks = self._extract_fenced_code_blocks(response)
+
+        if code_blocks:
+            if len(code_blocks) == 1:
+                paste_content = code_blocks[0][1].strip("\n")
+            else:
+                paste_content = "\n\n".join(block for _, block in code_blocks).strip("\n")
+
+            primary_language, _ = max(code_blocks, key=lambda block: len(block[1]))
+            extension = (
+                self._language_to_extension(primary_language)
+                or self._guess_extension_from_hints(topic_hint)
+                or self._guess_extension_from_hints(question_hint)
+                or "txt"
+            )
+            return f"{paste_content}\n", f"claude_code.{extension}"
+
+        # No fenced blocks: keep original text, but avoid markdown default
+        extension = self._guess_extension_from_hints(topic_hint)
+        filename = f"claude_code.{extension}" if extension else "claude_response.txt"
+        return f"{response.rstrip()}\n", filename
     
     def _extract_summary(self, response: str, max_length: int = 300) -> str:
         """Extract a brief summary from the response."""
@@ -237,7 +386,12 @@ Returns detailed explanations with examples. Long responses auto-paste to botbin
         # Check if response needs pasting
         if len(response) > self.PASTE_THRESHOLD:
             # Paste to botbin
-            paste_url = self._paste_to_botbin(response, f"claude_code.md")
+            paste_content, paste_filename = self._build_paste_payload(
+                response=response,
+                topic_hint=effective_topic,
+                question_hint=question,
+            )
+            paste_url = self._paste_to_botbin(paste_content, paste_filename)
             
             if paste_url:
                 summary = self._extract_summary(response)

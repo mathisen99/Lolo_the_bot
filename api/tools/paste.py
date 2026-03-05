@@ -7,7 +7,7 @@ Provides text/code pasting to botbin.net for content that doesn't work well on I
 import os
 import tempfile
 import requests
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Tuple
 from .base import Tool
 
 
@@ -22,6 +22,54 @@ class PasteTool(Tool):
     }
     
     VALID_EXPIRIES = {"1day", "1week", "1month"}
+
+    # Map common markdown language tags to file extensions
+    LANGUAGE_EXTENSIONS = {
+        "python": "py",
+        "py": "py",
+        "javascript": "js",
+        "js": "js",
+        "typescript": "ts",
+        "ts": "ts",
+        "c": "c",
+        "cpp": "cpp",
+        "c++": "cpp",
+        "cc": "cpp",
+        "cxx": "cpp",
+        "csharp": "cs",
+        "c#": "cs",
+        "cs": "cs",
+        "go": "go",
+        "golang": "go",
+        "rust": "rs",
+        "rs": "rs",
+        "java": "java",
+        "kotlin": "kt",
+        "kt": "kt",
+        "swift": "swift",
+        "php": "php",
+        "ruby": "rb",
+        "rb": "rb",
+        "bash": "sh",
+        "sh": "sh",
+        "shell": "sh",
+        "zsh": "sh",
+        "powershell": "ps1",
+        "ps1": "ps1",
+        "sql": "sql",
+        "html": "html",
+        "css": "css",
+        "scss": "scss",
+        "sass": "sass",
+        "json": "json",
+        "yaml": "yml",
+        "yml": "yml",
+        "toml": "toml",
+        "xml": "xml",
+        "lua": "lua",
+        "perl": "pl",
+        "r": "r",
+    }
     
     def __init__(self):
         """Initialize paste tool."""
@@ -47,7 +95,7 @@ class PasteTool(Tool):
                     },
                     "filename": {
                         "type": "string",
-                        "description": "Filename for the paste with extension (e.g., 'example.py', 'code.js', 'notes.txt'). Extension determines content type display."
+                        "description": "Filename for the paste with extension (e.g., 'example.py', 'code.js', 'notes.txt'). Extension determines content type display. If omitted or generic (.txt), extension may be auto-inferred for fenced code."
                     },
                     "retention": {
                         "type": "string",
@@ -59,6 +107,118 @@ class PasteTool(Tool):
                 "additionalProperties": False
             }
         }
+
+    def _normalize_language_tag(self, tag: str) -> str:
+        """Normalize a markdown fence language tag."""
+        if not tag:
+            return ""
+        normalized = tag.strip().lower()
+        normalized = normalized.strip("{}").lstrip(".")
+        if normalized.startswith("language-"):
+            normalized = normalized[len("language-"):]
+        normalized = normalized.split()[0]
+        return normalized
+
+    def _language_to_extension(self, language: str) -> Optional[str]:
+        """Map a language hint to extension."""
+        normalized = self._normalize_language_tag(language)
+        if not normalized:
+            return None
+        return self.LANGUAGE_EXTENSIONS.get(normalized)
+
+    def _extract_fenced_blocks_with_context(self, text: str) -> Tuple[List[Tuple[str, str]], bool]:
+        """
+        Extract triple-backtick fenced code blocks.
+
+        Returns:
+            (blocks, has_non_code_text)
+        """
+        blocks: List[Tuple[str, str]] = []
+        in_block = False
+        language = ""
+        current_lines: List[str] = []
+        has_non_code_text = False
+
+        for line in text.splitlines():
+            stripped = line.strip()
+
+            if not in_block:
+                if stripped.startswith("```"):
+                    in_block = True
+                    language = stripped[3:].strip()
+                    current_lines = []
+                else:
+                    if stripped:
+                        has_non_code_text = True
+                continue
+
+            if stripped.startswith("```"):
+                code = "\n".join(current_lines).strip("\n")
+                if code:
+                    blocks.append((language, code))
+                in_block = False
+                language = ""
+                current_lines = []
+                continue
+
+            current_lines.append(line)
+
+        # Keep content if the final fence is missing
+        if in_block and current_lines:
+            code = "\n".join(current_lines).strip("\n")
+            if code:
+                blocks.append((language, code))
+
+        return blocks, has_non_code_text
+
+    def _should_strip_fenced_code(self, filename: str, has_non_code_text: bool) -> bool:
+        """
+        Strip fences only when paste content is code-only and not explicitly markdown.
+        """
+        if has_non_code_text:
+            return False
+        ext = os.path.splitext(filename)[1].lower()
+        if ext in (".md", ".markdown"):
+            return False
+        return True
+
+    def _resolve_filename(self, filename: str, inferred_ext: Optional[str]) -> str:
+        """Ensure filename has an extension and prefer inferred code extension for generic names."""
+        if not filename:
+            filename = "paste"
+
+        base, ext = os.path.splitext(filename)
+        ext = ext.lower()
+
+        # No extension: prefer inferred code extension, otherwise txt
+        if not ext:
+            return f"{filename}.{inferred_ext or 'txt'}"
+
+        # Generic extensions: promote to inferred language extension if available
+        if inferred_ext and ext in (".txt", ".text"):
+            return f"{base}.{inferred_ext}"
+
+        return filename
+
+    def _prepare_paste_content(self, content: str, filename: str) -> Tuple[str, str]:
+        """
+        Prepare content and filename for upload.
+
+        If content is purely fenced code blocks, strip fences and infer extension.
+        Otherwise preserve original content.
+        """
+        blocks, has_non_code_text = self._extract_fenced_blocks_with_context(content)
+        if not blocks:
+            return content, self._resolve_filename(filename, None)
+
+        if not self._should_strip_fenced_code(filename, has_non_code_text):
+            return content, self._resolve_filename(filename, None)
+
+        cleaned_content = "\n\n".join(block for _, block in blocks).strip("\n")
+        primary_language, _ = max(blocks, key=lambda item: len(item[1]))
+        inferred_ext = self._language_to_extension(primary_language)
+        resolved_filename = self._resolve_filename(filename, inferred_ext)
+        return f"{cleaned_content}\n", resolved_filename
     
     def execute(
         self,
@@ -89,13 +249,12 @@ class PasteTool(Tool):
         if not content or not content.strip():
             return "Error: No content provided to paste"
 
-        # Ensure filename has extension
-        if "." not in filename:
-            filename = f"{filename}.txt"
+        content, filename = self._prepare_paste_content(content, filename)
 
         try:
             # Write content to temp file
-            with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp:
+            file_suffix = os.path.splitext(filename)[1] or ".txt"
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=file_suffix) as tmp:
                 tmp.write(content)
                 tmp_path = tmp.name
 

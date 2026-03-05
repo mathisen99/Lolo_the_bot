@@ -20,6 +20,9 @@ type ChannelTracker struct {
 	namesBuf   map[string][]database.ChannelUserEntry // channel -> pending users
 	namesMu    sync.Mutex
 	namesTimer map[string]*time.Timer // channel -> flush timer
+
+	// Fallback flush delay when we don't receive 366 for any reason.
+	namesFlushDelay time.Duration
 }
 
 // NewChannelTracker creates a new channel tracker
@@ -30,6 +33,8 @@ func NewChannelTracker(db *database.DB, logger output.Logger, botNick string) *C
 		botNick:    botNick,
 		namesBuf:   make(map[string][]database.ChannelUserEntry),
 		namesTimer: make(map[string]*time.Timer),
+		// Keep this safely above normal inter-packet gaps for large channels.
+		namesFlushDelay: 3 * time.Second,
 	}
 }
 
@@ -47,6 +52,12 @@ func (ct *ChannelTracker) OnNamesReply(channel string, names []string) {
 
 	channelLower := strings.ToLower(channel)
 
+	// Mark that we are collecting a snapshot for this channel, even if this
+	// chunk has no names (so flush can still clear stale entries).
+	if _, exists := ct.namesBuf[channelLower]; !exists {
+		ct.namesBuf[channelLower] = make([]database.ChannelUserEntry, 0, len(names))
+	}
+
 	// Parse and buffer users
 	for _, name := range names {
 		if name == "" {
@@ -62,7 +73,8 @@ func (ct *ChannelTracker) OnNamesReply(channel string, names []string) {
 		// Handle mode prefixes (can be multiple, e.g., @+ for op+voice)
 		for len(nick) > 0 {
 			switch nick[0] {
-			case '@':
+			case '~', '&', '@', '!':
+				// Higher privilege prefixes are treated as op-equivalent for counts.
 				isOp = true
 				nick = nick[1:]
 			case '%':
@@ -70,6 +82,9 @@ func (ct *ChannelTracker) OnNamesReply(channel string, names []string) {
 				nick = nick[1:]
 			case '+':
 				isVoice = true
+				nick = nick[1:]
+			case '*':
+				// Some networks prepend '*' for IRC operators.
 				nick = nick[1:]
 			default:
 				goto done
@@ -98,33 +113,45 @@ func (ct *ChannelTracker) OnNamesReply(channel string, names []string) {
 		}
 	}
 
-	// Reset/start the flush timer - wait 500ms after last 353 before flushing
-	// This handles the case where IRC sends many 353 messages in quick succession
+	// Reset/start fallback timer. Normal flush is triggered by 366 (end of NAMES).
 	if timer, exists := ct.namesTimer[channelLower]; exists {
 		timer.Stop()
 	}
-	ct.namesTimer[channelLower] = time.AfterFunc(500*time.Millisecond, func() {
+	ct.namesTimer[channelLower] = time.AfterFunc(ct.namesFlushDelay, func() {
 		ct.flushNamesBuffer(channelLower)
 	})
+}
+
+// OnNamesEnd handles RPL_ENDOFNAMES (366) and flushes the buffered snapshot.
+func (ct *ChannelTracker) OnNamesEnd(channel string) {
+	channelLower := strings.ToLower(channel)
+
+	ct.namesMu.Lock()
+	if timer, exists := ct.namesTimer[channelLower]; exists {
+		timer.Stop()
+	}
+	ct.namesMu.Unlock()
+
+	ct.flushNamesBuffer(channelLower)
 }
 
 // flushNamesBuffer writes buffered users to database
 func (ct *ChannelTracker) flushNamesBuffer(channel string) {
 	ct.namesMu.Lock()
-	users := ct.namesBuf[channel]
+	users, hasSnapshot := ct.namesBuf[channel]
 	delete(ct.namesBuf, channel)
 	delete(ct.namesTimer, channel)
 	ct.namesMu.Unlock()
 
-	if len(users) == 0 {
+	if !hasSnapshot {
 		return
 	}
 
-	ct.logger.Info("Flushing %d users for %s to database", len(users), channel)
+	ct.logger.Info("Flushing names snapshot (%d users) for %s to database", len(users), channel)
 
-	// Batch insert all users
-	if err := ct.db.BulkUpsertChannelUsers(channel, users); err != nil {
-		ct.logger.Warning("Failed to bulk upsert users for %s: %v", channel, err)
+	// Replace channel membership with authoritative NAMES snapshot.
+	if err := ct.db.ReplaceChannelUsersSnapshot(channel, users); err != nil {
+		ct.logger.Warning("Failed to replace user snapshot for %s: %v", channel, err)
 	}
 }
 

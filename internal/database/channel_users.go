@@ -66,6 +66,58 @@ type ChannelUserEntry struct {
 	IsVoice  bool
 }
 
+// ReplaceChannelUsersSnapshot replaces all tracked users for a channel with
+// a fresh snapshot (typically from IRC NAMES replies).
+func (db *DB) ReplaceChannelUsersSnapshot(channel string, users []ChannelUserEntry) error {
+	channel = strings.ToLower(channel)
+
+	// Deduplicate nicks case-insensitively in case the upstream snapshot
+	// contains repeated entries with different casing.
+	uniqueUsers := make(map[string]ChannelUserEntry, len(users))
+	for _, u := range users {
+		nick := strings.TrimSpace(u.Nick)
+		if nick == "" {
+			continue
+		}
+		u.Nick = nick
+		uniqueUsers[strings.ToLower(nick)] = u
+	}
+
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Snapshot semantics: clear channel users, then insert current list.
+	if _, err := tx.Exec(`DELETE FROM channel_users WHERE channel = ?`, channel); err != nil {
+		return fmt.Errorf("failed to clear channel users: %w", err)
+	}
+
+	if len(uniqueUsers) > 0 {
+		stmt, err := tx.Prepare(`
+			INSERT INTO channel_users (channel, nick, is_op, is_halfop, is_voice, updated_at)
+			VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare statement: %w", err)
+		}
+		defer func() { _ = stmt.Close() }()
+
+		for _, u := range uniqueUsers {
+			if _, err := stmt.Exec(channel, u.Nick, u.IsOp, u.IsHalfop, u.IsVoice); err != nil {
+				return fmt.Errorf("failed to insert user %s: %w", u.Nick, err)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return db.updateChannelCounts(channel)
+}
+
 // BulkUpsertChannelUsers adds or updates multiple users in a channel efficiently
 // This uses a transaction to batch all inserts, then updates counts once at the end
 func (db *DB) BulkUpsertChannelUsers(channel string, users []ChannelUserEntry) error {

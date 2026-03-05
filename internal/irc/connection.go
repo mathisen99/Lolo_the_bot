@@ -30,6 +30,7 @@ type JoinHandler func(nick, channel string)
 // ChannelUserTracker interface for tracking channel users
 type ChannelUserTracker interface {
 	OnNamesReply(channel string, names []string)
+	OnNamesEnd(channel string)
 	OnJoin(channel, nick string, isSelf bool)
 	OnPart(channel, nick string, isSelf bool)
 	OnQuit(nick string)
@@ -760,7 +761,13 @@ func (cm *ConnectionManager) handleNumericIfApplicable(msg *irc.Message) {
 				}
 
 			case 366: // RPL_ENDOFNAMES - End of names list
-				// We don't need to do anything special here, names are already processed
+				// Format: :server 366 <nick> <channel> :End of /NAMES list
+				if len(msg.Params) >= 2 {
+					channel := msg.Params[1]
+					if cm.channelUserTracker != nil {
+						cm.channelUserTracker.OnNamesEnd(channel)
+					}
+				}
 
 			case 332: // RPL_TOPIC - Channel topic
 				// Format: :server 332 <nick> <channel> :<topic>

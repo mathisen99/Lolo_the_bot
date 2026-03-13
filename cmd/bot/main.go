@@ -76,6 +76,7 @@ func main() {
 			MinimumPoints:     cfg.Trivia.DefaultMinimumPoints,
 			HintPenalty:       cfg.Trivia.DefaultHintPenalty,
 			Enabled:           cfg.Trivia.DefaultEnabled,
+			Difficulty:        cfg.Trivia.DefaultDifficulty,
 		},
 	}
 
@@ -92,6 +93,7 @@ func main() {
 		APIKeyEnv:       cfg.Trivia.OpenAIAPIKeyEnv,
 		BaseURL:         cfg.Trivia.OpenAIBaseURL,
 		Model:           cfg.Trivia.OpenAIModel,
+		ReasoningEffort: cfg.Trivia.OpenAIReasoningEffort,
 		RequestTimeout:  cfg.Trivia.GetRequestTimeoutDuration(),
 		MaxOutputTokens: cfg.Trivia.MaxOutputTokens,
 	}, logger)
@@ -535,6 +537,7 @@ func registerCoreCommands(registry *commands.Registry, db *database.DB, userMgr 
 	// Trivia commands
 	_ = registry.Register(commands.NewTriviaCommand(triviaManager))
 	_ = registry.Register(commands.NewQuizCommand(triviaManager))
+	_ = registry.Register(commands.NewCodeCommand(triviaManager))
 	_ = registry.Register(commands.NewHintCommand(triviaManager))
 	_ = registry.Register(commands.NewTriviaRulesCommand(triviaManager))
 	_ = registry.Register(commands.NewQuizRulesCommand(triviaManager))

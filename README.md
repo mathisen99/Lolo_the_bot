@@ -400,18 +400,21 @@ The VM runs persistently and uses vsock for host-guest communication. No network
 | `!version` | Bot version | All |
 | `!uptime` | Bot uptime | All |
 | `!trivia <topic>` / `!quiz <topic>` | Start a trivia round | All |
+| `!code <go|python|javascript|bash>` | Start a one-line coding quiz round | All |
 | `!hint` | Reveal a hint for active trivia round | All |
 | `!triviarules` / `!quizrules` | Show trivia rules and scoring | All |
 | `!top10` | Top 10 trivia leaderboard for current channel | All |
 | `!score [nick]` | Show trivia score in current channel | All |
 | `!user add/remove/list` | Manage users | Admin+ |
 | `!score set/add/remove/reset ...` | Manual trivia score management | Admin+ |
-| `!triviasettings ...` | Trivia channel settings | Admin+ |
+| `!triviasettings show/time/hint/difficulty/points/enabled` | Trivia channel settings | Admin+ |
 | `!kick/ban/mute` | Moderation | Admin+ |
 | `!join/part` | Channel management | Owner |
 | `!quit` | Shutdown bot | Owner |
 
 Use `!help <command>` for detailed help.
+
+Trivia/code note: For long-form trivia answers and timed-out code rounds, if no exact match is found before timeout, the bot can run a strict close-answer judge pass and award points to the earliest clearly equivalent guess.
 
 ## Configuration
 
@@ -474,6 +477,7 @@ default_answer_time_seconds = 30
 default_base_points = 100
 default_minimum_points = 20
 default_hint_penalty = 20
+default_difficulty = "medium"   # easy/medium/hard
 ```
 
 ### Step 5: Initialize Semantic Search (Optional)

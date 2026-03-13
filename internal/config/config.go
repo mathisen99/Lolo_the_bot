@@ -147,6 +147,7 @@ func DefaultConfig() *Config {
 			Enabled:                  true,
 			DatabasePath:             "data/trivia.db",
 			OpenAIModel:              "gpt-5.2",
+			OpenAIReasoningEffort:    "medium",
 			OpenAIAPIKeyEnv:          "OPENAI_API_KEY",
 			OpenAIBaseURL:            "https://api.openai.com/v1",
 			RequestTimeoutSeconds:    20,
@@ -158,6 +159,7 @@ func DefaultConfig() *Config {
 			DefaultMinimumPoints:     20,
 			DefaultHintPenalty:       20,
 			DefaultEnabled:           true,
+			DefaultDifficulty:        "medium",
 		},
 		PhoneNotifications: PhoneNotificationsConfig{
 			Active: false,
@@ -262,6 +264,13 @@ func validate(cfg *Config) error {
 	if cfg.Trivia.OpenAIModel == "" {
 		return fmt.Errorf("trivia.openai_model is required")
 	}
+	if cfg.Trivia.OpenAIReasoningEffort != "" {
+		switch cfg.Trivia.OpenAIReasoningEffort {
+		case "none", "low", "medium", "high", "xhigh":
+		default:
+			return fmt.Errorf("trivia.openai_reasoning_effort must be one of none, low, medium, high, xhigh, got %s", cfg.Trivia.OpenAIReasoningEffort)
+		}
+	}
 	if cfg.Trivia.OpenAIBaseURL == "" {
 		return fmt.Errorf("trivia.openai_base_url is required")
 	}
@@ -290,6 +299,13 @@ func validate(cfg *Config) error {
 	if cfg.Trivia.DefaultHintPenalty < 0 {
 		return fmt.Errorf("trivia.default_hint_penalty must be non-negative, got %d", cfg.Trivia.DefaultHintPenalty)
 	}
+	if cfg.Trivia.DefaultDifficulty != "" {
+		switch cfg.Trivia.DefaultDifficulty {
+		case "easy", "medium", "hard":
+		default:
+			return fmt.Errorf("trivia.default_difficulty must be one of easy, medium, hard, got %s", cfg.Trivia.DefaultDifficulty)
+		}
+	}
 
 	return nil
 }
@@ -306,6 +322,7 @@ func applyTriviaDefaults(cfg *Config) {
 		cfg.Trivia.DefaultBasePoints == 0 &&
 		cfg.Trivia.DefaultMinimumPoints == 0 &&
 		cfg.Trivia.DefaultHintPenalty == 0 &&
+		cfg.Trivia.DefaultDifficulty == "" &&
 		!cfg.Trivia.DefaultHintsEnabled &&
 		!cfg.Trivia.DefaultEnabled &&
 		!cfg.Trivia.Enabled
@@ -318,6 +335,7 @@ func applyTriviaDefaults(cfg *Config) {
 		cfg.Trivia.DefaultBasePoints = 100
 		cfg.Trivia.DefaultMinimumPoints = 20
 		cfg.Trivia.DefaultHintPenalty = 20
+		cfg.Trivia.DefaultDifficulty = "medium"
 	}
 
 	if cfg.Trivia.DatabasePath == "" {
@@ -325,6 +343,9 @@ func applyTriviaDefaults(cfg *Config) {
 	}
 	if cfg.Trivia.OpenAIModel == "" {
 		cfg.Trivia.OpenAIModel = "gpt-5.2"
+	}
+	if cfg.Trivia.OpenAIReasoningEffort == "" {
+		cfg.Trivia.OpenAIReasoningEffort = "medium"
 	}
 	if cfg.Trivia.OpenAIAPIKeyEnv == "" {
 		cfg.Trivia.OpenAIAPIKeyEnv = "OPENAI_API_KEY"
@@ -352,5 +373,8 @@ func applyTriviaDefaults(cfg *Config) {
 	}
 	if cfg.Trivia.DefaultHintPenalty < 0 {
 		cfg.Trivia.DefaultHintPenalty = 20
+	}
+	if cfg.Trivia.DefaultDifficulty == "" {
+		cfg.Trivia.DefaultDifficulty = "medium"
 	}
 }

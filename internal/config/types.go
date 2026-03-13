@@ -93,6 +93,7 @@ type TriviaConfig struct {
 	Enabled                  bool   `toml:"enabled"`
 	DatabasePath             string `toml:"database_path"`
 	OpenAIModel              string `toml:"openai_model"`
+	OpenAIReasoningEffort    string `toml:"openai_reasoning_effort"`
 	OpenAIAPIKeyEnv          string `toml:"openai_api_key_env"`
 	OpenAIBaseURL            string `toml:"openai_base_url"`
 	RequestTimeoutSeconds    int    `toml:"request_timeout_seconds"`
@@ -104,6 +105,7 @@ type TriviaConfig struct {
 	DefaultMinimumPoints     int    `toml:"default_minimum_points"`
 	DefaultHintPenalty       int    `toml:"default_hint_penalty"`
 	DefaultEnabled           bool   `toml:"default_enabled"`
+	DefaultDifficulty        string `toml:"default_difficulty"`
 }
 
 // GetAPITimeoutDuration returns the API timeout as a time.Duration

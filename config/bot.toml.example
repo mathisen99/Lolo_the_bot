@@ -59,6 +59,7 @@
   enabled = true
   database_path = "data/trivia.db"       # Dedicated trivia SQLite database
   openai_model = "gpt-5.2"
+  openai_reasoning_effort = "medium"     # none|low|medium|high|xhigh
   openai_api_key_env = "OPENAI_API_KEY"  # Environment variable for API key
   openai_base_url = "https://api.openai.com/v1"
   request_timeout_seconds = 20
@@ -71,4 +72,5 @@
   default_base_points = 100
   default_minimum_points = 20
   default_hint_penalty = 20
+  default_difficulty = "medium"          # easy|medium|hard
   default_enabled = true

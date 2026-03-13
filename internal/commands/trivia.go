@@ -73,6 +73,66 @@ func (c *QuizCommand) CooldownDuration() time.Duration {
 	return 0
 }
 
+// CodeCommand implements !code <language>.
+type CodeCommand struct {
+	manager *trivia.Manager
+}
+
+func NewCodeCommand(manager *trivia.Manager) *CodeCommand {
+	return &CodeCommand{manager: manager}
+}
+
+func (c *CodeCommand) Name() string {
+	return "code"
+}
+
+func (c *CodeCommand) Execute(ctx *Context) (*Response, error) {
+	if ctx.IsPM {
+		return NewErrorResponse("Code quiz can only be started in a channel."), nil
+	}
+
+	if len(ctx.Args) != 1 {
+		return nil, boterrors.NewInvalidSyntaxError("code", "!code <go|python|javascript|bash>")
+	}
+
+	commandCtx, cancel := context.WithTimeout(context.Background(), triviaCommandTimeout)
+	defer cancel()
+
+	message, err := c.manager.StartCodeRound(commandCtx, ctx.Channel, ctx.Args[0])
+	if err != nil {
+		switch {
+		case stderrors.Is(err, trivia.ErrUnsupportedCodeLanguage):
+			return NewResponse("Unsupported language. Use: go, python, javascript, bash (aliases: js, py, sh)."), nil
+		case stderrors.Is(err, trivia.ErrRoundAlreadyActive):
+			return NewResponse("A trivia/code round is already active in this channel."), nil
+		case stderrors.Is(err, trivia.ErrTriviaDisabled):
+			return NewResponse("Trivia/code rounds are disabled in this channel."), nil
+		case stderrors.Is(err, trivia.ErrGeneratorDisabled):
+			return NewResponse("Code generation is unavailable right now. Check OpenAI configuration."), nil
+		case stderrors.Is(err, trivia.ErrGenerationFailed):
+			return NewResponse("Failed to generate a unique code question right now. Please try again."), nil
+		case stderrors.Is(err, context.DeadlineExceeded):
+			return NewResponse("Code generation timed out. Please try again."), nil
+		default:
+			return nil, boterrors.NewUnexpectedError(err)
+		}
+	}
+
+	return NewResponse(message), nil
+}
+
+func (c *CodeCommand) RequiredPermission() database.PermissionLevel {
+	return database.LevelNormal
+}
+
+func (c *CodeCommand) Help() string {
+	return "!code <go|python|javascript|bash> - Start a one-line coding quiz round"
+}
+
+func (c *CodeCommand) CooldownDuration() time.Duration {
+	return 0
+}
+
 func executeTriviaStart(ctx *Context, manager *trivia.Manager) (*Response, error) {
 	if ctx.IsPM {
 		return NewErrorResponse("Trivia can only be started in a channel."), nil
@@ -94,9 +154,9 @@ func executeTriviaStart(ctx *Context, manager *trivia.Manager) (*Response, error
 	if err != nil {
 		switch {
 		case stderrors.Is(err, trivia.ErrRoundAlreadyActive):
-			return NewResponse("A trivia round is already active in this channel."), nil
+			return NewResponse("A trivia/code round is already active in this channel."), nil
 		case stderrors.Is(err, trivia.ErrTriviaDisabled):
-			return NewResponse("Trivia is disabled in this channel."), nil
+			return NewResponse("Trivia/code rounds are disabled in this channel."), nil
 		case stderrors.Is(err, trivia.ErrGeneratorDisabled):
 			return NewResponse("Trivia generation is unavailable right now. Check OpenAI configuration."), nil
 		case stderrors.Is(err, trivia.ErrGenerationFailed):
@@ -126,14 +186,14 @@ func (c *HintCommand) Name() string {
 
 func (c *HintCommand) Execute(ctx *Context) (*Response, error) {
 	if ctx.IsPM {
-		return NewErrorResponse("Hints are only available in a channel with an active trivia round."), nil
+		return NewErrorResponse("Hints are only available in a channel with an active trivia/code round."), nil
 	}
 
 	message, err := c.manager.UseHint(ctx.Channel)
 	if err != nil {
 		switch {
 		case stderrors.Is(err, trivia.ErrNoActiveRound):
-			return NewResponse("No active trivia round in this channel."), nil
+			return NewResponse("No active trivia/code round in this channel."), nil
 		case stderrors.Is(err, trivia.ErrHintsDisabled):
 			return NewResponse("Hints are disabled for this channel."), nil
 		case stderrors.Is(err, trivia.ErrHintAlreadyUsed):
@@ -151,7 +211,7 @@ func (c *HintCommand) RequiredPermission() database.PermissionLevel {
 }
 
 func (c *HintCommand) Help() string {
-	return "!hint - Reveal a hint for the active trivia round (if enabled)"
+	return "!hint - Reveal a hint for the active trivia/code round (if enabled)"
 }
 
 func (c *HintCommand) CooldownDuration() time.Duration {
@@ -235,12 +295,16 @@ func formatTriviaRules(settings trivia.ChannelSettings) string {
 	}
 
 	return fmt.Sprintf(
-		"Trivia rules: Start with !trivia <topic> or !quiz <topic>. Answer by typing normally in channel. "+
+		"Trivia rules: Start with !trivia <topic> or !quiz <topic>. Code mode: !code <go|python|javascript|bash>. "+
+			"Answer by typing normally in channel (code answers must be one line). "+
 			"Time limit: %ds. Scoring: faster answers earn more points (base %d, minimum %d). "+
-			"Hints are %s and using !hint applies a -%d point penalty. Use !top10 for leaderboard and !score [nick] for scores.",
+			"Difficulty: %s. Hints are %s and using !hint applies a -%d point penalty. "+
+			"If nobody matches exactly, timeout may trigger strict close-answer judging. "+
+			"Use !top10 for leaderboard and !score [nick] for scores.",
 		settings.AnswerTimeSeconds,
 		settings.BasePoints,
 		settings.MinimumPoints,
+		settings.Difficulty,
 		hintStatus,
 		settings.HintPenalty,
 	)
@@ -498,6 +562,20 @@ func (c *TriviaSettingsCommand) Execute(ctx *Context) (*Response, error) {
 		}
 		c.logAudit(ctx, "trivia_settings_hint", fmt.Sprintf("channel=%s hints_enabled=%t", ctx.Channel, enabled))
 		return NewResponse(formatSettingsMessage(ctx.Channel, settings)), nil
+	case "difficulty":
+		if len(ctx.Args) != 2 {
+			return nil, boterrors.NewInvalidSyntaxError("triviasettings", "!triviasettings difficulty <easy|medium|hard>")
+		}
+		difficulty, err := parseDifficulty(ctx.Args[1])
+		if err != nil {
+			return NewErrorResponse(err.Error()), nil
+		}
+		settings, err := c.manager.UpdateDifficulty(ctx.Channel, difficulty)
+		if err != nil {
+			return NewErrorResponse(err.Error()), nil
+		}
+		c.logAudit(ctx, "trivia_settings_difficulty", fmt.Sprintf("channel=%s difficulty=%s", ctx.Channel, difficulty))
+		return NewResponse(formatSettingsMessage(ctx.Channel, settings)), nil
 	case "points":
 		if len(ctx.Args) != 4 {
 			return nil, boterrors.NewInvalidSyntaxError("triviasettings", "!triviasettings points <base> <minimum> <hint_penalty>")
@@ -535,7 +613,7 @@ func (c *TriviaSettingsCommand) Execute(ctx *Context) (*Response, error) {
 		c.logAudit(ctx, "trivia_settings_enabled", fmt.Sprintf("channel=%s enabled=%t", ctx.Channel, enabled))
 		return NewResponse(formatSettingsMessage(ctx.Channel, settings)), nil
 	default:
-		return nil, boterrors.NewInvalidSyntaxError("triviasettings", "!triviasettings show|time|hint|points|enabled ...")
+		return nil, boterrors.NewInvalidSyntaxError("triviasettings", "!triviasettings show|time|hint|difficulty|points|enabled ...")
 	}
 }
 
@@ -553,7 +631,7 @@ func (c *TriviaSettingsCommand) RequiredPermission() database.PermissionLevel {
 }
 
 func (c *TriviaSettingsCommand) Help() string {
-	return "!triviasettings show|time|hint|points|enabled - Manage trivia channel settings (admin/owner)"
+	return "!triviasettings show|time|hint|difficulty|points|enabled - Manage trivia channel settings (admin/owner)"
 }
 
 func (c *TriviaSettingsCommand) CooldownDuration() time.Duration {
@@ -562,15 +640,23 @@ func (c *TriviaSettingsCommand) CooldownDuration() time.Duration {
 
 func formatSettingsMessage(channel string, settings trivia.ChannelSettings) string {
 	return fmt.Sprintf(
-		"Trivia settings for %s: enabled=%t, answer_time=%ds, hints=%t, base_points=%d, minimum_points=%d, hint_penalty=%d",
+		"Trivia settings for %s: enabled=%t, answer_time=%ds, difficulty=%s, hints=%t, base_points=%d, minimum_points=%d, hint_penalty=%d",
 		channel,
 		settings.Enabled,
 		settings.AnswerTimeSeconds,
+		settings.Difficulty,
 		settings.HintsEnabled,
 		settings.BasePoints,
 		settings.MinimumPoints,
 		settings.HintPenalty,
 	)
+}
+
+func parseDifficulty(input string) (string, error) {
+	if !trivia.IsValidDifficulty(input) {
+		return "", fmt.Errorf("difficulty must be easy, medium, or hard")
+	}
+	return trivia.NormalizeDifficulty(input), nil
 }
 
 func parseOnOff(input string) (bool, error) {

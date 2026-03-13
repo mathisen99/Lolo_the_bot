@@ -6,10 +6,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+type historicalQuestion struct {
+	Mode     string
+	Language string
+	Question string
+	Answer   string
+}
 
 // Store provides persistent trivia storage in a dedicated SQLite database.
 type Store struct {
@@ -103,6 +111,115 @@ func (s *Store) IsQuestionDuplicate(uniqueHash, questionHash string) (bool, erro
 	return count > 0, nil
 }
 
+// GetRecentQuestionTexts returns the most recently stored question texts.
+func (s *Store) GetRecentQuestionTexts(limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	rows, err := s.conn.Query(`
+		SELECT question
+		FROM trivia_questions
+		ORDER BY id DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recent trivia question texts: %w", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	questions := make([]string, 0, limit)
+	for rows.Next() {
+		var question string
+		if err := rows.Scan(&question); err != nil {
+			return nil, fmt.Errorf("failed to scan recent trivia question text: %w", err)
+		}
+		questions = append(questions, question)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed iterating recent trivia question texts: %w", err)
+	}
+
+	return questions, nil
+}
+
+// GetRecentQuestionsByTopic returns recent questions for a topic, newest first.
+func (s *Store) GetRecentQuestionsByTopic(topic string, limit int) ([]historicalQuestion, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+
+	rows, err := s.conn.Query(`
+		SELECT mode, language, question, answer
+		FROM trivia_questions
+		WHERE mode = ?
+		  AND LOWER(topic) = LOWER(?)
+		ORDER BY id DESC
+		LIMIT ?
+	`, ModeTrivia, topic, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recent trivia questions for topic: %w", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	questions := make([]historicalQuestion, 0, limit)
+	for rows.Next() {
+		var q historicalQuestion
+		if err := rows.Scan(&q.Mode, &q.Language, &q.Question, &q.Answer); err != nil {
+			return nil, fmt.Errorf("failed to scan historical trivia question: %w", err)
+		}
+		questions = append(questions, q)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed iterating historical trivia questions: %w", err)
+	}
+
+	return questions, nil
+}
+
+// GetRecentCodeQuestionsByLanguage returns recent code questions for a language, newest first.
+func (s *Store) GetRecentCodeQuestionsByLanguage(language string, limit int) ([]historicalQuestion, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+
+	rows, err := s.conn.Query(`
+		SELECT mode, language, question, answer
+		FROM trivia_questions
+		WHERE mode = ?
+		  AND LOWER(language) = LOWER(?)
+		ORDER BY id DESC
+		LIMIT ?
+	`, ModeCode, language, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recent code questions for language: %w", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	questions := make([]historicalQuestion, 0, limit)
+	for rows.Next() {
+		var q historicalQuestion
+		if err := rows.Scan(&q.Mode, &q.Language, &q.Question, &q.Answer); err != nil {
+			return nil, fmt.Errorf("failed to scan historical code question: %w", err)
+		}
+		questions = append(questions, q)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed iterating historical code questions: %w", err)
+	}
+
+	return questions, nil
+}
+
 // InsertQuestion stores a generated trivia question.
 func (s *Store) InsertQuestion(q *StoredQuestion) (int64, error) {
 	aliasesJSON, err := json.Marshal(q.Aliases)
@@ -112,14 +229,17 @@ func (s *Store) InsertQuestion(q *StoredQuestion) (int64, error) {
 
 	result, err := s.conn.Exec(`
 		INSERT INTO trivia_questions (
-			topic, question, answer, aliases_json, hint, uniqueness_key, uniqueness_hash, question_hash, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			mode, topic, language, question, answer, aliases_json, hint, validator_type, uniqueness_key, uniqueness_hash, question_hash, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
+		NormalizeMode(q.Mode),
 		q.Topic,
+		strings.TrimSpace(q.Language),
 		q.Question,
 		q.Answer,
 		string(aliasesJSON),
 		q.Hint,
+		normalizeValidatorType(q.ValidatorType),
 		q.UniquenessKey,
 		q.UniquenessHash,
 		q.QuestionHash,
@@ -137,12 +257,12 @@ func (s *Store) InsertQuestion(q *StoredQuestion) (int64, error) {
 }
 
 // StartRound inserts a new active round.
-func (s *Store) StartRound(channel, topic string, questionID int64, startedAt time.Time) (int64, error) {
+func (s *Store) StartRound(channel, topic, mode, language string, questionID int64, startedAt time.Time) (int64, error) {
 	result, err := s.conn.Exec(`
 		INSERT INTO trivia_rounds (
-			channel, topic, question_id, started_at, status
-		) VALUES (?, ?, ?, ?, ?)
-	`, channel, topic, questionID, startedAt, "active")
+			channel, topic, mode, language, question_id, started_at, status
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, channel, topic, NormalizeMode(mode), strings.TrimSpace(language), questionID, startedAt, "active")
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert trivia round: %w", err)
 	}
@@ -340,12 +460,14 @@ func (s *Store) ResetScore(channel, nick string) error {
 // GetSettings loads channel settings, returning defaults if none are persisted.
 func (s *Store) GetSettings(channel string) (ChannelSettings, error) {
 	settings := s.defaults.Settings
+	settings.Difficulty = NormalizeDifficulty(settings.Difficulty)
 
 	var hintsEnabled int
 	var enabled int
+	var difficulty string
 
 	err := s.conn.QueryRow(`
-		SELECT answer_time_seconds, hints_enabled, base_points, minimum_points, hint_penalty, enabled
+		SELECT answer_time_seconds, hints_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty
 		FROM trivia_settings
 		WHERE channel = ?
 	`, channel).Scan(
@@ -355,6 +477,7 @@ func (s *Store) GetSettings(channel string) (ChannelSettings, error) {
 		&settings.MinimumPoints,
 		&settings.HintPenalty,
 		&enabled,
+		&difficulty,
 	)
 
 	if err == sql.ErrNoRows {
@@ -366,15 +489,18 @@ func (s *Store) GetSettings(channel string) (ChannelSettings, error) {
 
 	settings.HintsEnabled = hintsEnabled == 1
 	settings.Enabled = enabled == 1
+	settings.Difficulty = NormalizeDifficulty(difficulty)
 	return settings, nil
 }
 
 // SaveSettings upserts settings for a channel.
 func (s *Store) SaveSettings(channel string, settings ChannelSettings) error {
+	settings.Difficulty = NormalizeDifficulty(settings.Difficulty)
+
 	_, err := s.conn.Exec(`
 		INSERT INTO trivia_settings (
-			channel, answer_time_seconds, hints_enabled, base_points, minimum_points, hint_penalty, enabled, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			channel, answer_time_seconds, hints_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(channel) DO UPDATE SET
 			answer_time_seconds = excluded.answer_time_seconds,
 			hints_enabled = excluded.hints_enabled,
@@ -382,6 +508,7 @@ func (s *Store) SaveSettings(channel string, settings ChannelSettings) error {
 			minimum_points = excluded.minimum_points,
 			hint_penalty = excluded.hint_penalty,
 			enabled = excluded.enabled,
+			difficulty = excluded.difficulty,
 			updated_at = excluded.updated_at
 	`,
 		channel,
@@ -391,6 +518,7 @@ func (s *Store) SaveSettings(channel string, settings ChannelSettings) error {
 		settings.MinimumPoints,
 		settings.HintPenalty,
 		boolToInt(settings.Enabled),
+		settings.Difficulty,
 		time.Now(),
 	)
 	if err != nil {
@@ -436,4 +564,13 @@ func boolToInt(v bool) int {
 		return 1
 	}
 	return 0
+}
+
+func normalizeValidatorType(input string) string {
+	switch strings.ToLower(strings.TrimSpace(input)) {
+	case ValidatorNormalizedExact:
+		return ValidatorNormalizedExact
+	default:
+		return ValidatorNormalizedExact
+	}
 }

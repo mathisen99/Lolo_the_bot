@@ -70,13 +70,15 @@ func main() {
 
 	triviaDefaults := trivia.StoreDefaults{
 		Settings: trivia.ChannelSettings{
-			AnswerTimeSeconds: cfg.Trivia.DefaultAnswerTimeSeconds,
-			HintsEnabled:      cfg.Trivia.DefaultHintsEnabled,
-			BasePoints:        cfg.Trivia.DefaultBasePoints,
-			MinimumPoints:     cfg.Trivia.DefaultMinimumPoints,
-			HintPenalty:       cfg.Trivia.DefaultHintPenalty,
-			Enabled:           cfg.Trivia.DefaultEnabled,
-			Difficulty:        cfg.Trivia.DefaultDifficulty,
+			AnswerTimeSeconds:     cfg.Trivia.DefaultAnswerTimeSeconds,
+			CodeAnswerTimeSeconds: cfg.Trivia.DefaultCodeAnswerTime,
+			HintsEnabled:          cfg.Trivia.DefaultHintsEnabled,
+			BasePoints:            cfg.Trivia.DefaultBasePoints,
+			MinimumPoints:         cfg.Trivia.DefaultMinimumPoints,
+			HintPenalty:           cfg.Trivia.DefaultHintPenalty,
+			Enabled:               cfg.Trivia.DefaultEnabled,
+			Difficulty:            cfg.Trivia.DefaultDifficulty,
+			CodeDifficulty:        cfg.Trivia.DefaultCodeDifficulty,
 		},
 	}
 

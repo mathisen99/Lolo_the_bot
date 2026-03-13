@@ -163,8 +163,8 @@ func (g *Generator) GenerateQuestion(ctx context.Context, topic, difficulty stri
 	return &question, nil
 }
 
-// GenerateCodeQuestion creates a one-line coding question for a specific language.
-func (g *Generator) GenerateCodeQuestion(ctx context.Context, language string, attempt int, avoidKeys, avoidQuestions []string) (*GeneratedCodeQuestion, error) {
+// GenerateCodeQuestion creates a one-line coding question for a specific language and difficulty.
+func (g *Generator) GenerateCodeQuestion(ctx context.Context, language, difficulty string, attempt int, avoidKeys, avoidQuestions []string) (*GeneratedCodeQuestion, error) {
 	if !g.config.Enabled {
 		return nil, ErrGeneratorDisabled
 	}
@@ -196,7 +196,8 @@ func (g *Generator) GenerateCodeQuestion(ctx context.Context, language string, a
 
 	maxOutputTokens := resolveMaxOutputTokens(g.config.MaxOutputTokens, attempt, codeGenerationMinTokens)
 
-	prompt := buildCodePrompt(canonicalLanguage, attempt, avoidKeys, avoidQuestions)
+	difficulty = NormalizeDifficulty(difficulty)
+	prompt := buildCodePrompt(canonicalLanguage, difficulty, attempt, avoidKeys, avoidQuestions)
 
 	requestBody := map[string]any{
 		"model":             model,
@@ -423,14 +424,16 @@ Rules:
 	return prompt.String()
 }
 
-func buildCodePrompt(language string, attempt int, avoidKeys, avoidQuestions []string) string {
+func buildCodePrompt(language, difficulty string, attempt int, avoidKeys, avoidQuestions []string) string {
 	language = strings.TrimSpace(language)
+	difficulty = NormalizeDifficulty(difficulty)
 	now := time.Now().UTC().Format("2006-01-02")
 
 	var prompt strings.Builder
 	_, _ = fmt.Fprintf(&prompt, `Generate a one-line coding quiz for IRC.
 
 Language: %s
+Difficulty: %s
 Current date (UTC): %s
 
 Requirements:
@@ -458,7 +461,9 @@ Return exactly this JSON schema:
   "uniqueness_key": "string",
   "validator_type": "normalized_exact"
 }
-`, language, now, language, language)
+`, language, difficulty, now, language, language)
+
+	_, _ = fmt.Fprintf(&prompt, "\nDifficulty requirements (%s):\n%s\n", difficulty, codeDifficultyPromptGuidance(difficulty))
 
 	_, _ = fmt.Fprintf(&prompt, "\nGeneration attempt: %d", attempt)
 	_, _ = fmt.Fprintf(&prompt, "\nVariation nonce: %d", time.Now().UnixNano())
@@ -492,6 +497,17 @@ Return exactly this JSON schema:
 	}
 
 	return prompt.String()
+}
+
+func codeDifficultyPromptGuidance(difficulty string) string {
+	switch NormalizeDifficulty(difficulty) {
+	case DifficultyEasy:
+		return "- easy: very common syntax/stdlib one-liners; avoid tricky edge cases."
+	case DifficultyHard:
+		return "- hard: still one-line solvable, but require deeper language knowledge or precise syntax."
+	default:
+		return "- medium: balanced one-liners; not trivial but not obscure."
+	}
 }
 
 func buildJudgePrompt(req JudgeRequest) (string, error) {

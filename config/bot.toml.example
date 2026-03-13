@@ -68,9 +68,11 @@
 
   # Defaults for channels without explicit trivia settings rows
   default_answer_time_seconds = 30
+  default_code_answer_time_seconds = 30
   default_hints_enabled = true
   default_base_points = 100
   default_minimum_points = 20
   default_hint_penalty = 20
   default_difficulty = "medium"          # easy|medium|hard
+  default_code_difficulty = "medium"     # easy|medium|hard
   default_enabled = true

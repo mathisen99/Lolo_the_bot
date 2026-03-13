@@ -461,23 +461,33 @@ func (s *Store) ResetScore(channel, nick string) error {
 func (s *Store) GetSettings(channel string) (ChannelSettings, error) {
 	settings := s.defaults.Settings
 	settings.Difficulty = NormalizeDifficulty(settings.Difficulty)
+	if settings.CodeAnswerTimeSeconds <= 0 {
+		settings.CodeAnswerTimeSeconds = settings.AnswerTimeSeconds
+	}
+	settings.CodeDifficulty = NormalizeDifficulty(settings.CodeDifficulty)
+	if strings.TrimSpace(settings.CodeDifficulty) == "" {
+		settings.CodeDifficulty = settings.Difficulty
+	}
 
 	var hintsEnabled int
 	var enabled int
 	var difficulty string
+	var codeDifficulty string
 
 	err := s.conn.QueryRow(`
-		SELECT answer_time_seconds, hints_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty
+		SELECT answer_time_seconds, code_answer_time_seconds, hints_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty, code_difficulty
 		FROM trivia_settings
 		WHERE channel = ?
 	`, channel).Scan(
 		&settings.AnswerTimeSeconds,
+		&settings.CodeAnswerTimeSeconds,
 		&hintsEnabled,
 		&settings.BasePoints,
 		&settings.MinimumPoints,
 		&settings.HintPenalty,
 		&enabled,
 		&difficulty,
+		&codeDifficulty,
 	)
 
 	if err == sql.ErrNoRows {
@@ -490,35 +500,53 @@ func (s *Store) GetSettings(channel string) (ChannelSettings, error) {
 	settings.HintsEnabled = hintsEnabled == 1
 	settings.Enabled = enabled == 1
 	settings.Difficulty = NormalizeDifficulty(difficulty)
+	if settings.CodeAnswerTimeSeconds <= 0 {
+		settings.CodeAnswerTimeSeconds = settings.AnswerTimeSeconds
+	}
+	settings.CodeDifficulty = NormalizeDifficulty(codeDifficulty)
+	if strings.TrimSpace(settings.CodeDifficulty) == "" {
+		settings.CodeDifficulty = settings.Difficulty
+	}
 	return settings, nil
 }
 
 // SaveSettings upserts settings for a channel.
 func (s *Store) SaveSettings(channel string, settings ChannelSettings) error {
 	settings.Difficulty = NormalizeDifficulty(settings.Difficulty)
+	if settings.CodeAnswerTimeSeconds <= 0 {
+		settings.CodeAnswerTimeSeconds = settings.AnswerTimeSeconds
+	}
+	settings.CodeDifficulty = NormalizeDifficulty(settings.CodeDifficulty)
+	if strings.TrimSpace(settings.CodeDifficulty) == "" {
+		settings.CodeDifficulty = settings.Difficulty
+	}
 
 	_, err := s.conn.Exec(`
 		INSERT INTO trivia_settings (
-			channel, answer_time_seconds, hints_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			channel, answer_time_seconds, code_answer_time_seconds, hints_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty, code_difficulty, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(channel) DO UPDATE SET
 			answer_time_seconds = excluded.answer_time_seconds,
+			code_answer_time_seconds = excluded.code_answer_time_seconds,
 			hints_enabled = excluded.hints_enabled,
 			base_points = excluded.base_points,
 			minimum_points = excluded.minimum_points,
 			hint_penalty = excluded.hint_penalty,
 			enabled = excluded.enabled,
 			difficulty = excluded.difficulty,
+			code_difficulty = excluded.code_difficulty,
 			updated_at = excluded.updated_at
 	`,
 		channel,
 		settings.AnswerTimeSeconds,
+		settings.CodeAnswerTimeSeconds,
 		boolToInt(settings.HintsEnabled),
 		settings.BasePoints,
 		settings.MinimumPoints,
 		settings.HintPenalty,
 		boolToInt(settings.Enabled),
 		settings.Difficulty,
+		settings.CodeDifficulty,
 		time.Now(),
 	)
 	if err != nil {

@@ -407,7 +407,7 @@ The VM runs persistently and uses vsock for host-guest communication. No network
 | `!score [nick]` | Show trivia score in current channel | All |
 | `!user add/remove/list` | Manage users | Admin+ |
 | `!score set/add/remove/reset ...` | Manual trivia score management | Admin+ |
-| `!triviasettings show/time/hint/difficulty/points/enabled` | Trivia channel settings | Admin+ |
+| `!triviasettings show/time/codetime/hint/difficulty/codedifficulty/points/enabled` | Trivia/code channel settings | Admin+ |
 | `!kick/ban/mute` | Moderation | Admin+ |
 | `!join/part` | Channel management | Owner |
 | `!quit` | Shutdown bot | Owner |
@@ -475,10 +475,12 @@ database_path = "data/trivia.db"
 openai_model = "gpt-5.2"
 openai_api_key_env = "OPENAI_API_KEY"
 default_answer_time_seconds = 30
+default_code_answer_time_seconds = 30
 default_base_points = 100
 default_minimum_points = 20
 default_hint_penalty = 20
 default_difficulty = "medium"   # easy/medium/hard
+default_code_difficulty = "medium"   # easy/medium/hard
 ```
 
 ### Step 5: Initialize Semantic Search (Optional)

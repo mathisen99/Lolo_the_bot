@@ -63,13 +63,15 @@ var supportedCodeLanguages = []string{
 
 // ChannelSettings controls trivia behavior for a specific channel.
 type ChannelSettings struct {
-	AnswerTimeSeconds int
-	HintsEnabled      bool
-	BasePoints        int
-	MinimumPoints     int
-	HintPenalty       int
-	Enabled           bool
-	Difficulty        string
+	AnswerTimeSeconds     int
+	CodeAnswerTimeSeconds int
+	HintsEnabled          bool
+	BasePoints            int
+	MinimumPoints         int
+	HintPenalty           int
+	Enabled               bool
+	Difficulty            string
+	CodeDifficulty        string
 }
 
 // StoreDefaults defines default settings used when a channel has no explicit row.

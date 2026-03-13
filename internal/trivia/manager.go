@@ -193,7 +193,7 @@ func (m *Manager) StartCodeRound(ctx context.Context, channel, language string) 
 		m.mu.Unlock()
 	}()
 
-	question, err := m.generateAndPersistCodeQuestion(ctx, canonicalLanguage)
+	question, err := m.generateAndPersistCodeQuestion(ctx, canonicalLanguage, settings.CodeDifficulty)
 	if err != nil {
 		return "", err
 	}
@@ -206,6 +206,22 @@ func (m *Manager) startRoundFromStoredQuestion(channel string, settings ChannelS
 	if len(accepted) == 0 || normalizedAnswer == "" {
 		return "", ErrGenerationFailed
 	}
+
+	roundAnswerTimeSeconds := settings.AnswerTimeSeconds
+	roundDifficulty := NormalizeDifficulty(settings.Difficulty)
+	if NormalizeMode(mode) == ModeCode {
+		if settings.CodeAnswerTimeSeconds > 0 {
+			roundAnswerTimeSeconds = settings.CodeAnswerTimeSeconds
+		}
+		roundDifficulty = NormalizeDifficulty(settings.CodeDifficulty)
+	}
+	if roundAnswerTimeSeconds <= 0 {
+		roundAnswerTimeSeconds = 30
+	}
+
+	roundSettings := settings
+	roundSettings.AnswerTimeSeconds = roundAnswerTimeSeconds
+	roundSettings.Difficulty = roundDifficulty
 
 	startedAt := time.Now()
 	roundID, err := m.store.StartRound(channel, topic, mode, language, question.ID, startedAt)
@@ -227,7 +243,7 @@ func (m *Manager) startRoundFromStoredQuestion(channel string, settings ChannelS
 		Hint:              question.Hint,
 		StartedAt:         startedAt,
 		AcceptedAnswers:   accepted,
-		Settings:          settings,
+		Settings:          roundSettings,
 		HintUsed:          false,
 		Guesses:           make([]GuessLog, 0, 24),
 		NextGuessID:       1,
@@ -236,7 +252,7 @@ func (m *Manager) startRoundFromStoredQuestion(channel string, settings ChannelS
 		NormalizedAliases: normalizedAliases,
 	}
 
-	duration := time.Duration(settings.AnswerTimeSeconds) * time.Second
+	duration := time.Duration(roundAnswerTimeSeconds) * time.Second
 	round.timeoutTimer = time.AfterFunc(duration, func() {
 		m.handleTimeout(channel, roundID)
 	})
@@ -253,20 +269,21 @@ func (m *Manager) startRoundFromStoredQuestion(channel string, settings ChannelS
 
 	switch mode {
 	case ModeCode:
-		m.logger.Info("Code round started: channel=%s language=%s question_id=%d round_id=%d", channel, language, question.ID, roundID)
+		m.logger.Info("Code round started: channel=%s language=%s difficulty=%s question_id=%d round_id=%d", channel, language, roundDifficulty, question.ID, roundID)
 		return fmt.Sprintf(
-			"Code (%s): %s | You have %ds. Answer with one line of code in normal channel text. Use !hint for a hint.",
+			"Code (%s, %s): %s | You have %ds. Answer with one line of code in normal channel text. Use !hint for a hint.",
 			language,
+			roundDifficulty,
 			question.Question,
-			settings.AnswerTimeSeconds,
+			roundAnswerTimeSeconds,
 		), nil
 	default:
-		m.logger.Info("Trivia round started: channel=%s topic=%s difficulty=%s question_id=%d round_id=%d", channel, topic, settings.Difficulty, question.ID, roundID)
+		m.logger.Info("Trivia round started: channel=%s topic=%s difficulty=%s question_id=%d round_id=%d", channel, topic, roundDifficulty, question.ID, roundID)
 		return fmt.Sprintf(
 			"Trivia (%s): %s | You have %ds. Answer with normal channel text. Use !hint for a hint.",
 			topic,
 			question.Question,
-			settings.AnswerTimeSeconds,
+			roundAnswerTimeSeconds,
 		), nil
 	}
 }
@@ -387,6 +404,22 @@ func (m *Manager) UpdateAnswerTime(channel string, seconds int) (ChannelSettings
 	return settings, nil
 }
 
+// UpdateCodeAnswerTime updates code answer timeout seconds for a channel.
+func (m *Manager) UpdateCodeAnswerTime(channel string, seconds int) (ChannelSettings, error) {
+	if seconds < 5 || seconds > 600 {
+		return ChannelSettings{}, fmt.Errorf("code answer time must be between 5 and 600 seconds")
+	}
+	settings, err := m.store.GetSettings(channel)
+	if err != nil {
+		return ChannelSettings{}, err
+	}
+	settings.CodeAnswerTimeSeconds = seconds
+	if err := m.store.SaveSettings(channel, settings); err != nil {
+		return ChannelSettings{}, err
+	}
+	return settings, nil
+}
+
 // UpdateHintsEnabled updates hint usage behavior for a channel.
 func (m *Manager) UpdateHintsEnabled(channel string, enabled bool) (ChannelSettings, error) {
 	settings, err := m.store.GetSettings(channel)
@@ -452,6 +485,23 @@ func (m *Manager) UpdateDifficulty(channel, difficulty string) (ChannelSettings,
 		return ChannelSettings{}, err
 	}
 	settings.Difficulty = NormalizeDifficulty(difficulty)
+	if err := m.store.SaveSettings(channel, settings); err != nil {
+		return ChannelSettings{}, err
+	}
+	return settings, nil
+}
+
+// UpdateCodeDifficulty updates code question difficulty for a channel.
+func (m *Manager) UpdateCodeDifficulty(channel, difficulty string) (ChannelSettings, error) {
+	if !IsValidDifficulty(difficulty) {
+		return ChannelSettings{}, fmt.Errorf("code difficulty must be easy, medium, or hard")
+	}
+
+	settings, err := m.store.GetSettings(channel)
+	if err != nil {
+		return ChannelSettings{}, err
+	}
+	settings.CodeDifficulty = NormalizeDifficulty(difficulty)
 	if err := m.store.SaveSettings(channel, settings); err != nil {
 		return ChannelSettings{}, err
 	}
@@ -600,10 +650,11 @@ func (m *Manager) generateAndPersistQuestion(ctx context.Context, topic, difficu
 	return nil, ErrGenerationFailed
 }
 
-func (m *Manager) generateAndPersistCodeQuestion(ctx context.Context, language string) (*StoredQuestion, error) {
+func (m *Manager) generateAndPersistCodeQuestion(ctx context.Context, language, difficulty string) (*StoredQuestion, error) {
 	if m.generator == nil {
 		return nil, ErrGeneratorDisabled
 	}
+	difficulty = NormalizeDifficulty(difficulty)
 
 	recentLanguageQuestions, err := m.store.GetRecentCodeQuestionsByLanguage(language, 50)
 	if err != nil {
@@ -627,7 +678,7 @@ func (m *Manager) generateAndPersistCodeQuestion(ctx context.Context, language s
 		avoidQuestions = append(avoidQuestions, recentQuestionTexts...)
 		avoidQuestions = append(avoidQuestions, rejectedQuestions...)
 
-		generated, err := m.generator.GenerateCodeQuestion(ctx, language, attempt, rejectedKeys, avoidQuestions)
+		generated, err := m.generator.GenerateCodeQuestion(ctx, language, difficulty, attempt, rejectedKeys, avoidQuestions)
 		if err != nil {
 			lastErr = err
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -637,7 +688,7 @@ func (m *Manager) generateAndPersistCodeQuestion(ctx context.Context, language s
 				m.logger.Warning("Code generator unavailable: %v", err)
 				return nil, ErrGeneratorDisabled
 			}
-			m.logger.Warning("Code generation attempt %d/%d failed (language=%s): %v", attempt, m.generationRetries, language, err)
+			m.logger.Warning("Code generation attempt %d/%d failed (language=%s difficulty=%s): %v", attempt, m.generationRetries, language, difficulty, err)
 			continue
 		}
 
@@ -648,7 +699,7 @@ func (m *Manager) generateAndPersistCodeQuestion(ctx context.Context, language s
 		normalizedQuestion := NormalizeDedupKey(fmt.Sprintf("code %s %s", language, generated.Question))
 		if normalizedUnique == "" || normalizedQuestion == "" {
 			lastErr = fmt.Errorf("generated code quiz had empty normalized dedup keys")
-			m.logger.Warning("Code generation attempt %d/%d produced invalid dedup keys", attempt, m.generationRetries)
+			m.logger.Warning("Code generation attempt %d/%d produced invalid dedup keys (language=%s difficulty=%s)", attempt, m.generationRetries, language, difficulty)
 			continue
 		}
 
@@ -660,7 +711,7 @@ func (m *Manager) generateAndPersistCodeQuestion(ctx context.Context, language s
 			return nil, err
 		}
 		if duplicate {
-			m.logger.Info("Rejected duplicate code question (attempt %d/%d, language=%s)", attempt, m.generationRetries, language)
+			m.logger.Info("Rejected duplicate code question (attempt %d/%d, language=%s difficulty=%s)", attempt, m.generationRetries, language, difficulty)
 			rejectedKeys = appendUniqueRejectedKey(rejectedKeys, normalizedUnique)
 			rejectedKeys = appendUniqueRejectedKey(rejectedKeys, normalizedQuestion)
 			rejectedQuestions = appendUniqueRejectedQuestion(rejectedQuestions, generated.Question)
@@ -673,7 +724,7 @@ func (m *Manager) generateAndPersistCodeQuestion(ctx context.Context, language s
 			return nil, err
 		}
 		if nearDuplicate {
-			m.logger.Info("Rejected near-duplicate code question (attempt %d/%d, language=%s, reason=%s)", attempt, m.generationRetries, language, nearReason)
+			m.logger.Info("Rejected near-duplicate code question (attempt %d/%d, language=%s difficulty=%s, reason=%s)", attempt, m.generationRetries, language, difficulty, nearReason)
 			rejectedKeys = appendUniqueRejectedKey(rejectedKeys, normalizedUnique)
 			rejectedKeys = appendUniqueRejectedKey(rejectedKeys, normalizedQuestion)
 			rejectedQuestions = appendUniqueRejectedQuestion(rejectedQuestions, generated.Question)
@@ -700,7 +751,7 @@ func (m *Manager) generateAndPersistCodeQuestion(ctx context.Context, language s
 		if err != nil {
 			lastErr = err
 			if isUniqueConstraintErr(err) {
-				m.logger.Info("Rejected duplicate code question from unique constraint (attempt %d/%d, language=%s)", attempt, m.generationRetries, language)
+				m.logger.Info("Rejected duplicate code question from unique constraint (attempt %d/%d, language=%s difficulty=%s)", attempt, m.generationRetries, language, difficulty)
 				rejectedKeys = appendUniqueRejectedKey(rejectedKeys, normalizedUnique)
 				rejectedKeys = appendUniqueRejectedKey(rejectedKeys, normalizedQuestion)
 				rejectedQuestions = appendUniqueRejectedQuestion(rejectedQuestions, generated.Question)
@@ -714,7 +765,7 @@ func (m *Manager) generateAndPersistCodeQuestion(ctx context.Context, language s
 	}
 
 	if lastErr != nil {
-		m.logger.Warning("Code generation exhausted retries (language=%s): %v", language, lastErr)
+		m.logger.Warning("Code generation exhausted retries (language=%s difficulty=%s): %v", language, difficulty, lastErr)
 	}
 	return nil, ErrGenerationFailed
 }

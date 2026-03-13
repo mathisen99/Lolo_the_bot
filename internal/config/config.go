@@ -154,12 +154,14 @@ func DefaultConfig() *Config {
 			MaxOutputTokens:          220,
 			GenerationRetryLimit:     5,
 			DefaultAnswerTimeSeconds: 30,
+			DefaultCodeAnswerTime:    30,
 			DefaultHintsEnabled:      true,
 			DefaultBasePoints:        100,
 			DefaultMinimumPoints:     20,
 			DefaultHintPenalty:       20,
 			DefaultEnabled:           true,
 			DefaultDifficulty:        "medium",
+			DefaultCodeDifficulty:    "medium",
 		},
 		PhoneNotifications: PhoneNotificationsConfig{
 			Active: false,
@@ -286,6 +288,9 @@ func validate(cfg *Config) error {
 	if cfg.Trivia.DefaultAnswerTimeSeconds <= 0 {
 		return fmt.Errorf("trivia.default_answer_time_seconds must be positive, got %d", cfg.Trivia.DefaultAnswerTimeSeconds)
 	}
+	if cfg.Trivia.DefaultCodeAnswerTime <= 0 {
+		return fmt.Errorf("trivia.default_code_answer_time_seconds must be positive, got %d", cfg.Trivia.DefaultCodeAnswerTime)
+	}
 	if cfg.Trivia.DefaultBasePoints <= 0 {
 		return fmt.Errorf("trivia.default_base_points must be positive, got %d", cfg.Trivia.DefaultBasePoints)
 	}
@@ -306,6 +311,13 @@ func validate(cfg *Config) error {
 			return fmt.Errorf("trivia.default_difficulty must be one of easy, medium, hard, got %s", cfg.Trivia.DefaultDifficulty)
 		}
 	}
+	if cfg.Trivia.DefaultCodeDifficulty != "" {
+		switch cfg.Trivia.DefaultCodeDifficulty {
+		case "easy", "medium", "hard":
+		default:
+			return fmt.Errorf("trivia.default_code_difficulty must be one of easy, medium, hard, got %s", cfg.Trivia.DefaultCodeDifficulty)
+		}
+	}
 
 	return nil
 }
@@ -319,10 +331,12 @@ func applyTriviaDefaults(cfg *Config) {
 		cfg.Trivia.MaxOutputTokens == 0 &&
 		cfg.Trivia.GenerationRetryLimit == 0 &&
 		cfg.Trivia.DefaultAnswerTimeSeconds == 0 &&
+		cfg.Trivia.DefaultCodeAnswerTime == 0 &&
 		cfg.Trivia.DefaultBasePoints == 0 &&
 		cfg.Trivia.DefaultMinimumPoints == 0 &&
 		cfg.Trivia.DefaultHintPenalty == 0 &&
 		cfg.Trivia.DefaultDifficulty == "" &&
+		cfg.Trivia.DefaultCodeDifficulty == "" &&
 		!cfg.Trivia.DefaultHintsEnabled &&
 		!cfg.Trivia.DefaultEnabled &&
 		!cfg.Trivia.Enabled
@@ -332,10 +346,12 @@ func applyTriviaDefaults(cfg *Config) {
 		cfg.Trivia.DefaultHintsEnabled = true
 		cfg.Trivia.DefaultEnabled = true
 		cfg.Trivia.DefaultAnswerTimeSeconds = 30
+		cfg.Trivia.DefaultCodeAnswerTime = 30
 		cfg.Trivia.DefaultBasePoints = 100
 		cfg.Trivia.DefaultMinimumPoints = 20
 		cfg.Trivia.DefaultHintPenalty = 20
 		cfg.Trivia.DefaultDifficulty = "medium"
+		cfg.Trivia.DefaultCodeDifficulty = "medium"
 	}
 
 	if cfg.Trivia.DatabasePath == "" {
@@ -365,6 +381,9 @@ func applyTriviaDefaults(cfg *Config) {
 	if cfg.Trivia.DefaultAnswerTimeSeconds <= 0 {
 		cfg.Trivia.DefaultAnswerTimeSeconds = 30
 	}
+	if cfg.Trivia.DefaultCodeAnswerTime <= 0 {
+		cfg.Trivia.DefaultCodeAnswerTime = cfg.Trivia.DefaultAnswerTimeSeconds
+	}
 	if cfg.Trivia.DefaultBasePoints <= 0 {
 		cfg.Trivia.DefaultBasePoints = 100
 	}
@@ -376,5 +395,8 @@ func applyTriviaDefaults(cfg *Config) {
 	}
 	if cfg.Trivia.DefaultDifficulty == "" {
 		cfg.Trivia.DefaultDifficulty = "medium"
+	}
+	if cfg.Trivia.DefaultCodeDifficulty == "" {
+		cfg.Trivia.DefaultCodeDifficulty = cfg.Trivia.DefaultDifficulty
 	}
 }

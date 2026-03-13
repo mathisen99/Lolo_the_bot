@@ -100,12 +100,14 @@ type TriviaConfig struct {
 	MaxOutputTokens          int    `toml:"max_output_tokens"`
 	GenerationRetryLimit     int    `toml:"generation_retry_limit"`
 	DefaultAnswerTimeSeconds int    `toml:"default_answer_time_seconds"`
+	DefaultCodeAnswerTime    int    `toml:"default_code_answer_time_seconds"`
 	DefaultHintsEnabled      bool   `toml:"default_hints_enabled"`
 	DefaultBasePoints        int    `toml:"default_base_points"`
 	DefaultMinimumPoints     int    `toml:"default_minimum_points"`
 	DefaultHintPenalty       int    `toml:"default_hint_penalty"`
 	DefaultEnabled           bool   `toml:"default_enabled"`
 	DefaultDifficulty        string `toml:"default_difficulty"`
+	DefaultCodeDifficulty    string `toml:"default_code_difficulty"`
 }
 
 // GetAPITimeoutDuration returns the API timeout as a time.Duration

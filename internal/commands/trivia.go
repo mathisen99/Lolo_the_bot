@@ -92,7 +92,7 @@ func (c *CodeCommand) Execute(ctx *Context) (*Response, error) {
 	}
 
 	if len(ctx.Args) != 1 {
-		return nil, boterrors.NewInvalidSyntaxError("code", "!code <go|python|javascript|bash>")
+		return nil, boterrors.NewInvalidSyntaxError("code", "!code <"+supportedCodeLanguagePattern()+">")
 	}
 
 	commandCtx, cancel := context.WithTimeout(context.Background(), triviaCommandTimeout)
@@ -102,7 +102,7 @@ func (c *CodeCommand) Execute(ctx *Context) (*Response, error) {
 	if err != nil {
 		switch {
 		case stderrors.Is(err, trivia.ErrUnsupportedCodeLanguage):
-			return NewResponse("Unsupported language. Use: go, python, javascript, bash (aliases: js, py, sh)."), nil
+			return NewResponse("Unsupported language. Supported: " + supportedCodeLanguageSummary() + " (aliases: js, ts, py, sh, c++, c#)."), nil
 		case stderrors.Is(err, trivia.ErrRoundAlreadyActive):
 			return NewResponse("A trivia/code round is already active in this channel."), nil
 		case stderrors.Is(err, trivia.ErrTriviaDisabled):
@@ -126,7 +126,7 @@ func (c *CodeCommand) RequiredPermission() database.PermissionLevel {
 }
 
 func (c *CodeCommand) Help() string {
-	return "!code <go|python|javascript|bash> - Start a one-line coding quiz round"
+	return "!code <" + supportedCodeLanguagePattern() + "> - Start a one-line coding quiz round"
 }
 
 func (c *CodeCommand) CooldownDuration() time.Duration {
@@ -295,7 +295,7 @@ func formatTriviaRules(settings trivia.ChannelSettings) string {
 	}
 
 	return fmt.Sprintf(
-		"Trivia rules: Start with !trivia <topic> or !quiz <topic>. Code mode: !code <go|python|javascript|bash>. "+
+		"Trivia rules: Start with !trivia <topic> or !quiz <topic>. Code mode: !code <lang>. "+
 			"Answer by typing normally in channel (code answers must be one line). "+
 			"Time limit: %ds. Scoring: faster answers earn more points (base %d, minimum %d). "+
 			"Difficulty: %s. Hints are %s and using !hint applies a -%d point penalty. "+
@@ -308,6 +308,14 @@ func formatTriviaRules(settings trivia.ChannelSettings) string {
 		hintStatus,
 		settings.HintPenalty,
 	)
+}
+
+func supportedCodeLanguageSummary() string {
+	return strings.Join(trivia.SupportedCodeLanguages(), ", ")
+}
+
+func supportedCodeLanguagePattern() string {
+	return strings.Join(trivia.SupportedCodeLanguages(), "|")
 }
 
 // Top10Command implements !top10.

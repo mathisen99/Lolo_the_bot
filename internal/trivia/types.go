@@ -18,12 +18,47 @@ const (
 
 var codeLanguageAliasMap = map[string]string{
 	"go":         "go",
+	"golang":     "go",
 	"python":     "python",
-	"javascript": "javascript",
-	"bash":       "bash",
-	"js":         "javascript",
 	"py":         "python",
+	"javascript": "javascript",
+	"js":         "javascript",
+	"typescript": "typescript",
+	"ts":         "typescript",
+	"bash":       "bash",
 	"sh":         "bash",
+	"shell":      "bash",
+	"pascal":     "pascal",
+	"c":          "c",
+	"cpp":        "cpp",
+	"c++":        "cpp",
+	"cxx":        "cpp",
+	"cc":         "cpp",
+	"csharp":     "csharp",
+	"c#":         "csharp",
+	"cs":         "csharp",
+	"java":       "java",
+	"rust":       "rust",
+	"php":        "php",
+	"ruby":       "ruby",
+	"lua":        "lua",
+}
+
+var supportedCodeLanguages = []string{
+	"go",
+	"python",
+	"javascript",
+	"typescript",
+	"bash",
+	"pascal",
+	"c",
+	"cpp",
+	"csharp",
+	"java",
+	"rust",
+	"php",
+	"ruby",
+	"lua",
 }
 
 // ChannelSettings controls trivia behavior for a specific channel.
@@ -161,5 +196,7 @@ func NormalizeCodeLanguage(input string) (string, bool) {
 
 // SupportedCodeLanguages returns the canonical supported language list.
 func SupportedCodeLanguages() []string {
-	return []string{"go", "python", "javascript", "bash"}
+	languages := make([]string, len(supportedCodeLanguages))
+	copy(languages, supportedCodeLanguages)
+	return languages
 }

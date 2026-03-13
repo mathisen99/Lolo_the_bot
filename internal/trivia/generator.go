@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,14 +38,20 @@ type Generator struct {
 }
 
 const (
-	maxAnswerLength      = 160
-	maxAliasLength       = 160
-	maxCodeQuestionLen   = 220
-	maxCodeAnswerLength  = 280
-	maxCodeAliasLength   = 280
-	maxCodeHintLength    = 200
-	maxCodeUniqueKeyLen  = 180
-	maxCodeLanguageField = 32
+	defaultMaxOutputTokens    = 220
+	maxOutputTokensRetryStep  = 80
+	maxOutputTokensCeiling    = 1200
+	triviaGenerationMinTokens = 300
+	codeGenerationMinTokens   = 900
+	judgeGenerationMinTokens  = 300
+	maxAnswerLength           = 160
+	maxAliasLength            = 160
+	maxCodeQuestionLen        = 220
+	maxCodeAnswerLength       = 280
+	maxCodeAliasLength        = 280
+	maxCodeHintLength         = 200
+	maxCodeUniqueKeyLen       = 180
+	maxCodeLanguageField      = 32
 )
 
 // NewGenerator builds a trivia question generator.
@@ -90,10 +98,7 @@ func (g *Generator) GenerateQuestion(ctx context.Context, topic, difficulty stri
 		model = "gpt-5.2"
 	}
 
-	maxOutputTokens := g.config.MaxOutputTokens
-	if maxOutputTokens <= 0 {
-		maxOutputTokens = 220
-	}
+	maxOutputTokens := resolveMaxOutputTokens(g.config.MaxOutputTokens, attempt, triviaGenerationMinTokens)
 
 	prompt := buildTriviaPrompt(topic, difficulty, attempt, avoidKeys, avoidQuestions)
 	reasoningEffort := normalizeReasoningEffort(g.config.ReasoningEffort)
@@ -189,10 +194,7 @@ func (g *Generator) GenerateCodeQuestion(ctx context.Context, language string, a
 		model = "gpt-5.2"
 	}
 
-	maxOutputTokens := g.config.MaxOutputTokens
-	if maxOutputTokens <= 0 {
-		maxOutputTokens = 220
-	}
+	maxOutputTokens := resolveMaxOutputTokens(g.config.MaxOutputTokens, attempt, codeGenerationMinTokens)
 
 	prompt := buildCodePrompt(canonicalLanguage, attempt, avoidKeys, avoidQuestions)
 
@@ -296,7 +298,7 @@ func (g *Generator) JudgeClosestGuess(ctx context.Context, req JudgeRequest) (*J
 	requestBody := map[string]any{
 		"model":             model,
 		"input":             prompt,
-		"max_output_tokens": 220,
+		"max_output_tokens": resolveMaxOutputTokens(g.config.MaxOutputTokens, 1, judgeGenerationMinTokens),
 		"reasoning": map[string]any{
 			"effort": normalizeReasoningEffort(g.config.ReasoningEffort),
 		},
@@ -423,11 +425,13 @@ Rules:
 
 func buildCodePrompt(language string, attempt int, avoidKeys, avoidQuestions []string) string {
 	language = strings.TrimSpace(language)
+	now := time.Now().UTC().Format("2006-01-02")
 
 	var prompt strings.Builder
 	_, _ = fmt.Fprintf(&prompt, `Generate a one-line coding quiz for IRC.
 
 Language: %s
+Current date (UTC): %s
 
 Requirements:
 - Return JSON only
@@ -441,6 +445,8 @@ Requirements:
 - Only generate a question with one clear expected answer or a very small set of equivalent answers
 - Include a short hint
 - Keep the question concise and unambiguous
+- Use modern, up-to-date syntax and standard-library usage as of the current date
+- Avoid deprecated or legacy-only constructs unless explicitly required
 
 Return exactly this JSON schema:
 {
@@ -452,7 +458,7 @@ Return exactly this JSON schema:
   "uniqueness_key": "string",
   "validator_type": "normalized_exact"
 }
-`, language, language, language)
+`, language, now, language, language)
 
 	_, _ = fmt.Fprintf(&prompt, "\nGeneration attempt: %d", attempt)
 	_, _ = fmt.Fprintf(&prompt, "\nVariation nonce: %d", time.Now().UnixNano())
@@ -578,6 +584,24 @@ func normalizeReasoningEffort(input string) string {
 	}
 }
 
+func resolveMaxOutputTokens(configValue, attempt, minimum int) int {
+	maxOutputTokens := configValue
+	if maxOutputTokens <= 0 {
+		maxOutputTokens = defaultMaxOutputTokens
+	}
+	if maxOutputTokens < minimum {
+		maxOutputTokens = minimum
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	maxOutputTokens += (attempt - 1) * maxOutputTokensRetryStep
+	if maxOutputTokens > maxOutputTokensCeiling {
+		maxOutputTokens = maxOutputTokensCeiling
+	}
+	return maxOutputTokens
+}
+
 func validateJudgeDecision(decision *JudgeDecision, candidates []JudgeGuessCandidate) error {
 	if decision == nil {
 		return fmt.Errorf("invalid trivia judge payload: empty decision")
@@ -610,46 +634,402 @@ func validateJudgeDecision(decision *JudgeDecision, candidates []JudgeGuessCandi
 }
 
 func extractTriviaJSON(rawResponse []byte) (string, error) {
-	var payload struct {
-		OutputText string `json:"output_text"`
-		Output     []struct {
-			Type    string `json:"type"`
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"output"`
+	text, status, incompleteReason, err := extractResponseText(rawResponse)
+	if err != nil {
+		return "", err
 	}
-
-	if err := json.Unmarshal(rawResponse, &payload); err != nil {
-		return "", fmt.Errorf("failed to parse openai response envelope: %w", err)
-	}
-
-	text := strings.TrimSpace(payload.OutputText)
 	if text == "" {
-		var b strings.Builder
-		for _, item := range payload.Output {
-			for _, content := range item.Content {
-				if content.Type == "output_text" && content.Text != "" {
-					if b.Len() > 0 {
-						b.WriteByte('\n')
-					}
-					b.WriteString(content.Text)
-				}
-			}
-		}
-		text = strings.TrimSpace(b.String())
-	}
-
-	if text == "" {
-		return "", fmt.Errorf("openai trivia response did not include output text")
+		return "", fmt.Errorf("openai response did not include output text%s", responseMetadataSuffix(status, incompleteReason))
 	}
 
 	jsonText, ok := extractFirstJSONObject(text)
 	if !ok {
-		return "", fmt.Errorf("openai trivia response did not include a valid JSON object")
+		var asJSONString string
+		if err := json.Unmarshal([]byte(text), &asJSONString); err == nil {
+			jsonText, ok = extractFirstJSONObject(asJSONString)
+		}
+	}
+	if !ok {
+		if kvJSON, kvOK := parseLooseKeyValueJSONObject(text); kvOK {
+			jsonText = kvJSON
+			ok = true
+		}
+	}
+	if !ok {
+		preview := summarizeForLog(text, 220)
+		if preview != "" {
+			return "", fmt.Errorf("openai response did not include a valid JSON object%s; preview=%q", responseMetadataSuffix(status, incompleteReason), preview)
+		}
+		return "", fmt.Errorf("openai response did not include a valid JSON object%s", responseMetadataSuffix(status, incompleteReason))
 	}
 	return jsonText, nil
+}
+
+func extractResponseText(rawResponse []byte) (string, string, string, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(rawResponse, &payload); err != nil {
+		return "", "", "", fmt.Errorf("failed to parse openai response envelope: %w", err)
+	}
+
+	status := strings.TrimSpace(flattenTextCandidate(payload["status"]))
+	incompleteReason := ""
+	if details, ok := payload["incomplete_details"].(map[string]any); ok {
+		incompleteReason = strings.TrimSpace(flattenTextCandidate(details["reason"]))
+	}
+
+	fragments := make([]string, 0, 8)
+	appendTextCandidate(&fragments, flattenTextCandidate(payload["output_text"]))
+	appendJSONCandidate(&fragments, payload["output_parsed"])
+
+	outputItems, _ := payload["output"].([]any)
+	for _, item := range outputItems {
+		itemMap, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		appendTextCandidate(&fragments, flattenTextCandidate(itemMap["output_text"]))
+		appendTextCandidate(&fragments, flattenTextCandidate(itemMap["text"]))
+		appendTextCandidate(&fragments, flattenTextCandidate(itemMap["arguments"]))
+		appendJSONCandidate(&fragments, itemMap["json"])
+
+		contentItems, _ := itemMap["content"].([]any)
+		for _, content := range contentItems {
+			contentMap, ok := content.(map[string]any)
+			if !ok {
+				continue
+			}
+			appendTextCandidate(&fragments, flattenTextCandidate(contentMap["output_text"]))
+			appendTextCandidate(&fragments, flattenTextCandidate(contentMap["text"]))
+			appendTextCandidate(&fragments, flattenTextCandidate(contentMap["arguments"]))
+			appendTextCandidate(&fragments, flattenTextCandidate(contentMap["value"]))
+			appendJSONCandidate(&fragments, contentMap["json"])
+		}
+	}
+
+	return strings.TrimSpace(strings.Join(fragments, "\n")), status, incompleteReason, nil
+}
+
+func appendTextCandidate(fragments *[]string, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	*fragments = append(*fragments, text)
+}
+
+func appendJSONCandidate(fragments *[]string, value any) {
+	if value == nil {
+		return
+	}
+
+	if text, ok := value.(string); ok {
+		appendTextCandidate(fragments, text)
+		return
+	}
+
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return
+	}
+	appendTextCandidate(fragments, string(encoded))
+}
+
+func flattenTextCandidate(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(v)
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			part := flattenTextCandidate(item)
+			if part != "" {
+				parts = append(parts, part)
+			}
+		}
+		return strings.TrimSpace(strings.Join(parts, " "))
+	case map[string]any:
+		if part := flattenTextCandidate(v["value"]); part != "" {
+			return part
+		}
+		if part := flattenTextCandidate(v["text"]); part != "" {
+			return part
+		}
+	}
+	return ""
+}
+
+func responseMetadataSuffix(status, reason string) string {
+	parts := make([]string, 0, 2)
+	status = strings.TrimSpace(status)
+	reason = strings.TrimSpace(reason)
+
+	if status != "" {
+		parts = append(parts, "status="+status)
+	}
+	if reason != "" {
+		parts = append(parts, "reason="+reason)
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
+}
+
+func summarizeForLog(text string, maxLen int) string {
+	clean := strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	if clean == "" {
+		return ""
+	}
+	if maxLen <= 0 || len(clean) <= maxLen {
+		return clean
+	}
+	if maxLen <= 3 {
+		return clean[:maxLen]
+	}
+	return clean[:maxLen-3] + "..."
+}
+
+func parseLooseKeyValueJSONObject(text string) (string, bool) {
+	cleaned := strings.TrimSpace(text)
+	if cleaned == "" {
+		return "", false
+	}
+
+	// Strip optional markdown fences first.
+	if strings.HasPrefix(cleaned, "```") {
+		cleaned = strings.TrimPrefix(cleaned, "```json")
+		cleaned = strings.TrimPrefix(cleaned, "```JSON")
+		cleaned = strings.TrimPrefix(cleaned, "```")
+		cleaned = strings.TrimSuffix(cleaned, "```")
+		cleaned = strings.TrimSpace(cleaned)
+	}
+
+	lines := strings.Split(cleaned, "\n")
+	fields := make(map[string]string, 10)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "-") || strings.HasPrefix(trimmed, "*") {
+			trimmed = strings.TrimSpace(strings.TrimLeft(trimmed, "-*"))
+		}
+
+		sep := strings.Index(trimmed, ":")
+		if sep <= 0 {
+			continue
+		}
+
+		key := normalizeLooseKVKey(trimmed[:sep])
+		value := strings.TrimSpace(trimmed[sep+1:])
+		value = strings.Trim(value, `"'`)
+		if key == "" || value == "" {
+			continue
+		}
+		fields[key] = value
+	}
+
+	if len(fields) == 0 {
+		return "", false
+	}
+
+	if judgeJSON, ok := buildLooseJudgeJSON(fields); ok {
+		return judgeJSON, true
+	}
+	_, hasLanguage := fields["language"]
+	_, hasValidator := fields["validator_type"]
+	if hasLanguage || hasValidator {
+		if codeJSON, ok := buildLooseCodeJSON(fields); ok {
+			return codeJSON, true
+		}
+	}
+	if triviaJSON, ok := buildLooseTriviaJSON(fields); ok {
+		return triviaJSON, true
+	}
+	if !hasLanguage && !hasValidator {
+		if codeJSON, ok := buildLooseCodeJSON(fields); ok {
+			return codeJSON, true
+		}
+	}
+
+	return "", false
+}
+
+func normalizeLooseKVKey(key string) string {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	normalized = strings.ReplaceAll(normalized, " ", "_")
+
+	switch normalized {
+	case "q":
+		return "question"
+	case "a":
+		return "answer"
+	case "unique_key", "uniqueness", "uniq_key":
+		return "uniqueness_key"
+	case "lang":
+		return "language"
+	case "validator":
+		return "validator_type"
+	}
+
+	return normalized
+}
+
+func buildLooseJudgeJSON(fields map[string]string) (string, bool) {
+	approvedRaw, hasApproved := fields["approved"]
+	if !hasApproved {
+		return "", false
+	}
+
+	approved, ok := parseLooseBool(approvedRaw)
+	if !ok {
+		return "", false
+	}
+
+	guessID := int64(0)
+	if value, exists := fields["guess_id"]; exists {
+		if parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil && parsed >= 0 {
+			guessID = parsed
+		}
+	}
+	if !approved {
+		guessID = 0
+	}
+
+	confidence := 0.0
+	if value, exists := fields["confidence"]; exists {
+		if parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
+			confidence = math.Max(0, math.Min(1, parsed))
+		}
+	}
+
+	reason := strings.TrimSpace(fields["reason"])
+
+	payload := map[string]any{
+		"approved":   approved,
+		"guess_id":   guessID,
+		"confidence": confidence,
+		"reason":     reason,
+	}
+
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", false
+	}
+	return string(encoded), true
+}
+
+func buildLooseTriviaJSON(fields map[string]string) (string, bool) {
+	question := strings.TrimSpace(fields["question"])
+	answer := strings.TrimSpace(fields["answer"])
+	hint := strings.TrimSpace(fields["hint"])
+	if question == "" || answer == "" || hint == "" {
+		return "", false
+	}
+
+	aliases := parseLooseAliases(fields["aliases"])
+	uniquenessKey := strings.TrimSpace(fields["uniqueness_key"])
+	if uniquenessKey == "" {
+		uniquenessKey = strings.TrimSpace(fields["unique_key"])
+	}
+
+	payload := map[string]any{
+		"question":       question,
+		"answer":         answer,
+		"aliases":        aliases,
+		"hint":           hint,
+		"uniqueness_key": uniquenessKey,
+	}
+
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", false
+	}
+	return string(encoded), true
+}
+
+func buildLooseCodeJSON(fields map[string]string) (string, bool) {
+	language := strings.TrimSpace(fields["language"])
+	question := strings.TrimSpace(fields["question"])
+	answer := strings.TrimSpace(fields["answer"])
+	hint := strings.TrimSpace(fields["hint"])
+	if language == "" || question == "" || answer == "" || hint == "" {
+		return "", false
+	}
+
+	validatorType := strings.TrimSpace(fields["validator_type"])
+	if validatorType == "" {
+		validatorType = ValidatorNormalizedExact
+	}
+
+	aliases := parseLooseAliases(fields["aliases"])
+	uniquenessKey := strings.TrimSpace(fields["uniqueness_key"])
+	if uniquenessKey == "" {
+		uniquenessKey = strings.TrimSpace(fields["unique_key"])
+	}
+
+	payload := map[string]any{
+		"language":       language,
+		"question":       question,
+		"answer":         answer,
+		"aliases":        aliases,
+		"hint":           hint,
+		"uniqueness_key": uniquenessKey,
+		"validator_type": validatorType,
+	}
+
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", false
+	}
+	return string(encoded), true
+}
+
+func parseLooseAliases(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return []string{}
+	}
+
+	var aliases []string
+	if strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") {
+		if err := json.Unmarshal([]byte(raw), &aliases); err == nil {
+			clean := make([]string, 0, len(aliases))
+			for _, alias := range aliases {
+				trimmed := strings.TrimSpace(alias)
+				if trimmed != "" {
+					clean = append(clean, trimmed)
+				}
+			}
+			return clean
+		}
+	}
+
+	parts := strings.Split(raw, ",")
+	aliases = make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.Trim(strings.TrimSpace(part), `"'`)
+		if trimmed == "" {
+			continue
+		}
+		aliases = append(aliases, trimmed)
+	}
+	return aliases
+}
+
+func parseLooseBool(value string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "yes", "y", "1":
+		return true, true
+	case "false", "no", "n", "0":
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 func extractFirstJSONObject(input string) (string, bool) {

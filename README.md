@@ -400,8 +400,8 @@ The VM runs persistently and uses vsock for host-guest communication. No network
 | `!version` | Bot version | All |
 | `!uptime` | Bot uptime | All |
 | `!trivia <topic>` / `!quiz <topic>` | Start a trivia round | All |
-| `!code <go|python|javascript|bash>` | Start a one-line coding quiz round | All |
-| `!hint` | Reveal a hint for active trivia round | All |
+| `!code <lang>` | Start a one-line coding quiz round | All |
+| `!hint` | Reveal a hint for active trivia/code round | All |
 | `!triviarules` / `!quizrules` | Show trivia rules and scoring | All |
 | `!top10` | Top 10 trivia leaderboard for current channel | All |
 | `!score [nick]` | Show trivia score in current channel | All |
@@ -415,6 +415,7 @@ The VM runs persistently and uses vsock for host-guest communication. No network
 Use `!help <command>` for detailed help.
 
 Trivia/code note: For long-form trivia answers and timed-out code rounds, if no exact match is found before timeout, the bot can run a strict close-answer judge pass and award points to the earliest clearly equivalent guess.
+Supported code quiz languages: `go`, `python`, `javascript`, `typescript`, `bash`, `pascal`, `c`, `cpp`, `csharp`, `java`, `rust`, `php`, `ruby`, `lua` (aliases include `js`, `ts`, `py`, `sh`, `c++`, `c#`).
 
 ## Configuration
 

@@ -18,6 +18,7 @@ import (
 	"github.com/yourusername/lolo/internal/ircformat"
 	"github.com/yourusername/lolo/internal/output"
 	"github.com/yourusername/lolo/internal/splitter"
+	"github.com/yourusername/lolo/internal/trivia"
 	"github.com/yourusername/lolo/internal/user"
 )
 
@@ -38,6 +39,7 @@ type MessageHandler struct {
 	commandMetadata       map[string]*CommandMetadata        // Cache of API command metadata
 	imageDownloadChannels []string                           // Channels to auto-download images from
 	sendMessageFunc       func(target, message string) error // Callback to send IRC messages
+	triviaManager         *trivia.Manager
 }
 
 // MessageHandlerConfig contains configuration for the message handler
@@ -56,6 +58,7 @@ type MessageHandlerConfig struct {
 	PhoneNotificationsActive bool
 	PhoneNotificationsURL    string
 	MentionAggregateDelay    time.Duration // How long to wait for overflow messages (default: 1s)
+	TriviaManager            *trivia.Manager
 }
 
 // NewMessageHandler creates a new message handler
@@ -91,6 +94,7 @@ func NewMessageHandler(config *MessageHandlerConfig) *MessageHandler {
 		testMode:              config.TestMode,
 		commandMetadata:       make(map[string]*CommandMetadata),
 		imageDownloadChannels: config.ImageDownloadChannels,
+		triviaManager:         config.TriviaManager,
 	}
 }
 
@@ -151,6 +155,28 @@ func (h *MessageHandler) HandleMessage(ctx context.Context, nick, hostmask, chan
 	// Check if this is a command
 	if h.dispatcher.IsCommand(message) {
 		return h.handleCommand(ctx, nick, hostmask, channel, message, isPM)
+	}
+
+	// Check if this is a trivia answer in an active channel round.
+	// This must run before mention handling because trivia answers use plain channel text.
+	if !isPM && h.triviaManager != nil {
+		triviaResponse, handled, err := h.triviaManager.TryAnswer(channel, nick, message)
+		if err != nil {
+			h.logger.Warning("Failed to process trivia answer in %s: %v", channel, err)
+		}
+		if handled {
+			if triviaResponse == "" {
+				return nil, nil
+			}
+
+			messages := h.splitMessage(triviaResponse)
+			for _, msg := range messages {
+				if err := h.logMessage("bot", "", channel, msg, true); err != nil {
+					h.errorHandler.LogError(errors.NewDatabaseError("log trivia response", err), "trivia response logging")
+				}
+			}
+			return messages, nil
+		}
 	}
 
 	// Check if this is a mention (only in channels, not PMs)
@@ -507,12 +533,18 @@ func (h *MessageHandler) processMention(ctx context.Context, nick, hostmask, cha
 // This is needed for the mention aggregator to send responses asynchronously
 func (h *MessageHandler) SetSendMessageFunc(fn func(target, message string) error) {
 	h.sendMessageFunc = fn
+	if h.triviaManager != nil {
+		h.triviaManager.SetSendMessageFunc(fn)
+	}
 }
 
 // Shutdown cleans up resources used by the message handler
 func (h *MessageHandler) Shutdown() {
 	if h.mentionAggregator != nil {
 		h.mentionAggregator.Shutdown()
+	}
+	if h.triviaManager != nil {
+		h.triviaManager.Shutdown()
 	}
 }
 

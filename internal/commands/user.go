@@ -222,7 +222,7 @@ func (c *UserListCommand) Execute(ctx *Context) (*Response, error) {
 	var sb strings.Builder
 	sb.WriteString("Registered users:\n")
 	for _, u := range users {
-		sb.WriteString(fmt.Sprintf("  %s - %s (hostmask: %s)\n", u.Nick, errors.PermissionLevelName(u.Level), u.Hostmask))
+		_, _ = fmt.Fprintf(&sb, "  %s - %s (hostmask: %s)\n", u.Nick, errors.PermissionLevelName(u.Level), u.Hostmask)
 	}
 
 	// Send as PM (Requirement 15.3)

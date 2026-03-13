@@ -70,7 +70,11 @@ func (c *Checker) OnJoin(nick, channel string) {
 		// Don't log connection errors — API might just be down
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			c.logger.Warning("Reminder: failed to close join check response body: %v", closeErr)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return

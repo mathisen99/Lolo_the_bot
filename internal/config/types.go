@@ -13,6 +13,7 @@ type Config struct {
 	API                APIConfig                `toml:"api"`
 	Images             ImagesConfig             `toml:"images"`
 	PhoneNotifications PhoneNotificationsConfig `toml:"phone_notifications"`
+	Trivia             TriviaConfig             `toml:"trivia"`
 }
 
 // ImagesConfig contains image download settings
@@ -87,6 +88,24 @@ type APIConfig struct {
 	RetryBackoffMS          int `toml:"retry_backoff_ms"`
 }
 
+// TriviaConfig contains trivia/quiz system configuration.
+type TriviaConfig struct {
+	Enabled                  bool   `toml:"enabled"`
+	DatabasePath             string `toml:"database_path"`
+	OpenAIModel              string `toml:"openai_model"`
+	OpenAIAPIKeyEnv          string `toml:"openai_api_key_env"`
+	OpenAIBaseURL            string `toml:"openai_base_url"`
+	RequestTimeoutSeconds    int    `toml:"request_timeout_seconds"`
+	MaxOutputTokens          int    `toml:"max_output_tokens"`
+	GenerationRetryLimit     int    `toml:"generation_retry_limit"`
+	DefaultAnswerTimeSeconds int    `toml:"default_answer_time_seconds"`
+	DefaultHintsEnabled      bool   `toml:"default_hints_enabled"`
+	DefaultBasePoints        int    `toml:"default_base_points"`
+	DefaultMinimumPoints     int    `toml:"default_minimum_points"`
+	DefaultHintPenalty       int    `toml:"default_hint_penalty"`
+	DefaultEnabled           bool   `toml:"default_enabled"`
+}
+
 // GetAPITimeoutDuration returns the API timeout as a time.Duration
 func (c *BotConfig) GetAPITimeoutDuration() time.Duration {
 	return time.Duration(c.APITimeout) * time.Second
@@ -129,4 +148,9 @@ func (c *APIConfig) GetCircuitBreakerTimeoutDuration() time.Duration {
 // GetRetryBackoffDuration returns the initial retry backoff as a time.Duration
 func (c *APIConfig) GetRetryBackoffDuration() time.Duration {
 	return time.Duration(c.RetryBackoffMS) * time.Millisecond
+}
+
+// GetRequestTimeoutDuration returns trivia generation timeout as duration.
+func (c *TriviaConfig) GetRequestTimeoutDuration() time.Duration {
+	return time.Duration(c.RequestTimeoutSeconds) * time.Second
 }

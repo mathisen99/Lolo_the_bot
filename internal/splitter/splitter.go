@@ -398,11 +398,6 @@ func (f *formatState) hasAnyFormatting() bool {
 		f.monospace || f.reverse || f.fgColor != "" || f.bgColor != ""
 }
 
-// findSplitPoint is kept for backwards compatibility but now calls findSplitPointIRC
-func (s *Splitter) findSplitPoint(message string, maxLen int) int {
-	return s.findSplitPointIRC(message, maxLen)
-}
-
 // NeedsSplit returns true if the message needs to be split
 func (s *Splitter) NeedsSplit(message string) bool {
 	return len(message) > s.maxLength

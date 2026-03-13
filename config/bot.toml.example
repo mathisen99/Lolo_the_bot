@@ -54,3 +54,21 @@
   # Channels to auto-download images from (user-posted images)
   # Bot-generated images (flux create/edit) are always saved to img/
   download_channels = ["#yourchannel"]
+
+[trivia]
+  enabled = true
+  database_path = "data/trivia.db"       # Dedicated trivia SQLite database
+  openai_model = "gpt-5.2"
+  openai_api_key_env = "OPENAI_API_KEY"  # Environment variable for API key
+  openai_base_url = "https://api.openai.com/v1"
+  request_timeout_seconds = 20
+  max_output_tokens = 220
+  generation_retry_limit = 5             # Dedup regeneration attempts
+
+  # Defaults for channels without explicit trivia settings rows
+  default_answer_time_seconds = 30
+  default_hints_enabled = true
+  default_base_points = 100
+  default_minimum_points = 20
+  default_hint_penalty = 20
+  default_enabled = true

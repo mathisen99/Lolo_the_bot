@@ -143,6 +143,22 @@ func DefaultConfig() *Config {
 			MaxRetries:              3,
 			RetryBackoffMS:          100, // initial backoff, doubles each retry
 		},
+		Trivia: TriviaConfig{
+			Enabled:                  true,
+			DatabasePath:             "data/trivia.db",
+			OpenAIModel:              "gpt-5.2",
+			OpenAIAPIKeyEnv:          "OPENAI_API_KEY",
+			OpenAIBaseURL:            "https://api.openai.com/v1",
+			RequestTimeoutSeconds:    20,
+			MaxOutputTokens:          220,
+			GenerationRetryLimit:     5,
+			DefaultAnswerTimeSeconds: 30,
+			DefaultHintsEnabled:      true,
+			DefaultBasePoints:        100,
+			DefaultMinimumPoints:     20,
+			DefaultHintPenalty:       20,
+			DefaultEnabled:           true,
+		},
 		PhoneNotifications: PhoneNotificationsConfig{
 			Active: false,
 			URL:    "",
@@ -152,6 +168,8 @@ func DefaultConfig() *Config {
 
 // validate checks that all required configuration fields are present and valid
 func validate(cfg *Config) error {
+	applyTriviaDefaults(cfg)
+
 	// Validate server settings
 	if cfg.Server.Address == "" {
 		return fmt.Errorf("server.address is required")
@@ -237,5 +255,102 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("api.retry_backoff_ms must be positive, got %d", cfg.API.RetryBackoffMS)
 	}
 
+	// Validate trivia settings
+	if cfg.Trivia.DatabasePath == "" {
+		return fmt.Errorf("trivia.database_path is required")
+	}
+	if cfg.Trivia.OpenAIModel == "" {
+		return fmt.Errorf("trivia.openai_model is required")
+	}
+	if cfg.Trivia.OpenAIBaseURL == "" {
+		return fmt.Errorf("trivia.openai_base_url is required")
+	}
+	if cfg.Trivia.RequestTimeoutSeconds <= 0 {
+		return fmt.Errorf("trivia.request_timeout_seconds must be positive, got %d", cfg.Trivia.RequestTimeoutSeconds)
+	}
+	if cfg.Trivia.MaxOutputTokens <= 0 {
+		return fmt.Errorf("trivia.max_output_tokens must be positive, got %d", cfg.Trivia.MaxOutputTokens)
+	}
+	if cfg.Trivia.GenerationRetryLimit <= 0 {
+		return fmt.Errorf("trivia.generation_retry_limit must be positive, got %d", cfg.Trivia.GenerationRetryLimit)
+	}
+	if cfg.Trivia.DefaultAnswerTimeSeconds <= 0 {
+		return fmt.Errorf("trivia.default_answer_time_seconds must be positive, got %d", cfg.Trivia.DefaultAnswerTimeSeconds)
+	}
+	if cfg.Trivia.DefaultBasePoints <= 0 {
+		return fmt.Errorf("trivia.default_base_points must be positive, got %d", cfg.Trivia.DefaultBasePoints)
+	}
+	if cfg.Trivia.DefaultMinimumPoints < 0 {
+		return fmt.Errorf("trivia.default_minimum_points must be non-negative, got %d", cfg.Trivia.DefaultMinimumPoints)
+	}
+	if cfg.Trivia.DefaultMinimumPoints > cfg.Trivia.DefaultBasePoints {
+		return fmt.Errorf("trivia.default_minimum_points (%d) cannot exceed default_base_points (%d)",
+			cfg.Trivia.DefaultMinimumPoints, cfg.Trivia.DefaultBasePoints)
+	}
+	if cfg.Trivia.DefaultHintPenalty < 0 {
+		return fmt.Errorf("trivia.default_hint_penalty must be non-negative, got %d", cfg.Trivia.DefaultHintPenalty)
+	}
+
 	return nil
+}
+
+func applyTriviaDefaults(cfg *Config) {
+	triviaSectionMissing := cfg.Trivia.DatabasePath == "" &&
+		cfg.Trivia.OpenAIModel == "" &&
+		cfg.Trivia.OpenAIAPIKeyEnv == "" &&
+		cfg.Trivia.OpenAIBaseURL == "" &&
+		cfg.Trivia.RequestTimeoutSeconds == 0 &&
+		cfg.Trivia.MaxOutputTokens == 0 &&
+		cfg.Trivia.GenerationRetryLimit == 0 &&
+		cfg.Trivia.DefaultAnswerTimeSeconds == 0 &&
+		cfg.Trivia.DefaultBasePoints == 0 &&
+		cfg.Trivia.DefaultMinimumPoints == 0 &&
+		cfg.Trivia.DefaultHintPenalty == 0 &&
+		!cfg.Trivia.DefaultHintsEnabled &&
+		!cfg.Trivia.DefaultEnabled &&
+		!cfg.Trivia.Enabled
+
+	if triviaSectionMissing {
+		cfg.Trivia.Enabled = true
+		cfg.Trivia.DefaultHintsEnabled = true
+		cfg.Trivia.DefaultEnabled = true
+		cfg.Trivia.DefaultAnswerTimeSeconds = 30
+		cfg.Trivia.DefaultBasePoints = 100
+		cfg.Trivia.DefaultMinimumPoints = 20
+		cfg.Trivia.DefaultHintPenalty = 20
+	}
+
+	if cfg.Trivia.DatabasePath == "" {
+		cfg.Trivia.DatabasePath = "data/trivia.db"
+	}
+	if cfg.Trivia.OpenAIModel == "" {
+		cfg.Trivia.OpenAIModel = "gpt-5.2"
+	}
+	if cfg.Trivia.OpenAIAPIKeyEnv == "" {
+		cfg.Trivia.OpenAIAPIKeyEnv = "OPENAI_API_KEY"
+	}
+	if cfg.Trivia.OpenAIBaseURL == "" {
+		cfg.Trivia.OpenAIBaseURL = "https://api.openai.com/v1"
+	}
+	if cfg.Trivia.RequestTimeoutSeconds <= 0 {
+		cfg.Trivia.RequestTimeoutSeconds = 20
+	}
+	if cfg.Trivia.MaxOutputTokens <= 0 {
+		cfg.Trivia.MaxOutputTokens = 220
+	}
+	if cfg.Trivia.GenerationRetryLimit <= 0 {
+		cfg.Trivia.GenerationRetryLimit = 5
+	}
+	if cfg.Trivia.DefaultAnswerTimeSeconds <= 0 {
+		cfg.Trivia.DefaultAnswerTimeSeconds = 30
+	}
+	if cfg.Trivia.DefaultBasePoints <= 0 {
+		cfg.Trivia.DefaultBasePoints = 100
+	}
+	if cfg.Trivia.DefaultMinimumPoints < 0 {
+		cfg.Trivia.DefaultMinimumPoints = 20
+	}
+	if cfg.Trivia.DefaultHintPenalty < 0 {
+		cfg.Trivia.DefaultHintPenalty = 20
+	}
 }

@@ -399,7 +399,14 @@ The VM runs persistently and uses vsock for host-guest communication. No network
 | `!ping` | Pong | All |
 | `!version` | Bot version | All |
 | `!uptime` | Bot uptime | All |
+| `!trivia <topic>` / `!quiz <topic>` | Start a trivia round | All |
+| `!hint` | Reveal a hint for active trivia round | All |
+| `!triviarules` / `!quizrules` | Show trivia rules and scoring | All |
+| `!top10` | Top 10 trivia leaderboard for current channel | All |
+| `!score [nick]` | Show trivia score in current channel | All |
 | `!user add/remove/list` | Manage users | Admin+ |
+| `!score set/add/remove/reset ...` | Manual trivia score management | Admin+ |
+| `!triviasettings ...` | Trivia channel settings | Admin+ |
 | `!kick/ban/mute` | Moderation | Admin+ |
 | `!join/part` | Channel management | Owner |
 | `!quit` | Shutdown bot | Owner |
@@ -458,6 +465,17 @@ download_channels = ["#yourchannel"]  # Channels to auto-download images from
 circuit_breaker_threshold = 5  # Failures before circuit opens
 max_retries = 3                # Max API retry attempts
 
+[trivia]
+enabled = true
+database_path = "data/trivia.db"
+openai_model = "gpt-5.2"
+openai_api_key_env = "OPENAI_API_KEY"
+default_answer_time_seconds = 30
+default_base_points = 100
+default_minimum_points = 20
+default_hint_penalty = 20
+```
+
 ### Step 5: Initialize Semantic Search (Optional)
 
 If you have existing chat history and want to enable semantic search:
@@ -465,7 +483,6 @@ If you have existing chat history and want to enable semantic search:
 ```bash
 # Initialize ChromaDB with existing messages
 python3 scripts/migrate_to_chroma.py
-```
 ```
 
 ### Step 4: Customize AI Personality (api/config/ai_settings.toml)

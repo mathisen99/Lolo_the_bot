@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/yourusername/lolo/internal/callback"
@@ -20,6 +22,7 @@ import (
 	"github.com/yourusername/lolo/internal/reminder"
 	"github.com/yourusername/lolo/internal/shutdown"
 	"github.com/yourusername/lolo/internal/splitter"
+	"github.com/yourusername/lolo/internal/trivia"
 	"github.com/yourusername/lolo/internal/user"
 )
 
@@ -31,6 +34,10 @@ func main() {
 	// Create logger first for colored output
 	logger := output.NewColorLogger()
 	logger.Info("Lolo IRC Bot - Starting...")
+
+	// Load .env file for Go-side environment variables (e.g., OPENAI_API_KEY for trivia).
+	// Missing .env is not fatal; existing process environment always takes precedence.
+	loadDotEnvFile(".env", logger)
 
 	// Load or create configuration first to check test mode
 	cfg, err := config.LoadOrCreate("config/bot.toml")
@@ -55,15 +62,58 @@ func main() {
 	}
 	logger.Success("Database initialized")
 
+	// Initialize dedicated trivia database and manager
+	triviaDBPath := cfg.Trivia.DatabasePath
+	if cfg.Bot.TestMode {
+		triviaDBPath = ":memory:"
+	}
+
+	triviaDefaults := trivia.StoreDefaults{
+		Settings: trivia.ChannelSettings{
+			AnswerTimeSeconds: cfg.Trivia.DefaultAnswerTimeSeconds,
+			HintsEnabled:      cfg.Trivia.DefaultHintsEnabled,
+			BasePoints:        cfg.Trivia.DefaultBasePoints,
+			MinimumPoints:     cfg.Trivia.DefaultMinimumPoints,
+			HintPenalty:       cfg.Trivia.DefaultHintPenalty,
+			Enabled:           cfg.Trivia.DefaultEnabled,
+		},
+	}
+
+	triviaStore, err := trivia.NewStore(triviaDBPath, triviaDefaults)
+	if err != nil {
+		logger.Error("Failed to initialize trivia database: %v", err)
+		_ = db.Close()
+		os.Exit(1)
+	}
+	logger.Success("Trivia database initialized")
+
+	triviaGenerator := trivia.NewGenerator(trivia.GeneratorConfig{
+		Enabled:         cfg.Trivia.Enabled,
+		APIKeyEnv:       cfg.Trivia.OpenAIAPIKeyEnv,
+		BaseURL:         cfg.Trivia.OpenAIBaseURL,
+		Model:           cfg.Trivia.OpenAIModel,
+		RequestTimeout:  cfg.Trivia.GetRequestTimeoutDuration(),
+		MaxOutputTokens: cfg.Trivia.MaxOutputTokens,
+	}, logger)
+
+	triviaManager := trivia.NewManager(trivia.ManagerConfig{
+		Store:             triviaStore,
+		Generator:         triviaGenerator,
+		Logger:            logger,
+		GenerationRetries: cfg.Trivia.GenerationRetryLimit,
+	})
+
 	// Handle rollback if requested
 	if *rollbackFlag {
 		logger.Info("Rolling back last migration...")
 		if err := db.Rollback(); err != nil {
 			logger.Error("Rollback failed: %v", err)
+			_ = triviaStore.Close()
 			_ = db.Close()
 			os.Exit(1)
 		}
 		logger.Success("Migration rolled back successfully")
+		_ = triviaStore.Close()
 		_ = db.Close()
 		os.Exit(0)
 	}
@@ -72,6 +122,7 @@ func main() {
 	out, err := output.NewOutput("data/error.log")
 	if err != nil {
 		logger.Error("Failed to initialize output: %v", err)
+		_ = triviaStore.Close()
 		_ = db.Close()
 		os.Exit(1)
 	}
@@ -86,6 +137,8 @@ func main() {
 	)
 	if err := maintenanceScheduler.Start(); err != nil {
 		logger.Error("Failed to start maintenance scheduler: %v", err)
+		_ = triviaStore.Close()
+		_ = db.Close()
 		os.Exit(1)
 	}
 	logger.Success("Database maintenance scheduler started")
@@ -97,6 +150,7 @@ func main() {
 	hasPassword, err := userMgr.HasOwnerPassword()
 	if err != nil {
 		logger.Error("Failed to check owner password: %v", err)
+		_ = triviaStore.Close()
 		_ = db.Close()
 		os.Exit(1)
 	}
@@ -110,6 +164,7 @@ func main() {
 		_, err := fmt.Scanln(&password)
 		if err != nil || password == "" {
 			logger.Error("Failed to read password or password is empty")
+			_ = triviaStore.Close()
 			_ = db.Close()
 			os.Exit(1)
 		}
@@ -117,6 +172,7 @@ func main() {
 		// Set the owner password (hashed with bcrypt)
 		if err := userMgr.SetOwnerPassword(password); err != nil {
 			logger.Error("Failed to set owner password: %v", err)
+			_ = triviaStore.Close()
 			_ = db.Close()
 			os.Exit(1)
 		}
@@ -152,7 +208,7 @@ func main() {
 	connManager := irc.NewConnectionManager(cfg, logger, db, userMgr)
 
 	// Register all core commands (after API client and IRC client are created)
-	registerCoreCommands(registry, db, userMgr, logger, startTime, cfg.Bot.APIEndpoint, apiHealthChecker, connManager.GetClient())
+	registerCoreCommands(registry, db, userMgr, logger, startTime, cfg.Bot.APIEndpoint, apiHealthChecker, connManager.GetClient(), triviaManager)
 
 	// Check Python API health at startup (Requirement 16.5)
 	logger.Info("Checking API health...")
@@ -190,6 +246,7 @@ func main() {
 		PhoneNotificationsActive: cfg.PhoneNotifications.Active,
 		PhoneNotificationsURL:    cfg.PhoneNotifications.URL,
 		MentionAggregateDelay:    cfg.Limits.GetMentionAggregateDelayDuration(),
+		TriviaManager:            triviaManager,
 	}
 	messageHandler := handler.NewMessageHandler(handlerConfig)
 
@@ -273,6 +330,16 @@ func main() {
 	shutdownHandler.RegisterShutdownFunc(func() error {
 		logger.Info("Shutting down message handler...")
 		messageHandler.Shutdown()
+		return nil
+	})
+
+	// 3.7. Close trivia database
+	shutdownHandler.RegisterShutdownFunc(func() error {
+		logger.Info("Closing trivia database...")
+		if err := triviaStore.Close(); err != nil {
+			return fmt.Errorf("failed to close trivia database: %w", err)
+		}
+		logger.Success("Trivia database connection closed")
 		return nil
 	})
 
@@ -413,7 +480,7 @@ func (a *apiHealthCheckerAdapter) GetCircuitBreakerStats() commands.CircuitBreak
 }
 
 // registerCoreCommands registers all core commands with the registry
-func registerCoreCommands(registry *commands.Registry, db *database.DB, userMgr *user.Manager, logger output.Logger, startTime time.Time, apiEndpoint string, apiHealthChecker commands.APIHealthChecker, ircClient commands.IRCClient) {
+func registerCoreCommands(registry *commands.Registry, db *database.DB, userMgr *user.Manager, logger output.Logger, startTime time.Time, apiEndpoint string, apiHealthChecker commands.APIHealthChecker, ircClient commands.IRCClient, triviaManager *trivia.Manager) {
 	// Owner verification command (Requirement 11.4, 11.6)
 	_ = registry.Register(commands.NewVerifyCommand(userMgr, db))
 
@@ -465,6 +532,16 @@ func registerCoreCommands(registry *commands.Registry, db *database.DB, userMgr 
 	_ = registry.Register(commands.NewMuteCommand(ircClient))
 	_ = registry.Register(commands.NewUnmuteCommand(ircClient))
 
+	// Trivia commands
+	_ = registry.Register(commands.NewTriviaCommand(triviaManager))
+	_ = registry.Register(commands.NewQuizCommand(triviaManager))
+	_ = registry.Register(commands.NewHintCommand(triviaManager))
+	_ = registry.Register(commands.NewTriviaRulesCommand(triviaManager))
+	_ = registry.Register(commands.NewQuizRulesCommand(triviaManager))
+	_ = registry.Register(commands.NewTop10Command(triviaManager))
+	_ = registry.Register(commands.NewScoreCommand(triviaManager, db))
+	_ = registry.Register(commands.NewTriviaSettingsCommand(triviaManager, db))
+
 	logger.Info("Core commands registered")
 }
 
@@ -475,4 +552,75 @@ func setupIRCHandlers(connManager *irc.ConnectionManager, messageHandler *handle
 	// This integrates the bot's message handler with the IRC connection lifecycle
 	connManager.SetupBotMessageHandler(messageHandler, cfg, logger)
 	logger.Info("IRC handlers configured")
+}
+
+// loadDotEnvFile loads KEY=VALUE pairs from a .env file into the process environment.
+// Existing environment variables are preserved.
+func loadDotEnvFile(path string, logger output.Logger) {
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			logger.Info("No %s file found, using existing environment", path)
+			return
+		}
+		logger.Warning("Failed to open %s: %v", path, err)
+		return
+	}
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			logger.Warning("Failed to close %s: %v", path, closeErr)
+		}
+	}()
+
+	scanner := bufio.NewScanner(file)
+	loadedCount := 0
+	lineNumber := 0
+
+	for scanner.Scan() {
+		lineNumber++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		if strings.HasPrefix(line, "export ") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		}
+
+		equalIndex := strings.IndexByte(line, '=')
+		if equalIndex <= 0 {
+			logger.Warning("Skipping invalid %s line %d", path, lineNumber)
+			continue
+		}
+
+		key := strings.TrimSpace(line[:equalIndex])
+		value := strings.TrimSpace(line[equalIndex+1:])
+		if key == "" {
+			logger.Warning("Skipping invalid %s line %d", path, lineNumber)
+			continue
+		}
+
+		if len(value) >= 2 {
+			if (value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'') {
+				value = value[1 : len(value)-1]
+			}
+		}
+
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+
+		if err := os.Setenv(key, value); err != nil {
+			logger.Warning("Failed setting env var %s from %s: %v", key, path, err)
+			continue
+		}
+		loadedCount++
+	}
+
+	if err := scanner.Err(); err != nil {
+		logger.Warning("Failed reading %s: %v", path, err)
+		return
+	}
+
+	logger.Info("Loaded %d environment variables from %s", loadedCount, path)
 }

@@ -69,9 +69,8 @@ var codeGenerationStartMessages = []string{
 }
 
 const (
-	longAnswerJudgeWordThreshold = 3
-	judgeConfidenceThreshold     = 0.84
-	maxJudgeCandidates           = 120
+	judgeConfidenceThreshold = 0.70
+	maxJudgeCandidates       = 120
 )
 
 type activeRound struct {
@@ -857,7 +856,7 @@ func (m *Manager) handleTimeout(channel string, roundID int64) {
 	guesses := append([]GuessLog(nil), round.Guesses...)
 	m.mu.Unlock()
 
-	if m.shouldRunTimeoutJudge(round, guesses) {
+	if m.shouldRunTimeoutJudge(guesses) {
 		if sendMessage != nil {
 			judgeStart := "Time's up! Checking close answers..."
 			if round.Mode == ModeCode {
@@ -953,17 +952,14 @@ type judgedWinner struct {
 	Confidence float64
 }
 
-func (m *Manager) shouldRunTimeoutJudge(round *activeRound, guesses []GuessLog) bool {
+func (m *Manager) shouldRunTimeoutJudge(guesses []GuessLog) bool {
 	if m.generator == nil || !m.generator.config.Enabled {
 		return false
 	}
 	if len(guesses) == 0 {
 		return false
 	}
-	if round.Mode == ModeCode {
-		return true
-	}
-	return countWords(round.Answer) > longAnswerJudgeWordThreshold
+	return true
 }
 
 func (m *Manager) judgeTimeoutWinner(round *activeRound, guesses []GuessLog) (*judgedWinner, error) {

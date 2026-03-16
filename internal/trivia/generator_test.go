@@ -2,6 +2,7 @@ package trivia
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -89,5 +90,28 @@ func TestExtractTriviaJSONMissingOutput(t *testing.T) {
 	_, err := extractTriviaJSON(raw)
 	if err == nil {
 		t.Fatal("expected error for missing output text")
+	}
+}
+
+func TestBuildJudgePromptTriviaAllowsUnambiguousShorthand(t *testing.T) {
+	t.Parallel()
+
+	req := JudgeRequest{
+		Mode:     ModeTrivia,
+		Topic:    "pascal",
+		Question: `In Pascal, what is a record that uses a "case" section to store different field layouts called?`,
+		Answer:   "A variant record (record with a variant part).",
+		Candidates: []JudgeGuessCandidate{
+			{ID: 1, Nick: "joanna", Guess: "variant", ElapsedMS: 23000},
+		},
+	}
+
+	prompt, err := buildJudgePrompt(req)
+	if err != nil {
+		t.Fatalf("buildJudgePrompt returned error: %v", err)
+	}
+
+	if !strings.Contains(prompt, "concise shorthand when meaning is unambiguous") {
+		t.Fatalf("expected prompt to include shorthand acceptance guidance")
 	}
 }

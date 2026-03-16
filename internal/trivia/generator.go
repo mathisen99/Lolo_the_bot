@@ -259,7 +259,7 @@ func (g *Generator) GenerateCodeQuestion(ctx context.Context, language, difficul
 	return &question, nil
 }
 
-// JudgeClosestGuess runs strict post-timeout judging for long-form answers.
+// JudgeClosestGuess runs post-timeout close-answer judging for trivia/code rounds.
 func (g *Generator) JudgeClosestGuess(ctx context.Context, req JudgeRequest) (*JudgeDecision, error) {
 	if !g.config.Enabled {
 		return nil, ErrGeneratorDisabled
@@ -549,7 +549,7 @@ Return ONLY JSON with this exact shape:
 }
 `, strings.TrimSpace(req.Language), strings.TrimSpace(req.Question), strings.TrimSpace(req.Answer), string(aliasesJSON), string(candidatesJSON))
 	default:
-		_, _ = fmt.Fprintf(&prompt, `You are a strict IRC trivia judge.
+		_, _ = fmt.Fprintf(&prompt, `You are a strict-but-fair IRC trivia judge.
 Topic: %s
 Question: %s
 Official answer: %s
@@ -561,9 +561,10 @@ Candidate guesses (chronological, JSON):
 
 Decide if any candidate guess is clearly equivalent to the official answer.
 Strict judging rules:
-- Accept only if the guess is in the same factual ballpark and clearly refers to the same answer.
-- Reject partial, vague, broad, related-but-not-equivalent, or incorrect guesses.
-- Minor spelling/wording variation is okay only when meaning is clearly the same.
+- Accept if the guess clearly identifies the same specific answer in this question's context.
+- Accept minor spelling/wording variation, abbreviations, and concise shorthand when meaning is unambiguous.
+- Reject guesses that are wrong, too broad, ambiguous for this question, or only loosely related.
+- When in doubt, reject.
 - If multiple candidates qualify, pick the earliest one (lowest elapsed_ms).
 - If none qualify, approved must be false.
 
@@ -1226,8 +1227,4 @@ func validateGeneratedCodeQuestion(question *GeneratedCodeQuestion, expectedLang
 	question.Aliases = validAliases
 
 	return nil
-}
-
-func countWords(text string) int {
-	return len(strings.Fields(strings.TrimSpace(text)))
 }

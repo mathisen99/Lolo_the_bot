@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,42 @@ var ignoredSimilarityTokens = map[string]struct{}{
 	"do":    {},
 	"does":  {},
 	"did":   {},
+}
+
+var triviaGenerationStartMessages = []string{
+	"Nice choice. Crafting a %s trivia question now...",
+	"On it. Building a fresh %s trivia challenge...",
+	"Great topic. Generating your %s trivia question...",
+	"Give me a second. Preparing a %s trivia question...",
+	"Working on a %s trivia question right now...",
+	"Alright, spinning up a %s trivia round...",
+	"Locked in. Writing a %s trivia question...",
+	"Good pick. Building a %s brain teaser...",
+	"Loading up a %s trivia challenge...",
+	"Queueing a brand-new %s trivia question...",
+	"Dialing in a %s question for this channel...",
+	"Generating a crisp %s trivia prompt now...",
+	"Putting together a %s quiz question...",
+	"Creating a fresh %s challenge right now...",
+	"Stand by, your %s trivia question is in progress...",
+}
+
+var codeGenerationStartMessages = []string{
+	"Nice pick. Crafting a %s one-line code challenge now...",
+	"On it. Building a %s code question...",
+	"Give me a moment. Generating a %s coding challenge...",
+	"Cooking up a %s one-liner puzzle...",
+	"Generating a fresh %s code question now...",
+	"Locked in. Writing a %s code challenge...",
+	"Preparing a %s one-line coding prompt...",
+	"Great choice. Building a %s mini code quiz...",
+	"Compiling a fresh %s code question...",
+	"Queueing a %s one-liner challenge now...",
+	"Generating a sharp %s coding puzzle...",
+	"Creating a new %s code round prompt...",
+	"Assembling a %s one-line task...",
+	"Working on a %s challenge for the channel...",
+	"Stand by, your %s code question is in progress...",
 }
 
 const (
@@ -106,6 +143,38 @@ func (m *Manager) SetSendMessageFunc(fn func(target, message string) error) {
 	m.sendMessage = fn
 }
 
+func randomGenerationStartMessage(templates []string, descriptor string) string {
+	if len(templates) == 0 {
+		return ""
+	}
+	idx := rand.New(rand.NewSource(time.Now().UnixNano())).Intn(len(templates))
+	return fmt.Sprintf(templates[idx], descriptor)
+}
+
+func (m *Manager) sendGenerationStartMessage(channel, mode, descriptor string) {
+	m.mu.Lock()
+	sendMessage := m.sendMessage
+	m.mu.Unlock()
+
+	if sendMessage == nil {
+		return
+	}
+
+	message := ""
+	if NormalizeMode(mode) == ModeCode {
+		message = randomGenerationStartMessage(codeGenerationStartMessages, descriptor)
+	} else {
+		message = randomGenerationStartMessage(triviaGenerationStartMessages, descriptor)
+	}
+	if message == "" {
+		return
+	}
+
+	if err := sendMessage(channel, message); err != nil {
+		m.logger.Warning("Failed to send trivia generation-start message to %s: %v", channel, err)
+	}
+}
+
 // Shutdown stops all active timers and marks active rounds as cancelled.
 func (m *Manager) Shutdown() {
 	m.mu.Lock()
@@ -156,6 +225,8 @@ func (m *Manager) StartRound(ctx context.Context, channel, topic string) (string
 		m.mu.Unlock()
 	}()
 
+	m.sendGenerationStartMessage(channel, ModeTrivia, topic)
+
 	question, err := m.generateAndPersistQuestion(ctx, topic, settings.Difficulty)
 	if err != nil {
 		return "", err
@@ -192,6 +263,8 @@ func (m *Manager) StartCodeRound(ctx context.Context, channel, language string) 
 		delete(m.startingRound, channel)
 		m.mu.Unlock()
 	}()
+
+	m.sendGenerationStartMessage(channel, ModeCode, canonicalLanguage)
 
 	question, err := m.generateAndPersistCodeQuestion(ctx, canonicalLanguage, settings.CodeDifficulty)
 	if err != nil {

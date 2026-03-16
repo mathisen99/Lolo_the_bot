@@ -519,7 +519,7 @@ class AIClient:
         import json
         
         # Deep mode gets more iterations for thorough research (30 vs 18)
-        MAX_TOOL_ITERATIONS = 30 if deep_mode else 18
+        MAX_TOOL_ITERATIONS = 40 if deep_mode else 30
         iteration = 0
         null_response_triggered = False
         

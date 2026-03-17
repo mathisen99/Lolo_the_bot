@@ -15,7 +15,7 @@ import (
 
 const triviaCommandTimeout = 90 * time.Second
 
-// TriviaCommand implements !trivia <topic>.
+// TriviaCommand implements !trivia [topic].
 type TriviaCommand struct {
 	manager *trivia.Manager
 }
@@ -37,14 +37,14 @@ func (c *TriviaCommand) RequiredPermission() database.PermissionLevel {
 }
 
 func (c *TriviaCommand) Help() string {
-	return "!trivia <topic> - Start a trivia round in this channel"
+	return "!trivia [topic] - Start a trivia round in this channel (reuse last topic if omitted)"
 }
 
 func (c *TriviaCommand) CooldownDuration() time.Duration {
 	return 0
 }
 
-// QuizCommand implements !quiz <topic> as alias for !trivia.
+// QuizCommand implements !quiz [topic] as alias for !trivia.
 type QuizCommand struct {
 	manager *trivia.Manager
 }
@@ -66,14 +66,14 @@ func (c *QuizCommand) RequiredPermission() database.PermissionLevel {
 }
 
 func (c *QuizCommand) Help() string {
-	return "!quiz <topic> - Alias for !trivia"
+	return "!quiz [topic] - Alias for !trivia (reuse last topic if omitted)"
 }
 
 func (c *QuizCommand) CooldownDuration() time.Duration {
 	return 0
 }
 
-// CodeCommand implements !code <language>.
+// CodeCommand implements !code [language].
 type CodeCommand struct {
 	manager *trivia.Manager
 }
@@ -91,14 +91,24 @@ func (c *CodeCommand) Execute(ctx *Context) (*Response, error) {
 		return NewErrorResponse("Code quiz can only be started in a channel."), nil
 	}
 
-	if len(ctx.Args) != 1 {
+	language := ""
+	switch len(ctx.Args) {
+	case 0:
+		rememberedLanguage, ok := c.manager.GetLastCodeLanguage(ctx.Channel)
+		if !ok {
+			return nil, boterrors.NewInvalidSyntaxError("code", "!code <"+supportedCodeLanguagePattern()+">")
+		}
+		language = rememberedLanguage
+	case 1:
+		language = ctx.Args[0]
+	default:
 		return nil, boterrors.NewInvalidSyntaxError("code", "!code <"+supportedCodeLanguagePattern()+">")
 	}
 
 	commandCtx, cancel := context.WithTimeout(context.Background(), triviaCommandTimeout)
 	defer cancel()
 
-	message, err := c.manager.StartCodeRound(commandCtx, ctx.Channel, ctx.Args[0])
+	message, err := c.manager.StartCodeRound(commandCtx, ctx.Channel, language)
 	if err != nil {
 		switch {
 		case stderrors.Is(err, trivia.ErrUnsupportedCodeLanguage):
@@ -126,7 +136,7 @@ func (c *CodeCommand) RequiredPermission() database.PermissionLevel {
 }
 
 func (c *CodeCommand) Help() string {
-	return "!code <" + supportedCodeLanguagePattern() + "> - Start a one-line coding quiz round"
+	return "!code [<" + supportedCodeLanguagePattern() + ">] - Start a one-line coding quiz round (reuse last language if omitted)"
 }
 
 func (c *CodeCommand) CooldownDuration() time.Duration {
@@ -138,13 +148,13 @@ func executeTriviaStart(ctx *Context, manager *trivia.Manager) (*Response, error
 		return NewErrorResponse("Trivia can only be started in a channel."), nil
 	}
 
-	if len(ctx.Args) == 0 {
-		return nil, boterrors.NewInvalidSyntaxError("trivia", "!trivia <topic>")
-	}
-
 	topic := strings.TrimSpace(strings.Join(ctx.Args, " "))
 	if topic == "" {
-		return nil, boterrors.NewInvalidSyntaxError("trivia", "!trivia <topic>")
+		rememberedTopic, ok := manager.GetLastTriviaTopic(ctx.Channel)
+		if !ok {
+			return nil, boterrors.NewInvalidSyntaxError("trivia", "!trivia <topic>")
+		}
+		topic = rememberedTopic
 	}
 
 	commandCtx, cancel := context.WithTimeout(context.Background(), triviaCommandTimeout)
@@ -295,7 +305,7 @@ func formatTriviaRules(settings trivia.ChannelSettings) string {
 	}
 
 	return fmt.Sprintf(
-		"Trivia rules: Start with !trivia <topic> or !quiz <topic>. Code mode: !code <lang>. "+
+		"Trivia rules: Start with !trivia <topic> or !quiz <topic> (or omit topic to reuse last). Code mode: !code <lang> (or omit language to reuse last). "+
 			"Answer by typing normally in channel (code answers must be one line). "+
 			"Time limits: trivia %ds, code %ds. Scoring: faster answers earn more points (base %d, minimum %d). "+
 			"Difficulties: trivia %s, code %s. Hints are %s and using !hint applies a -%d point penalty. "+

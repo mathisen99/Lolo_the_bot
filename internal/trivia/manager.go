@@ -112,10 +112,12 @@ type Manager struct {
 	logger            output.Logger
 	generationRetries int
 
-	mu            sync.Mutex
-	activeRounds  map[string]*activeRound
-	startingRound map[string]bool
-	sendMessage   func(target, message string) error
+	mu               sync.Mutex
+	activeRounds     map[string]*activeRound
+	startingRound    map[string]bool
+	lastTriviaTopic  map[string]string
+	lastCodeLanguage map[string]string
+	sendMessage      func(target, message string) error
 }
 
 // NewManager creates a trivia manager.
@@ -132,6 +134,8 @@ func NewManager(config ManagerConfig) *Manager {
 		generationRetries: retries,
 		activeRounds:      make(map[string]*activeRound),
 		startingRound:     make(map[string]bool),
+		lastTriviaTopic:   make(map[string]string),
+		lastCodeLanguage:  make(map[string]string),
 	}
 }
 
@@ -216,6 +220,7 @@ func (m *Manager) StartRound(ctx context.Context, channel, topic string) (string
 		return "", ErrRoundAlreadyActive
 	}
 	m.startingRound[channel] = true
+	m.lastTriviaTopic[channel] = topic
 	m.mu.Unlock()
 
 	defer func() {
@@ -255,6 +260,7 @@ func (m *Manager) StartCodeRound(ctx context.Context, channel, language string) 
 		return "", ErrRoundAlreadyActive
 	}
 	m.startingRound[channel] = true
+	m.lastCodeLanguage[channel] = canonicalLanguage
 	m.mu.Unlock()
 
 	defer func() {
@@ -453,6 +459,30 @@ func (m *Manager) HasActiveRound(channel string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.activeRounds[channel] != nil || m.startingRound[channel]
+}
+
+// GetLastTriviaTopic returns the most recently requested trivia topic for a channel.
+func (m *Manager) GetLastTriviaTopic(channel string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	topic := strings.TrimSpace(m.lastTriviaTopic[channel])
+	if topic == "" {
+		return "", false
+	}
+	return topic, true
+}
+
+// GetLastCodeLanguage returns the most recently requested code language for a channel.
+func (m *Manager) GetLastCodeLanguage(channel string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	language := strings.TrimSpace(m.lastCodeLanguage[channel])
+	if language == "" {
+		return "", false
+	}
+	return language, true
 }
 
 // GetSettings returns the channel trivia settings.

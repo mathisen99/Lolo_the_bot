@@ -144,6 +144,8 @@ MODES:
 2. SEMANTIC SEARCH (semantic=true): Finds conceptually related messages via embeddings
 3. TIME-BASED (hours_ago): Messages around a specific point in time
 4. EVENT FILTER (event_type): Filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, MODE, TOPIC, ALL_EVENTS)
+   Also supports UNBAN.
+   QUIT/PART/NICK are channel-scoped in current logging, so keep channel accurate when querying.
 
 USE SEMANTIC SEARCH (semantic=true) WHEN:
 - User asks about topics discussed: "did anyone talk about AI?"

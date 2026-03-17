@@ -319,6 +319,47 @@ func (cm *ConnectionManager) handleNicknameInUse() {
 	}
 }
 
+// logEventForTrackedChannels logs an event once per tracked channel for a user.
+// Falls back to a single global event (empty channel) when channel membership
+// is not available.
+func (cm *ConnectionManager) logEventForTrackedChannels(eventType, nick, hostmask, content string) {
+	if cm.db == nil {
+		return
+	}
+
+	channels, err := cm.db.FindUserChannels(nick)
+	if err != nil {
+		cm.logger.Warning("Failed to find channels for %s event (%s): %v", eventType, nick, err)
+		channels = nil
+	}
+
+	if len(channels) == 0 {
+		if err := cm.db.LogEvent(eventType, "", nick, hostmask, content); err != nil {
+			cm.logger.Warning("Failed to log %s event: %v", strings.ToLower(eventType), err)
+		}
+		return
+	}
+
+	for _, channel := range channels {
+		if err := cm.db.LogEvent(eventType, channel, nick, hostmask, content); err != nil {
+			cm.logger.Warning("Failed to log %s event for %s in %s: %v", strings.ToLower(eventType), nick, channel, err)
+		}
+	}
+}
+
+func (cm *ConnectionManager) logNickChangeEvent(oldNick, newNick, hostmask string) {
+	content := fmt.Sprintf("%s is now known as %s", oldNick, newNick)
+	cm.logEventForTrackedChannels(database.EventTypeNickChange, oldNick, hostmask, content)
+}
+
+func (cm *ConnectionManager) logQuitEvent(nick, hostmask, reason string) {
+	content := fmt.Sprintf("%s has quit", nick)
+	if reason != "" {
+		content = fmt.Sprintf("%s has quit (%s)", nick, reason)
+	}
+	cm.logEventForTrackedChannels(database.EventTypeQuit, nick, hostmask, content)
+}
+
 // handleNickChange handles NICK messages
 func (cm *ConnectionManager) handleNickChange(msg *irc.Message) {
 	if len(msg.Params) > 0 {
@@ -327,12 +368,7 @@ func (cm *ConnectionManager) handleNickChange(msg *irc.Message) {
 		hostmask := msg.User + "@" + msg.Host
 
 		// Log the nick change event
-		if cm.db != nil {
-			content := fmt.Sprintf("%s is now known as %s", oldNick, newNick)
-			if err := cm.db.LogEvent(database.EventTypeNickChange, "", oldNick, hostmask, content); err != nil {
-				cm.logger.Warning("Failed to log nick change event: %v", err)
-			}
-		}
+		cm.logNickChangeEvent(oldNick, newNick, hostmask)
 
 		// Check if it's our own nick change
 		if oldNick == cm.currentNick {
@@ -375,15 +411,7 @@ func (cm *ConnectionManager) handleQuit(msg *irc.Message) {
 	reason := msg.Trailing()
 
 	// Log the quit event
-	if cm.db != nil {
-		content := fmt.Sprintf("%s has quit", nick)
-		if reason != "" {
-			content = fmt.Sprintf("%s has quit (%s)", nick, reason)
-		}
-		if err := cm.db.LogEvent(database.EventTypeQuit, "", nick, hostmask, content); err != nil {
-			cm.logger.Warning("Failed to log quit event: %v", err)
-		}
-	}
+	cm.logQuitEvent(nick, hostmask, reason)
 
 	// Notify netsplit detector of the quit (for netsplit detection)
 	cm.netsplitDetector.OnQuit(nick)

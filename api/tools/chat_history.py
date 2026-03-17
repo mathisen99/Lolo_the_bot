@@ -68,12 +68,12 @@ Use this when:
 For counting questions, use count_only=true for efficiency.
 For looking at a specific point in time with context, use hours_ago (returns messages around that time).
 For semantic analysis (like counting image generation attempts), fetch full messages and analyze the content yourself.
-For IRC events (kicks, bans, quits, nick changes), use event_type filter.
+For IRC events (kicks, bans, unbans, quits, nick changes), use event_type filter.
 
 Can fetch up to 1000 messages for full day analysis.
 
 New: Use semantic=true to find concepts instead of exact words (e.g. "cats" finds "feline", "kittens").
-New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, MODE, TOPIC).""",
+New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN, PART, MODE, TOPIC).""",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -121,7 +121,7 @@ New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, 
                     "event_type": {
                         "type": ["string", "null"],
                         "enum": [None, "KICK", "BAN", "UNBAN", "QUIT", "NICK", "JOIN", "PART", "MODE", "TOPIC", "ALL_EVENTS"],
-                        "description": "Filter by IRC event type. Use 'ALL_EVENTS' to get all events (kicks, bans, quits, etc.). Leave empty for regular messages only."
+                        "description": "Filter by IRC event type. Use 'ALL_EVENTS' to get all events (kicks, bans, unbans, quits, etc.). Leave empty for regular messages only."
                     },
                     "include_events": {
                         "type": "boolean",
@@ -175,11 +175,21 @@ New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, 
         include_bot: bool,
         end_time_str: Optional[str] = None,
         event_type: Optional[str] = None,
-        include_events: bool = False
+        include_events: bool = False,
+        include_global_event_fallback: bool = False,
     ) -> tuple[str, List[Any]]:
         """Build WHERE clause and params for queries."""
+        channel_condition = "LOWER(channel) = LOWER(?)"
+        if include_global_event_fallback:
+            # Legacy/fallback QUIT/NICK rows may have empty channel.
+            # Include them only in explicit event lookups where caller enables this.
+            channel_condition = (
+                "(LOWER(channel) = LOWER(?) OR "
+                "((channel IS NULL OR channel = '') AND event_type IN ('QUIT', 'NICK')))"
+            )
+
         conditions = [
-            "LOWER(channel) = LOWER(?)",
+            channel_condition,
             "substr(timestamp, 1, 19) >= ?"
         ]
         params: List[Any] = [channel, start_time_str]
@@ -286,12 +296,13 @@ New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, 
         time_desc: str,
         end_time_str: Optional[str] = None,
         event_type: Optional[str] = None,
-        include_events: bool = False
+        include_events: bool = False,
+        include_global_event_fallback: bool = False,
     ) -> str:
         """Get message count statistics."""
         where_clause, params = self._build_where_clause(
             channel, start_time_str, nick, search_term, include_bot, end_time_str,
-            event_type, include_events
+            event_type, include_events, include_global_event_fallback
         )
         
         cursor.execute(f"SELECT COUNT(*) FROM messages WHERE {where_clause}", params)
@@ -316,7 +327,7 @@ New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, 
         if not nick and total_count > 0 and not event_type:
             where_clause_top, params_top = self._build_where_clause(
                 channel, start_time_str, None, search_term, include_bot, end_time_str,
-                event_type, include_events
+                event_type, include_events, include_global_event_fallback
             )
             
             top_query = f"""
@@ -349,7 +360,8 @@ New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, 
         include_bot: bool,
         limit: int,
         event_type: Optional[str] = None,
-        include_events: bool = False
+        include_events: bool = False,
+        include_global_event_fallback: bool = False,
     ) -> tuple[List[sqlite3.Row], int, datetime]:
         """Query messages around a specific point in time."""
         start_time = target_time - timedelta(minutes=context_minutes)
@@ -360,7 +372,7 @@ New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, 
         
         where_clause, params = self._build_where_clause(
             channel, start_str, nick, search_term, include_bot, end_str,
-            event_type, include_events
+            event_type, include_events, include_global_event_fallback
         )
         
         # Get count
@@ -440,6 +452,8 @@ New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, 
         
         # Determine if this is an event query
         is_event_query = bool(event_type)
+        # Legacy/global event fallback (only for targeted user lookups to avoid cross-channel noise)
+        include_global_event_fallback = bool(event_type in ("QUIT", "NICK", "ALL_EVENTS") and nick)
 
         # Handle Semantic Search
         if semantic:
@@ -588,13 +602,13 @@ New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, 
                             start_time.strftime("%Y-%m-%d %H:%M:%S"),
                             nick, search_term, include_bot, time_desc,
                             end_time.strftime("%Y-%m-%d %H:%M:%S"),
-                            event_type, include_events
+                            event_type, include_events, include_global_event_fallback
                         )
                     
                     messages, total_found, target = self._query_around_time(
                         cursor, channel, target_time, context_minutes,
                         nick, search_term, include_bot, limit,
-                        event_type, include_events
+                        event_type, include_events, include_global_event_fallback
                     )
                     
                     return self._format_messages(
@@ -629,12 +643,12 @@ New: Use event_type to filter by IRC events (KICK, BAN, QUIT, NICK, JOIN, PART, 
                     return self._get_stats(
                         cursor, channel, start_time_str, nick,
                         search_term, include_bot, time_desc,
-                        None, event_type, include_events
+                        None, event_type, include_events, include_global_event_fallback
                     )
                 
                 where_clause, params = self._build_where_clause(
                     channel, start_time_str, nick, search_term, include_bot,
-                    None, event_type, include_events
+                    None, event_type, include_events, include_global_event_fallback
                 )
                 
                 cursor.execute(

@@ -22,7 +22,7 @@ pydantic==2.12.5
 pydantic-core==2.41.5
 pygments==2.19.2
 pyparsing==3.2.5
-pypdf==6.7.5
+pypdf==6.9.1
 python-dotenv==1.2.1
 pyyaml==6.0.3
 requests==2.32.5

@@ -11,7 +11,7 @@ matplotlib==3.7.5
 modelscope==1.15.0
 networkx==3.1
 omegaconf==2.3.0
-onnx==1.21.0rc1
+onnx==1.21.0
 onnxruntime-gpu==1.18.0
 protobuf==5.29.6
 pydantic==2.7.0

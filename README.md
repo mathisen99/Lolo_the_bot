@@ -23,7 +23,6 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **Source Code Introspection** - AI can read and explain its own source code
 - **Agentic Status Reporting** - Real-time status updates for complex tasks
 - **Knowledge Base (RAG)** - Learn from PDFs/articles and answer questions about them
-- **Video Generation** - Generate short videos from text prompts (Sora 2)
 
 ### Bot Management
 - **User Memories** - Per-user memories and custom personas that persist across conversations
@@ -537,7 +536,6 @@ null_response_enabled = true   # Ability to stay silent
 bug_report_enabled = true      # User bug reporting system
 irc_command_enabled = true     # IRC commands and channel queries
 source_code_enabled = true     # Source code introspection
-sora_video_enabled = true      # Video generation (Sora 2)
 ```
 
 **Note:** Tools requiring missing API keys will be automatically disabled.

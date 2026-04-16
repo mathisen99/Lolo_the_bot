@@ -72,15 +72,9 @@ class AIConfig:
         self.kb_list_enabled: bool = config["tools"].get("kb_list_enabled", True)
         self.kb_forget_enabled: bool = config["tools"].get("kb_forget_enabled", True)
         
-        # Moltbook posting
-        self.moltbook_post_enabled: bool = config["tools"].get("moltbook_post_enabled", True)
-        
         # Reminder tool
         self.reminder_enabled: bool = config["tools"].get("reminder_enabled", True)
-        
-        # Sora video tool
-        self.sora_video_enabled: bool = config["tools"].get("sora_video_enabled", True)
-        
+
         # Log analyzer tool
         self.log_analyzer_enabled: bool = config["tools"].get("log_analyzer_enabled", True)
         
@@ -145,8 +139,6 @@ class AIConfig:
             tools.append("claude_tech")
         if self.reminder_enabled:
             tools.append("reminder")
-        if self.sora_video_enabled:
-            tools.append("sora_video")
         if self.log_analyzer_enabled:
             tools.append("log_analyzer")
         return tools

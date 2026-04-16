@@ -38,11 +38,11 @@ type Generator struct {
 }
 
 const (
-	defaultMaxOutputTokens    = 220
+	defaultMaxOutputTokens    = 420
 	maxOutputTokensRetryStep  = 80
-	maxOutputTokensCeiling    = 1200
-	triviaGenerationMinTokens = 300
-	codeGenerationMinTokens   = 900
+	maxOutputTokensCeiling    = 1400
+	triviaGenerationMinTokens = 420
+	codeGenerationMinTokens   = 1100
 	judgeGenerationMinTokens  = 300
 	maxAnswerLength           = 160
 	maxAliasLength            = 160

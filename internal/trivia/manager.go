@@ -347,21 +347,31 @@ func (m *Manager) startRoundFromStoredQuestion(channel string, settings ChannelS
 
 	switch mode {
 	case ModeCode:
+		hintInstruction := "Use !hint for a hint."
+		if !roundSettings.CodeHintsEnabled {
+			hintInstruction = "Hints are disabled for code rounds in this channel."
+		}
 		m.logger.Info("Code round started: channel=%s language=%s difficulty=%s question_id=%d round_id=%d", channel, language, roundDifficulty, question.ID, roundID)
 		return fmt.Sprintf(
-			"Code (%s, %s): %s | You have %ds. Answer with one line of code in normal channel text. Use !hint for a hint.",
+			"Code (%s, %s): %s | You have %ds. Answer with one line of code in normal channel text. %s",
 			language,
 			roundDifficulty,
 			question.Question,
 			roundAnswerTimeSeconds,
+			hintInstruction,
 		), nil
 	default:
+		hintInstruction := "Use !hint for a hint."
+		if !roundSettings.TriviaHintsEnabled {
+			hintInstruction = "Hints are disabled for trivia rounds in this channel."
+		}
 		m.logger.Info("Trivia round started: channel=%s topic=%s difficulty=%s question_id=%d round_id=%d", channel, topic, roundDifficulty, question.ID, roundID)
 		return fmt.Sprintf(
-			"Trivia (%s): %s | You have %ds. Answer with normal channel text. Use !hint for a hint.",
+			"Trivia (%s): %s | You have %ds. Answer with normal channel text. %s",
 			topic,
 			question.Question,
 			roundAnswerTimeSeconds,
+			hintInstruction,
 		), nil
 	}
 }
@@ -437,7 +447,11 @@ func (m *Manager) UseHint(channel string) (string, error) {
 		m.mu.Unlock()
 		return "", ErrNoActiveRound
 	}
-	if !round.Settings.HintsEnabled {
+	hintsEnabled := round.Settings.TriviaHintsEnabled
+	if NormalizeMode(round.Mode) == ModeCode {
+		hintsEnabled = round.Settings.CodeHintsEnabled
+	}
+	if !hintsEnabled {
 		m.mu.Unlock()
 		return "", ErrHintsDisabled
 	}
@@ -522,13 +536,40 @@ func (m *Manager) UpdateCodeAnswerTime(channel string, seconds int) (ChannelSett
 	return settings, nil
 }
 
-// UpdateHintsEnabled updates hint usage behavior for a channel.
+// UpdateTriviaHintsEnabled updates trivia-round hint usage behavior for a channel.
+func (m *Manager) UpdateTriviaHintsEnabled(channel string, enabled bool) (ChannelSettings, error) {
+	settings, err := m.store.GetSettings(channel)
+	if err != nil {
+		return ChannelSettings{}, err
+	}
+	settings.TriviaHintsEnabled = enabled
+	if err := m.store.SaveSettings(channel, settings); err != nil {
+		return ChannelSettings{}, err
+	}
+	return settings, nil
+}
+
+// UpdateCodeHintsEnabled updates code-round hint usage behavior for a channel.
+func (m *Manager) UpdateCodeHintsEnabled(channel string, enabled bool) (ChannelSettings, error) {
+	settings, err := m.store.GetSettings(channel)
+	if err != nil {
+		return ChannelSettings{}, err
+	}
+	settings.CodeHintsEnabled = enabled
+	if err := m.store.SaveSettings(channel, settings); err != nil {
+		return ChannelSettings{}, err
+	}
+	return settings, nil
+}
+
+// UpdateHintsEnabled updates both trivia and code hint usage behavior for a channel.
 func (m *Manager) UpdateHintsEnabled(channel string, enabled bool) (ChannelSettings, error) {
 	settings, err := m.store.GetSettings(channel)
 	if err != nil {
 		return ChannelSettings{}, err
 	}
-	settings.HintsEnabled = enabled
+	settings.TriviaHintsEnabled = enabled
+	settings.CodeHintsEnabled = enabled
 	if err := m.store.SaveSettings(channel, settings); err != nil {
 		return ChannelSettings{}, err
 	}

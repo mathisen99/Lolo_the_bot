@@ -63,7 +63,7 @@
   openai_api_key_env = "OPENAI_API_KEY"  # Environment variable for API key
   openai_base_url = "https://api.openai.com/v1"
   request_timeout_seconds = 20
-  max_output_tokens = 220
+  max_output_tokens = 420
   generation_retry_limit = 5             # Dedup regeneration attempts
 
   # Defaults for channels without explicit trivia settings rows

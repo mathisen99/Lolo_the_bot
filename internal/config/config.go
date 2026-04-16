@@ -151,7 +151,7 @@ func DefaultConfig() *Config {
 			OpenAIAPIKeyEnv:          "OPENAI_API_KEY",
 			OpenAIBaseURL:            "https://api.openai.com/v1",
 			RequestTimeoutSeconds:    20,
-			MaxOutputTokens:          220,
+			MaxOutputTokens:          420,
 			GenerationRetryLimit:     5,
 			DefaultAnswerTimeSeconds: 30,
 			DefaultCodeAnswerTime:    30,
@@ -373,7 +373,7 @@ func applyTriviaDefaults(cfg *Config) {
 		cfg.Trivia.RequestTimeoutSeconds = 20
 	}
 	if cfg.Trivia.MaxOutputTokens <= 0 {
-		cfg.Trivia.MaxOutputTokens = 220
+		cfg.Trivia.MaxOutputTokens = 420
 	}
 	if cfg.Trivia.GenerationRetryLimit <= 0 {
 		cfg.Trivia.GenerationRetryLimit = 5

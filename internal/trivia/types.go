@@ -65,7 +65,8 @@ var supportedCodeLanguages = []string{
 type ChannelSettings struct {
 	AnswerTimeSeconds     int
 	CodeAnswerTimeSeconds int
-	HintsEnabled          bool
+	TriviaHintsEnabled    bool
+	CodeHintsEnabled      bool
 	BasePoints            int
 	MinimumPoints         int
 	HintPenalty           int

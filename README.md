@@ -407,7 +407,7 @@ The VM runs persistently and uses vsock for host-guest communication. No network
 | `!score [nick]` | Show trivia score in current channel | All |
 | `!user add/remove/list` | Manage users | Admin+ |
 | `!score set/add/remove/reset ...` | Manual trivia score management | Admin+ |
-| `!triviasettings show/time/codetime/hint/difficulty/codedifficulty/points/enabled` | Trivia/code channel settings | Admin+ |
+| `!triviasettings show/time/codetime/hint <trivia\|code\|both> on\|off/difficulty/codedifficulty/points/enabled` | Trivia/code channel settings | Admin+ |
 | `!kick/ban/mute` | Moderation | Admin+ |
 | `!join/part` | Channel management | Owner |
 | `!quit` | Shutdown bot | Owner |

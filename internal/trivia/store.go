@@ -469,19 +469,23 @@ func (s *Store) GetSettings(channel string) (ChannelSettings, error) {
 		settings.CodeDifficulty = settings.Difficulty
 	}
 
-	var hintsEnabled int
+	var legacyHintsEnabled int
+	var triviaHintsEnabled int
+	var codeHintsEnabled int
 	var enabled int
 	var difficulty string
 	var codeDifficulty string
 
 	err := s.conn.QueryRow(`
-		SELECT answer_time_seconds, code_answer_time_seconds, hints_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty, code_difficulty
+		SELECT answer_time_seconds, code_answer_time_seconds, hints_enabled, trivia_hints_enabled, code_hints_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty, code_difficulty
 		FROM trivia_settings
 		WHERE channel = ?
 	`, channel).Scan(
 		&settings.AnswerTimeSeconds,
 		&settings.CodeAnswerTimeSeconds,
-		&hintsEnabled,
+		&legacyHintsEnabled,
+		&triviaHintsEnabled,
+		&codeHintsEnabled,
 		&settings.BasePoints,
 		&settings.MinimumPoints,
 		&settings.HintPenalty,
@@ -497,7 +501,10 @@ func (s *Store) GetSettings(channel string) (ChannelSettings, error) {
 		return ChannelSettings{}, fmt.Errorf("failed to get trivia settings: %w", err)
 	}
 
-	settings.HintsEnabled = hintsEnabled == 1
+	settings.TriviaHintsEnabled = legacyHintsEnabled == 1
+	settings.CodeHintsEnabled = legacyHintsEnabled == 1
+	settings.TriviaHintsEnabled = triviaHintsEnabled == 1
+	settings.CodeHintsEnabled = codeHintsEnabled == 1
 	settings.Enabled = enabled == 1
 	settings.Difficulty = NormalizeDifficulty(difficulty)
 	if settings.CodeAnswerTimeSeconds <= 0 {
@@ -523,12 +530,14 @@ func (s *Store) SaveSettings(channel string, settings ChannelSettings) error {
 
 	_, err := s.conn.Exec(`
 		INSERT INTO trivia_settings (
-			channel, answer_time_seconds, code_answer_time_seconds, hints_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty, code_difficulty, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			channel, answer_time_seconds, code_answer_time_seconds, hints_enabled, trivia_hints_enabled, code_hints_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty, code_difficulty, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(channel) DO UPDATE SET
 			answer_time_seconds = excluded.answer_time_seconds,
 			code_answer_time_seconds = excluded.code_answer_time_seconds,
 			hints_enabled = excluded.hints_enabled,
+			trivia_hints_enabled = excluded.trivia_hints_enabled,
+			code_hints_enabled = excluded.code_hints_enabled,
 			base_points = excluded.base_points,
 			minimum_points = excluded.minimum_points,
 			hint_penalty = excluded.hint_penalty,
@@ -540,7 +549,9 @@ func (s *Store) SaveSettings(channel string, settings ChannelSettings) error {
 		channel,
 		settings.AnswerTimeSeconds,
 		settings.CodeAnswerTimeSeconds,
-		boolToInt(settings.HintsEnabled),
+		boolToInt(settings.TriviaHintsEnabled),
+		boolToInt(settings.TriviaHintsEnabled),
+		boolToInt(settings.CodeHintsEnabled),
 		settings.BasePoints,
 		settings.MinimumPoints,
 		settings.HintPenalty,

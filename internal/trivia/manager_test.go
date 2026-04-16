@@ -120,7 +120,8 @@ func newTriviaManagerForRememberTests(t *testing.T) *Manager {
 		Settings: ChannelSettings{
 			AnswerTimeSeconds:     30,
 			CodeAnswerTimeSeconds: 30,
-			HintsEnabled:          true,
+			TriviaHintsEnabled:    true,
+			CodeHintsEnabled:      true,
 			BasePoints:            10,
 			MinimumPoints:         1,
 			HintPenalty:           2,

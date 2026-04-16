@@ -72,7 +72,8 @@ func main() {
 		Settings: trivia.ChannelSettings{
 			AnswerTimeSeconds:     cfg.Trivia.DefaultAnswerTimeSeconds,
 			CodeAnswerTimeSeconds: cfg.Trivia.DefaultCodeAnswerTime,
-			HintsEnabled:          cfg.Trivia.DefaultHintsEnabled,
+			TriviaHintsEnabled:    cfg.Trivia.DefaultHintsEnabled,
+			CodeHintsEnabled:      cfg.Trivia.DefaultHintsEnabled,
 			BasePoints:            cfg.Trivia.DefaultBasePoints,
 			MinimumPoints:         cfg.Trivia.DefaultMinimumPoints,
 			HintPenalty:           cfg.Trivia.DefaultHintPenalty,

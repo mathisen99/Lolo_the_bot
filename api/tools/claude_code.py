@@ -1,7 +1,8 @@
 """
 Claude Tech tool implementation.
 
-Provides expert technical assistance using Claude Opus via AWS Bedrock.
+Provides expert technical assistance using Claude Opus 4.7 via AWS Bedrock.
+Falls back to Claude Opus 4.6 while the 4.7 rollout is stabilizing.
 Covers coding, Linux/Unix, networking, DevOps, sysadmin, and general tech.
 Long responses are automatically pasted to botbin.
 """
@@ -16,10 +17,11 @@ from .base import Tool
 
 
 class ClaudeCodeTool(Tool):
-    """Claude Opus technical expert via AWS Bedrock."""
+    """Claude Opus 4.7 technical expert via AWS Bedrock."""
     
     BEDROCK_REGION = "eu-west-1"
-    BEDROCK_MODEL = "eu.anthropic.claude-opus-4-6-v1"
+    BEDROCK_MODEL = "eu.anthropic.claude-opus-4-7"
+    BEDROCK_FALLBACK_MODEL = "eu.anthropic.claude-opus-4-6-v1"
     BOTBIN_URL = "https://botbin.net/upload"
     
     # Threshold for pasting (characters) - IRC messages are ~400 bytes
@@ -81,7 +83,12 @@ class ClaudeCodeTool(Tool):
         """Initialize Claude tech tool."""
         self.bearer_token = os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
         self.botbin_key = os.environ.get("BOTBIN_API_KEY")
-        self.bedrock_url = f"https://bedrock-runtime.{self.BEDROCK_REGION}.amazonaws.com/model/{self.BEDROCK_MODEL}/converse"
+        self.bedrock_url = self._bedrock_model_url(self.BEDROCK_MODEL)
+        self.bedrock_models = (self.BEDROCK_MODEL, self.BEDROCK_FALLBACK_MODEL)
+
+    def _bedrock_model_url(self, model: str) -> str:
+        """Build the Bedrock Converse endpoint URL for a model."""
+        return f"https://bedrock-runtime.{self.BEDROCK_REGION}.amazonaws.com/model/{model}/converse"
     
     @property
     def name(self) -> str:
@@ -92,7 +99,7 @@ class ClaudeCodeTool(Tool):
         return {
             "type": "function",
             "name": "claude_tech",
-            "description": """Ask Claude Opus 4.6 (Anthropic's most capable model) for expert technical help. Use for:
+            "description": """Ask Claude Opus 4.7 (Anthropic's most capable model) for expert technical help. Use for:
 - Programming: code review, debugging, architecture, algorithms, any language
 - Linux/Unix: shell commands, bash scripting, system administration, permissions
 - Networking: TCP/IP, DNS, firewalls, routing, troubleshooting connectivity
@@ -124,10 +131,10 @@ Returns detailed explanations with examples. Long responses auto-paste to botbin
             }
         }
     
-    def _call_bedrock(self, prompt: str) -> str:
-        """Call AWS Bedrock with Claude Opus."""
+    def _call_bedrock(self, prompt: str) -> Tuple[str, Optional[str]]:
+        """Call AWS Bedrock with Claude Opus 4.7, falling back to 4.6."""
         if not self.bearer_token:
-            return "Error: AWS_BEARER_TOKEN_BEDROCK not configured"
+            return "Error: AWS_BEARER_TOKEN_BEDROCK not configured", None
         
         headers = {
             "Authorization": f"Bearer {self.bearer_token}",
@@ -143,35 +150,48 @@ Returns detailed explanations with examples. Long responses auto-paste to botbin
             ]
         }
         
-        try:
-            response = requests.post(
-                self.bedrock_url,
-                headers=headers,
-                json=payload,
-                timeout=120  # 2 minute timeout for complex questions
-            )
-            
-            if response.status_code != 200:
-                return f"Error: Bedrock API returned {response.status_code}: {response.text[:200]}"
-            
-            result = response.json()
-            
-            # Extract text from response
-            output = result.get("output", {})
-            message = output.get("message", {})
-            content = message.get("content", [])
-            
-            if content and len(content) > 0:
-                return content[0].get("text", "No response text")
-            
-            return "Error: Empty response from Claude"
-            
-        except requests.exceptions.Timeout:
-            return "Error: Request to Claude timed out"
-        except requests.exceptions.RequestException as e:
-            return f"Error: Request failed - {str(e)}"
-        except json.JSONDecodeError as e:
-            return f"Error: Invalid JSON response - {str(e)}"
+        errors = []
+        for model in self.bedrock_models:
+            try:
+                response = requests.post(
+                    self._bedrock_model_url(model),
+                    headers=headers,
+                    json=payload,
+                    timeout=120  # 2 minute timeout for complex questions
+                )
+                
+                if response.status_code != 200:
+                    errors.append(f"{model}: Bedrock API returned {response.status_code}: {response.text[:200]}")
+                    continue
+                
+                result = response.json()
+                
+                # Extract text from response
+                output = result.get("output", {})
+                message = output.get("message", {})
+                content = message.get("content", [])
+                
+                if content and len(content) > 0:
+                    response_text = content[0].get("text")
+                    if response_text:
+                        return response_text, model
+                
+                errors.append(f"{model}: Empty response from Claude")
+                
+            except requests.exceptions.Timeout:
+                errors.append(f"{model}: Request to Claude timed out")
+            except requests.exceptions.RequestException as e:
+                errors.append(f"{model}: Request failed - {str(e)}")
+            except json.JSONDecodeError as e:
+                errors.append(f"{model}: Invalid JSON response - {str(e)}")
+        
+        return "Error: Bedrock API failed for all configured Claude models - " + " | ".join(errors), None
+
+    def _model_notice(self, model_used: Optional[str]) -> str:
+        """Build a user-visible notice when Claude used the fallback model."""
+        if model_used == self.BEDROCK_FALLBACK_MODEL:
+            return f"Claude fallback active: used {self.BEDROCK_FALLBACK_MODEL} because {self.BEDROCK_MODEL} failed. "
+        return ""
     
     def _paste_to_botbin(self, content: str, filename: str = "code.md") -> Optional[str]:
         """Paste content to botbin and return URL."""
@@ -336,7 +356,7 @@ Returns detailed explanations with examples. Long responses auto-paste to botbin
         **kwargs
     ) -> str:
         """
-        Get technical help from Claude Opus.
+        Get technical help from Claude Opus 4.7.
         
         Args:
             question: The technical question
@@ -378,10 +398,12 @@ Returns detailed explanations with examples. Long responses auto-paste to botbin
         prompt = '\n'.join(prompt_parts)
         
         # Call Claude
-        response = self._call_bedrock(prompt)
+        response, model_used = self._call_bedrock(prompt)
         
         if response.startswith("Error:"):
             return response
+
+        model_notice = self._model_notice(model_used)
         
         # Check if response needs pasting
         if len(response) > self.PASTE_THRESHOLD:
@@ -395,9 +417,9 @@ Returns detailed explanations with examples. Long responses auto-paste to botbin
             
             if paste_url:
                 summary = self._extract_summary(response)
-                return f"{summary} | Full response: {paste_url}"
+                return f"{model_notice}{summary} | Full response: {paste_url}"
             else:
                 # Fallback: truncate if paste fails
-                return response[:self.PASTE_THRESHOLD] + f"... [Response truncated - {len(response)} chars total]"
+                return model_notice + response[:self.PASTE_THRESHOLD] + f"... [Response truncated - {len(response)} chars total]"
         
-        return response
+        return model_notice + response

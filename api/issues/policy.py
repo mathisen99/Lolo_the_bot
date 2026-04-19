@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,8 @@ BLOCKED_PATTERNS = [
     "*.webp",
     "Lolo",
     "lolo",
+    ".codex",
+    ".codex/**",
 ]
 
 
@@ -94,7 +97,7 @@ class PolicyChecker:
         return result.stdout
 
     def _changed_files(self, worktree: Path) -> List[str]:
-        output = self._run(worktree, ["git", "status", "--porcelain"])
+        output = self._run(worktree, ["git", "status", "--porcelain", "--untracked-files=all"])
         files: List[str] = []
         for line in output.splitlines():
             if not line.strip():
@@ -102,6 +105,8 @@ class PolicyChecker:
             path = line[3:].strip()
             if " -> " in path:
                 path = path.split(" -> ", 1)[1].strip()
+            if self._is_runtime_metadata(path):
+                continue
             files.append(path)
         return sorted(set(files))
 
@@ -120,6 +125,8 @@ class PolicyChecker:
                 continue
             diff_lines += int(added) + int(deleted)
         for path in untracked.splitlines():
+            if self._is_runtime_metadata(path):
+                continue
             file_path = worktree / path
             if file_path.is_file():
                 if self._looks_binary(file_path):
@@ -138,13 +145,19 @@ class PolicyChecker:
         return any(fnmatch.fnmatch(clean, pattern) for pattern in BLOCKED_PATTERNS)
 
     def _is_test_or_doc(self, path: str) -> bool:
+        parts = set(Path(path).parts)
+        base = os.path.basename(path)
         return (
             path.endswith("_test.go")
-            or path.startswith("api/issues/tests/")
+            or base.startswith("test_")
+            or base.endswith("_test.py")
+            or "tests" in parts
             or path.endswith(".md")
-            or "/test_" in path
-            or path.startswith("tests/")
         )
+
+    def _is_runtime_metadata(self, path: str) -> bool:
+        clean = path.strip().lstrip("/")
+        return clean == ".codex" or clean.startswith(".codex/")
 
     def _looks_binary(self, path: Path) -> bool:
         try:
@@ -153,4 +166,3 @@ class PolicyChecker:
         except OSError:
             return False
         return b"\0" in chunk
-

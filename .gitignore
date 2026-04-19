@@ -166,3 +166,6 @@ scripts/firecracker/firecracker.log
 
 #Moltbook
 moltbook.json
+
+# Codex runtime metadata
+.codex

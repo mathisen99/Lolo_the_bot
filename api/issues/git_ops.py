@@ -39,10 +39,11 @@ class GitOps:
         self._run(["git", "fetch", "origin", "main"], timeout=300)
         return self._run(["git", "rev-parse", "origin/main"])
 
-    def create_worktree(self, issue_id: int, title: str, base_sha: str, root: Path) -> tuple[str, Path]:
+    def create_worktree(self, issue_id: int, title: str, base_sha: str, root: Path, run_id: Optional[int] = None) -> tuple[str, Path]:
         root.mkdir(parents=True, exist_ok=True)
-        branch = f"lolo/issue-{issue_id}-{slugify(title)}"
-        worktree = root / f"issue-{issue_id}-{slugify(title)}"
+        suffix = f"run-{run_id}" if run_id is not None else slugify(title)
+        branch = f"lolo/issue-{issue_id}-{slugify(title)}-{suffix}"
+        worktree = root / f"issue-{issue_id}-{slugify(title)}-{suffix}"
         if worktree.exists():
             raise GitError(f"worktree already exists: {worktree}")
         self._run(["git", "worktree", "add", "-b", branch, str(worktree), base_sha], timeout=300)
@@ -66,7 +67,7 @@ class GitOps:
         return diff
 
     def changed_files(self, worktree: Path) -> list[str]:
-        output = self._run(["git", "status", "--porcelain"], cwd=worktree)
+        output = self._run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=worktree)
         files: list[str] = []
         for line in output.splitlines():
             if not line.strip():
@@ -76,6 +77,14 @@ class GitOps:
                 path = path.split(" -> ", 1)[1].strip()
             files.append(path)
         return files
+
+    def cleanup_runtime_metadata(self, worktree: Path) -> None:
+        """Remove local agent metadata that must never be committed."""
+        codex_path = worktree / ".codex"
+        if codex_path.is_dir():
+            shutil.rmtree(codex_path)
+        elif codex_path.exists():
+            codex_path.unlink()
 
     def commit_all(self, worktree: Path, message: str) -> str:
         self._run(["git", "add", "--all"], cwd=worktree)

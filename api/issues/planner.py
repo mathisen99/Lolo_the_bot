@@ -109,6 +109,7 @@ class CodexPlanner:
             "exec",
             "--cd",
             str(self.repo_root),
+            "--ephemeral",
             "--sandbox",
             "read-only",
             "--output-schema",

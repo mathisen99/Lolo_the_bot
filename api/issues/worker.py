@@ -91,6 +91,7 @@ class IssueWorker:
             str(issue.get("title") or f"issue-{issue['id']}"),
             base_sha,
             self.WORKTREE_ROOT,
+            run_id=run_id,
         )
         self.store.update_run(
             run_id,
@@ -111,6 +112,7 @@ class IssueWorker:
             should_cancel=lambda: self.store.is_cancel_requested(run_id),
         )
         self._raise_if_cancelled(run_id)
+        self.git.cleanup_runtime_metadata(worktree)
         self.artifacts.write_text(
             int(issue["id"]),
             run_id,

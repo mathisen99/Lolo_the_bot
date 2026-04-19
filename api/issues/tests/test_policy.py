@@ -32,7 +32,30 @@ class PolicyTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertTrue(any("diff too large" in msg for msg in result.messages))
 
+    def test_untracked_test_files_are_allowed_support_changes(self):
+        tests_dir = self.repo / "api" / "tools" / "tests"
+        tests_dir.mkdir(parents=True)
+        (tests_dir / "__init__.py").write_text("", encoding="utf-8")
+        (tests_dir / "test_test_tool.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+        src_dir = self.repo / "api" / "tools"
+        (src_dir / "test_tool.py").write_text("def ok():\n    return 'ok'\n", encoding="utf-8")
+
+        result = PolicyChecker().check(self.repo, planned_paths=["api/tools/test_tool.py"])
+
+        self.assertTrue(result.ok, result.render())
+        self.assertIn("api/tools/tests/test_test_tool.py", result.changed_files)
+        self.assertNotIn("api/tools/tests/", result.changed_files)
+
+    def test_codex_runtime_metadata_is_ignored_by_policy(self):
+        codex_dir = self.repo / ".codex"
+        codex_dir.mkdir()
+        (codex_dir / "session.json").write_text("{}", encoding="utf-8")
+
+        result = PolicyChecker().check(self.repo, planned_paths=["README.md"])
+
+        self.assertTrue(result.ok, result.render())
+        self.assertNotIn(".codex/session.json", result.changed_files)
+
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -36,6 +36,7 @@ class CodexRunner:
             "exec",
             "--cd",
             str(worktree),
+            "--ephemeral",
             "--full-auto",
             "--json",
             "--output-last-message",

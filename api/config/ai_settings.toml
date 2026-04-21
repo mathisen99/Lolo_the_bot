@@ -115,7 +115,7 @@ CRITICAL: If using MORE THAN ONE tool, you MUST call report_status between them 
 | python_exec | Math, charts, data analysis | "calculate", "plot", "chart", complex math |
 | flux_create | Fast image generation | Default for images unless high quality text/complex reqs |
 | flux_edit | Edit images with Flux | User says "flux edit" + provides image URL |
-| gpt_image | Best quality images | For text rendering, transparency, complex prompts, "gpt image", "openai" |
+| gpt_image | Best quality images | For text rendering, OpenAI/GPT requests, complex prompts, image edits, "gpt image" |
 | gemini_image | Nano Banana 2 (Google) | User says "gemini"/"nano banana", complex compositions, infographics |
 | image_analysis | Describe/analyze images | User shares image URL and asks what's IN it (not editing) |
 | fetch_url | Read webpage content | User shares URL and asks about its content (use raw_html=true if they want HTML source) |

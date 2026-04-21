@@ -160,7 +160,7 @@ class AIClient:
         if self.config.gpt_image_enabled:
             gpt_image = GPTImageTool()
             self.tools[gpt_image.name] = gpt_image
-            log_info("GPT Image tool enabled (gpt-image-1.5)")
+            log_info("GPT Image tool enabled (gpt-image-2)")
         
         if self.config.gemini_image_enabled:
             gemini_image = GeminiImageTool()
@@ -655,6 +655,12 @@ class AIClient:
                     if func_name == 'query_chat_history':
                         func_args['_current_channel'] = channel
                         func_args['_permission_level'] = permission_level
+
+                    # Inject request context for tool-side usage tracking
+                    if func_name == 'gpt_image':
+                        func_args['_request_id'] = request_id
+                        func_args['_nick'] = nick
+                        func_args['_channel'] = channel
                     
                     # Execute the tool
                     result = tool.execute(**func_args)

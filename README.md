@@ -10,7 +10,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **Usage Tracking** - Track token usage and costs
 - **Web Search** - Real-time information lookup via Brave Search
 - **URL Fetching** - Retrieve and analyze web page content
-- **Image Generation** - Create images from text prompts (Flux AI, GPT Image 1.5, Nano Banana Pro)
+- **Image Generation** - Create images from text prompts (Flux AI, GPT Image 2, Nano Banana Pro)
 - **Image Editing** - Modify existing images with text instructions
 - **Image Analysis** - Describe images, solve visual puzzles, OCR text recognition
 - **Image Archiving** - Auto-download images from configured channels to local `img/` folder
@@ -226,7 +226,7 @@ The bot has access to these tools when mentioned:
 | **Shell Execution** | Run system commands (owner only) | "check disk space" |
 | **Voice Cloning** | Clone voices and generate speech | "clone this voice and say hello" |
 | **YouTube Search** | Search videos and comments | "search youtube for funny cats" |
-| **GPT Image 1.5** | High-quality image generation with text | "generate with GPT: a sign saying HELLO" |
+| **GPT Image 2** | High-quality image generation and editing with strong text rendering | "generate with GPT: a sign saying HELLO" |
 | **Nano Banana Pro** | Google's advanced image generation | "generate with gemini: an infographic about AI" |
 | **Usage Stats** | Check costs and token usage | "how much have I spent today?" |
 | **Bug Report** | Report issues with the bot | "I want to report a bug: image generation fails" |
@@ -520,7 +520,7 @@ web_search_enabled = true      # Web search via Brave
 fetch_url_enabled = true       # URL content retrieval
 flux_create_enabled = true     # Image generation (Flux)
 flux_edit_enabled = true       # Image editing (Flux)
-gpt_image_enabled = true       # High quality image generation (GPT Image 1.5)
+gpt_image_enabled = true       # High quality image generation (GPT Image 2)
 gemini_image_enabled = true    # Nano Banana Pro image generation (Gemini)
 image_analysis_enabled = true  # Image analysis/OCR
 python_exec_enabled = true     # Python code execution

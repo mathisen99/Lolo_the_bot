@@ -68,6 +68,7 @@ def handle_mention(request: MentionRequest) -> MentionResponse:
             channel=request.channel,
             conversation_history=request.history,
             permission_level=request.permission_level,
+            command_prefix=request.command_prefix,
             request_id=request.request_id,
             deep_mode=request.deep_mode
         )

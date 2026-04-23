@@ -191,6 +191,17 @@ func main() {
 	registry := commands.NewRegistry()
 	dispatcher := commands.NewDispatcher(registry, userMgr, cfg.Bot.CommandPrefix)
 
+	channelPrefixes, err := db.ListChannelCommandPrefixes()
+	if err != nil {
+		logger.Error("Failed to load channel command prefixes: %v", err)
+		_ = triviaStore.Close()
+		_ = db.Close()
+		os.Exit(1)
+	}
+	for channel, prefix := range channelPrefixes {
+		dispatcher.SetChannelPrefix(channel, prefix)
+	}
+
 	// Capture start time for metrics and uptime tracking
 	startTime := time.Now()
 
@@ -213,7 +224,7 @@ func main() {
 	connManager := irc.NewConnectionManager(cfg, logger, db, userMgr)
 
 	// Register all core commands (after API client and IRC client are created)
-	registerCoreCommands(registry, db, userMgr, logger, startTime, cfg.Bot.APIEndpoint, apiHealthChecker, connManager.GetClient(), triviaManager)
+	registerCoreCommands(registry, dispatcher, db, userMgr, logger, startTime, cfg.Bot.APIEndpoint, apiHealthChecker, connManager.GetClient(), triviaManager)
 
 	// Check Python API health at startup (Requirement 16.5)
 	logger.Info("Checking API health...")
@@ -245,7 +256,6 @@ func main() {
 		ErrorHandler:             errorHandler,
 		Splitter:                 msgSplitter,
 		BotNick:                  cfg.Server.Nickname,
-		CommandPrefix:            cfg.Bot.CommandPrefix,
 		TestMode:                 cfg.Bot.TestMode,
 		ImageDownloadChannels:    cfg.Images.DownloadChannels,
 		PhoneNotificationsActive: cfg.PhoneNotifications.Active,
@@ -485,7 +495,7 @@ func (a *apiHealthCheckerAdapter) GetCircuitBreakerStats() commands.CircuitBreak
 }
 
 // registerCoreCommands registers all core commands with the registry
-func registerCoreCommands(registry *commands.Registry, db *database.DB, userMgr *user.Manager, logger output.Logger, startTime time.Time, apiEndpoint string, apiHealthChecker commands.APIHealthChecker, ircClient commands.IRCClient, triviaManager *trivia.Manager) {
+func registerCoreCommands(registry *commands.Registry, dispatcher *commands.Dispatcher, db *database.DB, userMgr *user.Manager, logger output.Logger, startTime time.Time, apiEndpoint string, apiHealthChecker commands.APIHealthChecker, ircClient commands.IRCClient, triviaManager *trivia.Manager) {
 	// Owner verification command (Requirement 11.4, 11.6)
 	_ = registry.Register(commands.NewVerifyCommand(userMgr, db))
 
@@ -514,6 +524,7 @@ func registerCoreCommands(registry *commands.Registry, db *database.DB, userMgr 
 	_ = registry.Register(commands.NewPMDisableCommand(db))
 	_ = registry.Register(commands.NewChannelEnableCommand(db))
 	_ = registry.Register(commands.NewChannelDisableCommand(db))
+	_ = registry.Register(commands.NewPrefixCommand(db, dispatcher))
 	_ = registry.Register(commands.NewJoinCommand(ircClient))
 	_ = registry.Register(commands.NewPartCommand(ircClient))
 	_ = registry.Register(commands.NewNickCommand(ircClient))

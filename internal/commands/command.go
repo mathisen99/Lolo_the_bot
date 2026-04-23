@@ -49,6 +49,9 @@ type Context struct {
 
 	// Whether the user is registered in the database
 	IsRegistered bool
+
+	// ActivePrefix is the effective prefix for the source channel/PM.
+	ActivePrefix string
 }
 
 // Response represents a command response
@@ -67,7 +70,7 @@ type Response struct {
 }
 
 // NewContext creates a new command context
-func NewContext(command string, args []string, rawMessage, nick, hostmask, channel string, isPM bool, userLevel database.PermissionLevel, isRegistered bool) *Context {
+func NewContext(command string, args []string, rawMessage, nick, hostmask, channel string, isPM bool, userLevel database.PermissionLevel, isRegistered bool, activePrefix string) *Context {
 	return &Context{
 		Command:      command,
 		Args:         args,
@@ -78,6 +81,7 @@ func NewContext(command string, args []string, rawMessage, nick, hostmask, chann
 		IsPM:         isPM,
 		UserLevel:    userLevel,
 		IsRegistered: isRegistered,
+		ActivePrefix: activePrefix,
 	}
 }
 

@@ -59,6 +59,7 @@ class MentionRequest(BaseModel):
     channel: str = Field(..., description="Channel where mention occurred")
     message: str = Field(..., description="Full message containing the mention")
     permission_level: str = Field(default="normal", description="User permission level: owner, admin, normal, ignored")
+    command_prefix: str = Field(default="!", description="Effective command prefix for this channel")
     history: Optional[List[HistoryMessage]] = Field(default=None, description="Recent conversation history")
     deep_mode: bool = Field(default=False, description="Enable deep research mode with high reasoning")
 
@@ -389,6 +390,7 @@ async def handle_mention_stream(request: MentionRequest):
                     channel=request.channel,
                     conversation_history=request.history if request.history else [],
                     permission_level=request.permission_level,
+                    command_prefix=request.command_prefix,
                     request_id=request.request_id,
                     deep_mode=request.deep_mode
                 )

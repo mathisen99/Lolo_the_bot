@@ -82,7 +82,7 @@ func (h *MentionHandler) ContainsMention(message string) bool {
 // HandleMention processes a bot mention
 // Returns the response message and any error
 // If statusCallback is provided, it will be called with intermediate status updates
-func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostmask, channel string, statusCallback func(string)) (string, error) {
+func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostmask, channel, commandPrefix string, statusCallback func(string)) (string, error) {
 	// Check if channel is enabled
 	enabled, err := h.db.GetChannelState(channel)
 	if err != nil {
@@ -172,7 +172,7 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 	startTime := time.Now()
 
 	// Use SendMentionStream to get updates
-	respChan, err := h.apiClient.SendMentionStream(ctx, message, nick, hostmask, channel, permissionLevel, conversationHistory, deepMode)
+	respChan, err := h.apiClient.SendMentionStream(ctx, message, nick, hostmask, channel, permissionLevel, commandPrefix, conversationHistory, deepMode)
 	if err != nil {
 		// Record error metric (Requirement 30.3)
 		if errRecordErr := h.db.RecordError("mention_api_failed"); errRecordErr != nil {

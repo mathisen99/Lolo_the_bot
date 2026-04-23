@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/yourusername/lolo/internal/database"
 	"github.com/yourusername/lolo/internal/user"
@@ -10,35 +11,39 @@ import (
 
 // Dispatcher handles command detection and routing
 type Dispatcher struct {
-	registry      *Registry
-	userManager   *user.Manager
-	commandPrefix string
+	registry        *Registry
+	userManager     *user.Manager
+	defaultPrefix   string
+	channelPrefixes map[string]string
+	mu              sync.RWMutex
 }
 
 // NewDispatcher creates a new command dispatcher
 func NewDispatcher(registry *Registry, userManager *user.Manager, commandPrefix string) *Dispatcher {
 	return &Dispatcher{
-		registry:      registry,
-		userManager:   userManager,
-		commandPrefix: commandPrefix,
+		registry:        registry,
+		userManager:     userManager,
+		defaultPrefix:   commandPrefix,
+		channelPrefixes: make(map[string]string),
 	}
 }
 
-// IsCommand checks if a message is a command (starts with the command prefix)
-func (d *Dispatcher) IsCommand(message string) bool {
-	return strings.HasPrefix(message, d.commandPrefix)
+// IsCommand checks if a message is a command in the given context.
+func (d *Dispatcher) IsCommand(channel, message string, isPM bool) bool {
+	return strings.HasPrefix(message, d.GetActivePrefix(channel, isPM))
 }
 
 // ParseCommand parses a message into command name and arguments
 // Returns empty string if the message is not a command
 // Supports multi-word commands (e.g., "user add", "channel enable")
-func (d *Dispatcher) ParseCommand(message string) (command string, args []string) {
-	if !d.IsCommand(message) {
+func (d *Dispatcher) ParseCommand(channel, message string, isPM bool) (command string, args []string) {
+	prefix := d.GetActivePrefix(channel, isPM)
+	if !strings.HasPrefix(message, prefix) {
 		return "", nil
 	}
 
 	// Remove the prefix
-	message = strings.TrimPrefix(message, d.commandPrefix)
+	message = strings.TrimPrefix(message, prefix)
 	message = strings.TrimSpace(message)
 
 	// Split into command and arguments
@@ -78,12 +83,12 @@ func (d *Dispatcher) ParseCommand(message string) (command string, args []string
 // Returns the response, whether it was a command, and any error
 func (d *Dispatcher) Dispatch(nick, hostmask, channel, message string, isPM bool) (*Response, bool, error) {
 	// Check if this is a command
-	if !d.IsCommand(message) {
+	if !d.IsCommand(channel, message, isPM) {
 		return nil, false, nil
 	}
 
 	// Parse the command
-	command, args := d.ParseCommand(message)
+	command, args := d.ParseCommand(channel, message, isPM)
 	if command == "" {
 		return nil, false, nil
 	}
@@ -95,7 +100,7 @@ func (d *Dispatcher) Dispatch(nick, hostmask, channel, message string, isPM bool
 	}
 
 	// Create command context
-	ctx := NewContext(command, args, message, nick, hostmask, channel, isPM, userLevel, isRegistered)
+	ctx := NewContext(command, args, message, nick, hostmask, channel, isPM, userLevel, isRegistered, d.GetActivePrefix(channel, isPM))
 
 	// Check command cooldown before executing (Requirement 15.8, 15.9)
 	// Get the command to check its cooldown duration
@@ -168,12 +173,37 @@ func (d *Dispatcher) GetRegistry() *Registry {
 	return d.registry
 }
 
-// SetCommandPrefix updates the command prefix
-func (d *Dispatcher) SetCommandPrefix(prefix string) {
-	d.commandPrefix = prefix
+// GetActivePrefix returns the effective command prefix for the context.
+func (d *Dispatcher) GetActivePrefix(channel string, isPM bool) string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if isPM || channel == "" {
+		return d.defaultPrefix
+	}
+	if prefix, exists := d.channelPrefixes[channel]; exists && prefix != "" {
+		return prefix
+	}
+	return d.defaultPrefix
 }
 
-// GetCommandPrefix returns the current command prefix
-func (d *Dispatcher) GetCommandPrefix() string {
-	return d.commandPrefix
+// GetDefaultPrefix returns the configured default command prefix.
+func (d *Dispatcher) GetDefaultPrefix() string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.defaultPrefix
+}
+
+// SetChannelPrefix updates the command prefix override for a channel.
+func (d *Dispatcher) SetChannelPrefix(channel, prefix string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.channelPrefixes[channel] = prefix
+}
+
+// ClearChannelPrefix removes the command prefix override for a channel.
+func (d *Dispatcher) ClearChannelPrefix(channel string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.channelPrefixes, channel)
 }

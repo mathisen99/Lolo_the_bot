@@ -295,6 +295,7 @@ class AIClient:
         channel: str,
         conversation_history: list,
         permission_level: str,
+        command_prefix: str,
         request_id: str,
         deep_mode: bool = False
     ):
@@ -333,6 +334,7 @@ class AIClient:
                 nick, 
                 channel, 
                 conversation_history,
+                command_prefix,
                 deep_mode=deep_mode
             )
             
@@ -458,6 +460,7 @@ class AIClient:
         channel: str,
         conversation_history: list,
         permission_level: str,
+        command_prefix: str,
         request_id: str,
         deep_mode: bool = False
     ) -> str:
@@ -466,7 +469,7 @@ class AIClient:
         Wraps the streaming method and just returns the final result.
         """
         generator = self.generate_response_with_context_stream(
-            user_message, nick, channel, conversation_history, permission_level, request_id, deep_mode
+            user_message, nick, channel, conversation_history, permission_level, command_prefix, request_id, deep_mode
         )
         
         final_message = "I couldn't generate a proper response."
@@ -805,6 +808,7 @@ class AIClient:
         nick: str, 
         channel: str,
         conversation_history: list,
+        command_prefix: str,
         deep_mode: bool = False
     ) -> str:
         """
@@ -892,6 +896,7 @@ Remember: Quality over speed. The user specifically requested deep research with
         prompt_parts.append(f"Timestamp: {current_time}")
         prompt_parts.append(f"Channel: {channel}")
         prompt_parts.append(f"User: {nick}")
+        prompt_parts.append(f"Command prefix: {command_prefix}")
         prompt_parts.append(f"Message: {user_message}")
         prompt_parts.append("")
         

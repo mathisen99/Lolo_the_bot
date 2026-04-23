@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,7 +35,6 @@ type MessageHandler struct {
 	errorHandler          *errors.ErrorHandler
 	splitter              *splitter.Splitter
 	splitTracker          *splitter.StateTracker // Tracks split message state for error recovery
-	commandPrefix         string
 	testMode              bool
 	commandMetadata       map[string]*CommandMetadata        // Cache of API command metadata
 	imageDownloadChannels []string                           // Channels to auto-download images from
@@ -52,7 +52,6 @@ type MessageHandlerConfig struct {
 	ErrorHandler             *errors.ErrorHandler
 	Splitter                 *splitter.Splitter
 	BotNick                  string
-	CommandPrefix            string
 	TestMode                 bool
 	ImageDownloadChannels    []string
 	PhoneNotificationsActive bool
@@ -90,7 +89,6 @@ func NewMessageHandler(config *MessageHandlerConfig) *MessageHandler {
 		errorHandler:          config.ErrorHandler,
 		splitter:              config.Splitter,
 		splitTracker:          splitter.NewStateTracker(),
-		commandPrefix:         config.CommandPrefix,
 		testMode:              config.TestMode,
 		commandMetadata:       make(map[string]*CommandMetadata),
 		imageDownloadChannels: config.ImageDownloadChannels,
@@ -153,7 +151,7 @@ func (h *MessageHandler) HandleMessage(ctx context.Context, nick, hostmask, chan
 	}
 
 	// Check if this is a command
-	if h.dispatcher.IsCommand(message) {
+	if h.dispatcher.IsCommand(channel, message, isPM) {
 		return h.handleCommand(ctx, nick, hostmask, channel, message, isPM)
 	}
 
@@ -201,7 +199,7 @@ func (h *MessageHandler) HandleMessage(ctx context.Context, nick, hostmask, chan
 // handleCommand processes a command message
 func (h *MessageHandler) handleCommand(ctx context.Context, nick, hostmask, channel, message string, isPM bool) ([]string, error) {
 	// Parse the command
-	command, args := h.dispatcher.ParseCommand(message)
+	command, args := h.dispatcher.ParseCommand(channel, message, isPM)
 	if command == "" {
 		return nil, nil
 	}
@@ -250,7 +248,7 @@ func (h *MessageHandler) handleCoreCommand(_ context.Context, nick, hostmask, ch
 			h.logger.Warning("Failed to record error metric: %v", errRecordErr)
 		}
 		// Handle the error and return user-friendly message
-		return []string{h.errorHandler.HandleWithContext(err, "command execution")}, nil
+		return []string{h.rewriteCommandPrefixes(h.errorHandler.HandleWithContext(err, "command execution"), channel, isPM)}, nil
 	}
 
 	if !isCommand {
@@ -262,7 +260,7 @@ func (h *MessageHandler) handleCoreCommand(_ context.Context, nick, hostmask, ch
 	}
 
 	// Record command usage metric (Requirement 30.1)
-	command, _ := h.dispatcher.ParseCommand(message)
+	command, _ := h.dispatcher.ParseCommand(channel, message, isPM)
 	if command != "" {
 		if err := h.db.RecordCommandUsage(command); err != nil {
 			h.logger.Warning("Failed to record command metric: %v", err)
@@ -303,7 +301,7 @@ func (h *MessageHandler) handleAPICommand(ctx context.Context, command string, a
 	// In test mode, return a mock response
 	if h.testMode {
 		mockResponse := fmt.Sprintf("Test mode: Command '%s' with args %v", command, args)
-		return h.splitMessage(mockResponse), nil
+		return h.splitMessage(h.rewriteCommandPrefixes(mockResponse, channel, isPM)), nil
 	}
 
 	// Check if command supports streaming
@@ -360,7 +358,7 @@ func (h *MessageHandler) handleAPICommand(ctx context.Context, command string, a
 		}
 		h.logger.Warning("API error [%s]: %s", apiResp.RequestID, apiResp.Message)
 
-		return []string{apiResp.Message}, nil
+		return []string{h.rewriteCommandPrefixes(apiResp.Message, channel, isPM)}, nil
 	}
 
 	// Log successful command execution
@@ -389,7 +387,7 @@ func (h *MessageHandler) handleAPICommand(ctx context.Context, command string, a
 	}
 
 	// Return the API response
-	return h.splitMessage(apiResp.Message), nil
+	return h.splitMessage(h.rewriteCommandPrefixes(apiResp.Message, channel, isPM)), nil
 }
 
 // handleStreamingAPICommand processes a streaming command via the Python API
@@ -446,13 +444,13 @@ func (h *MessageHandler) handleStreamingAPICommand(ctx context.Context, command 
 
 		// Add message chunk to responses
 		if apiResp.Message != "" {
-			responses = append(responses, apiResp.Message)
+			responses = append(responses, h.rewriteCommandPrefixes(apiResp.Message, channel, isPM))
 		}
 	}
 
 	// If there was an error and no responses, return the error
 	if len(responses) == 0 && lastError != "" {
-		return []string{lastError}, nil
+		return []string{h.rewriteCommandPrefixes(lastError, channel, isPM)}, nil
 	}
 
 	// Download any images in streaming responses (flux create/edit)
@@ -472,7 +470,14 @@ func (h *MessageHandler) handleStreamingAPICommand(ctx context.Context, command 
 func (h *MessageHandler) handleMention(ctx context.Context, nick, hostmask, channel, message string, statusCallback func(string)) ([]string, error) {
 	h.logger.Info("Processing mention from %s in %s", nick, channel)
 
-	response, err := h.mentionHandler.HandleMention(ctx, message, nick, hostmask, channel, statusCallback)
+	var rewrittenStatusCallback func(string)
+	if statusCallback != nil {
+		rewrittenStatusCallback = func(msg string) {
+			statusCallback(h.rewriteCommandPrefixes(msg, channel, false))
+		}
+	}
+
+	response, err := h.mentionHandler.HandleMention(ctx, message, nick, hostmask, channel, h.dispatcher.GetActivePrefix(channel, false), rewrittenStatusCallback)
 	if err != nil {
 		h.logger.Error("Mention handling failed: %v", err)
 		return nil, nil // Don't send error messages for mentions
@@ -492,6 +497,7 @@ func (h *MessageHandler) handleMention(ctx context.Context, nick, hostmask, chan
 	// Convert custom formatting tags to IRC control codes
 	// This allows AI to use tags like <BOLD>text</BOLD> which become IRC formatting
 	formattedResponse := ircformat.Format(response)
+	formattedResponse = h.rewriteCommandPrefixes(formattedResponse, channel, false)
 
 	// Split the response
 	messages := h.splitMessage(formattedResponse)
@@ -560,9 +566,6 @@ func (h *MessageHandler) formatResponse(response *commands.Response, _ string, c
 		return nil, nil
 	}
 
-	// Split the message if needed
-	messages := h.splitMessage(response.Message)
-
 	// Log bot's own messages
 	target := channel
 	if isPM || response.SendAsPM {
@@ -572,6 +575,14 @@ func (h *MessageHandler) formatResponse(response *commands.Response, _ string, c
 		target = response.Target
 	}
 
+	message := response.Message
+	if target != "" && !isPM && !response.SendAsPM {
+		message = h.rewriteCommandPrefixes(message, target, false)
+	}
+
+	// Split the message if needed
+	messages := h.splitMessage(message)
+
 	for _, msg := range messages {
 		if err := h.logMessage("bot", "", target, msg, true); err != nil {
 			h.errorHandler.LogError(errors.NewDatabaseError("log bot message", err), "bot message logging")
@@ -579,6 +590,77 @@ func (h *MessageHandler) formatResponse(response *commands.Response, _ string, c
 	}
 
 	return messages, nil
+}
+
+func (h *MessageHandler) rewriteCommandPrefixes(message, channel string, isPM bool) string {
+	if message == "" || isPM || channel == "" {
+		return message
+	}
+
+	activePrefix := h.dispatcher.GetActivePrefix(channel, false)
+	if activePrefix == "!" {
+		return message
+	}
+
+	knownCommands := h.knownCommandTokens()
+	if len(knownCommands) == 0 {
+		return message
+	}
+
+	rewritten := message
+	basePrefixes := []string{"!"}
+	if defaultPrefix := h.dispatcher.GetDefaultPrefix(); defaultPrefix != "" && defaultPrefix != "!" {
+		basePrefixes = append(basePrefixes, defaultPrefix)
+	}
+
+	for _, command := range knownCommands {
+		for _, basePrefix := range basePrefixes {
+			if basePrefix == activePrefix {
+				continue
+			}
+			rewritten = strings.ReplaceAll(rewritten, basePrefix+command, activePrefix+command)
+		}
+	}
+
+	return rewritten
+}
+
+func (h *MessageHandler) knownCommandTokens() []string {
+	seen := make(map[string]struct{})
+	var tokens []string
+
+	for _, cmd := range h.dispatcher.GetRegistry().GetAll() {
+		name := strings.TrimSpace(cmd.Name())
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		tokens = append(tokens, name)
+	}
+
+	for name := range h.commandMetadata {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		tokens = append(tokens, name)
+	}
+
+	sort.Slice(tokens, func(i, j int) bool {
+		if len(tokens[i]) == len(tokens[j]) {
+			return tokens[i] < tokens[j]
+		}
+		return len(tokens[i]) > len(tokens[j])
+	})
+
+	return tokens
 }
 
 // splitMessage splits a long message into multiple parts

@@ -33,10 +33,25 @@ func TestShouldRunTimeoutJudgeRunsForAnyTriviaWithGuesses(t *testing.T) {
 			config: GeneratorConfig{Enabled: true},
 		},
 	}
+	round := &activeRound{Mode: ModeTrivia, Variant: VariantClassic}
 	guesses := []GuessLog{{ID: 1, Nick: "joanna", Message: "variant"}}
 
-	if !manager.shouldRunTimeoutJudge(guesses) {
+	if !manager.shouldRunTimeoutJudge(round, guesses) {
 		t.Fatalf("expected timeout judge to run for trivia rounds with guesses")
+	}
+}
+
+func TestShouldRunTimeoutJudgeSkipsChoiceOnlyVariants(t *testing.T) {
+	manager := &Manager{
+		generator: &Generator{
+			config: GeneratorConfig{Enabled: true},
+		},
+	}
+	round := &activeRound{Mode: ModeTrivia, Variant: VariantRealFake}
+	guesses := []GuessLog{{ID: 1, Nick: "joanna", Message: "B"}}
+
+	if manager.shouldRunTimeoutJudge(round, guesses) {
+		t.Fatalf("did not expect timeout judge to run for non-semantic choice variants")
 	}
 }
 
@@ -48,7 +63,8 @@ func TestShouldRunTimeoutJudgeRequiresEnabledGeneratorAndGuesses(t *testing.T) {
 			config: GeneratorConfig{Enabled: false},
 		},
 	}
-	if disabled.shouldRunTimeoutJudge(guesses) {
+	round := &activeRound{Mode: ModeTrivia, Variant: VariantClassic}
+	if disabled.shouldRunTimeoutJudge(round, guesses) {
 		t.Fatalf("did not expect judge to run when generator is disabled")
 	}
 
@@ -57,12 +73,12 @@ func TestShouldRunTimeoutJudgeRequiresEnabledGeneratorAndGuesses(t *testing.T) {
 			config: GeneratorConfig{Enabled: true},
 		},
 	}
-	if enabledNoGuesses.shouldRunTimeoutJudge(nil) {
+	if enabledNoGuesses.shouldRunTimeoutJudge(round, nil) {
 		t.Fatalf("did not expect judge to run without guesses")
 	}
 
 	noGenerator := &Manager{}
-	if noGenerator.shouldRunTimeoutJudge(guesses) {
+	if noGenerator.shouldRunTimeoutJudge(round, guesses) {
 		t.Fatalf("did not expect judge to run without generator")
 	}
 }

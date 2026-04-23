@@ -399,7 +399,7 @@ The VM runs persistently and uses vsock for host-guest communication. No network
 | `!version` | Bot version | All |
 | `!uptime` | Bot uptime | All |
 | `!trivia <topic>` / `!quiz <topic>` | Start a trivia round | All |
-| `!code <lang>` | Start a one-line coding quiz round | All |
+| `!code <language>` | Start a one-line coding quiz round | All |
 | `!hint` | Reveal a hint for active trivia/code round | All |
 | `!triviarules` / `!quizrules` | Show trivia rules and scoring | All |
 | `!top10` | Top 10 trivia leaderboard for current channel | All |
@@ -416,8 +416,8 @@ Use `!help <command>` for detailed help.
 
 Command prefix overrides are channel-specific. `!` remains the default prefix everywhere unless a channel admin changes it. Example: `!prefix -` changes the current channel to `-`, and `-prefix !` resets that channel back to the default.
 
-Trivia/code note: For long-form trivia answers and timed-out code rounds, if no exact match is found before timeout, the bot can run a strict close-answer judge pass and award points to the earliest clearly equivalent guess.
-Supported code quiz languages: `go`, `python`, `javascript`, `typescript`, `bash`, `pascal`, `c`, `cpp`, `csharp`, `java`, `rust`, `php`, `ruby`, `lua` (aliases include `js`, `ts`, `py`, `sh`, `c++`, `c#`).
+Trivia/code note: `!trivia` / `!quiz` now rotate a broader built-in catalog without adding new commands, including classic, pyramid, connection, real/fake, chronology, higher/lower, odd-one-out, xword, sequence, quote-source, acronym, title-completion, category-lock, definition-duel, and closest year/number rounds. If no exact match is found, the bot can use strict close-answer judging for equivalent trivia/code answers.
+Code quiz note: `!code` accepts free-form language names. Answers must still be a single line of valid code for that language, but imports/helpers/runtime setup are assumed to already be available.
 
 ## Configuration
 

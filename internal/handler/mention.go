@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/yourusername/lolo/internal/database"
+	"github.com/yourusername/lolo/internal/trivia"
 	"github.com/yourusername/lolo/internal/user"
 )
 
@@ -17,6 +18,7 @@ type MentionHandler struct {
 	userMgr                  *user.Manager
 	db                       *database.DB
 	botNick                  string
+	triviaManager            *trivia.Manager
 	testMode                 bool
 	phoneNotificationsActive bool
 	phoneNotificationsURL    string
@@ -34,12 +36,13 @@ func SendNotificationToPhone(message string, url string) {
 }
 
 // NewMentionHandler creates a new mention handler
-func NewMentionHandler(apiClient APIClientInterface, userMgr *user.Manager, db *database.DB, botNick string, testMode bool, phoneNotificationsActive bool, phoneNotificationsURL string) *MentionHandler {
+func NewMentionHandler(apiClient APIClientInterface, userMgr *user.Manager, db *database.DB, botNick string, triviaManager *trivia.Manager, testMode bool, phoneNotificationsActive bool, phoneNotificationsURL string) *MentionHandler {
 	return &MentionHandler{
 		apiClient:                apiClient,
 		userMgr:                  userMgr,
 		db:                       db,
 		botNick:                  botNick,
+		triviaManager:            triviaManager,
 		testMode:                 testMode,
 		phoneNotificationsActive: phoneNotificationsActive,
 		phoneNotificationsURL:    phoneNotificationsURL,
@@ -168,11 +171,27 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 		}
 	}
 
+	var triviaContext *TriviaContext
+	if h.triviaManager != nil {
+		round := h.triviaManager.GetActiveRoundContext(channel)
+		if round.Active {
+			triviaContext = &TriviaContext{
+				Active:   true,
+				Mode:     round.Mode,
+				Variant:  round.Variant,
+				Topic:    round.Topic,
+				Language: round.Language,
+				Question: round.Question,
+				HintUsed: round.HintUsed,
+			}
+		}
+	}
+
 	// Send streaming mention to Python API
 	startTime := time.Now()
 
 	// Use SendMentionStream to get updates
-	respChan, err := h.apiClient.SendMentionStream(ctx, message, nick, hostmask, channel, permissionLevel, commandPrefix, conversationHistory, deepMode)
+	respChan, err := h.apiClient.SendMentionStream(ctx, message, nick, hostmask, channel, permissionLevel, commandPrefix, conversationHistory, triviaContext, deepMode)
 	if err != nil {
 		// Record error metric (Requirement 30.3)
 		if errRecordErr := h.db.RecordError("mention_api_failed"); errRecordErr != nil {

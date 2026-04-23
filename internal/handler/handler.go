@@ -67,6 +67,7 @@ func NewMessageHandler(config *MessageHandlerConfig) *MessageHandler {
 		config.UserManager,
 		config.DB,
 		config.BotNick,
+		config.TriviaManager,
 		config.TestMode,
 		config.PhoneNotificationsActive,
 		config.PhoneNotificationsURL,

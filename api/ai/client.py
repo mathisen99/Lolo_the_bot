@@ -294,6 +294,7 @@ class AIClient:
         nick: str, 
         channel: str,
         conversation_history: list,
+        trivia_context: Optional[Dict[str, Any]],
         permission_level: str,
         command_prefix: str,
         request_id: str,
@@ -334,6 +335,7 @@ class AIClient:
                 nick, 
                 channel, 
                 conversation_history,
+                trivia_context,
                 command_prefix,
                 deep_mode=deep_mode
             )
@@ -459,6 +461,7 @@ class AIClient:
         nick: str, 
         channel: str,
         conversation_history: list,
+        trivia_context: Optional[Dict[str, Any]],
         permission_level: str,
         command_prefix: str,
         request_id: str,
@@ -469,7 +472,7 @@ class AIClient:
         Wraps the streaming method and just returns the final result.
         """
         generator = self.generate_response_with_context_stream(
-            user_message, nick, channel, conversation_history, permission_level, command_prefix, request_id, deep_mode
+            user_message, nick, channel, conversation_history, trivia_context, permission_level, command_prefix, request_id, deep_mode
         )
         
         final_message = "I couldn't generate a proper response."
@@ -808,6 +811,7 @@ class AIClient:
         nick: str, 
         channel: str,
         conversation_history: list,
+        trivia_context: Optional[Dict[str, Any]],
         command_prefix: str,
         deep_mode: bool = False
     ) -> str:
@@ -899,6 +903,20 @@ Remember: Quality over speed. The user specifically requested deep research with
         prompt_parts.append(f"Command prefix: {command_prefix}")
         prompt_parts.append(f"Message: {user_message}")
         prompt_parts.append("")
+
+        if trivia_context and trivia_context.get("active"):
+            prompt_parts.append("=== ACTIVE TRIVIA/CODE ROUND ===")
+            prompt_parts.append("There is an active built-in game round in this same channel.")
+            prompt_parts.append(f"Mode: {trivia_context.get('mode', '')}")
+            prompt_parts.append(f"Variant: {trivia_context.get('variant', '')}")
+            prompt_parts.append(f"Topic: {trivia_context.get('topic', '')}")
+            prompt_parts.append(f"Language: {trivia_context.get('language', '')}")
+            prompt_parts.append(f"Visible prompt: {trivia_context.get('question', '')}")
+            prompt_parts.append(f"Hint already used: {trivia_context.get('hint_used', False)}")
+            prompt_parts.append("")
+            prompt_parts.append("Do NOT reveal, confirm, narrow down, evaluate guesses for, or help solve this active round.")
+            prompt_parts.append("You may explain the official commands/rules and point users to !hint, but do not provide unofficial hints or cheating help.")
+            prompt_parts.append("")
         
         # Add conversation history AFTER the question (at the end)
         # Changes to history won't invalidate the cached system prompt prefix

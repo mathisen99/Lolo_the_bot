@@ -51,7 +51,7 @@ const (
 	maxCodeAliasLength        = 280
 	maxCodeHintLength         = 200
 	maxCodeUniqueKeyLen       = 180
-	maxCodeLanguageField      = 32
+	maxCodeLanguageField      = 64
 )
 
 // NewGenerator builds a trivia question generator.
@@ -70,10 +70,10 @@ func NewGenerator(config GeneratorConfig, logger output.Logger) *Generator {
 	}
 }
 
-// GenerateQuestion creates a single trivia question for a topic and difficulty.
+// GenerateQuestion creates a single trivia question for a topic, variant, and difficulty.
 // avoidKeys contains recently rejected normalized dedup keys for this generation cycle.
 // avoidQuestions contains recent historical question texts to avoid repeating/paraphrasing.
-func (g *Generator) GenerateQuestion(ctx context.Context, topic, difficulty string, attempt int, avoidKeys, avoidQuestions []string) (*GeneratedQuestion, error) {
+func (g *Generator) GenerateQuestion(ctx context.Context, topic, variant, difficulty string, attempt int, avoidKeys, avoidQuestions []string) (*GeneratedQuestion, error) {
 	if !g.config.Enabled {
 		return nil, ErrGeneratorDisabled
 	}
@@ -100,7 +100,7 @@ func (g *Generator) GenerateQuestion(ctx context.Context, topic, difficulty stri
 
 	maxOutputTokens := resolveMaxOutputTokens(g.config.MaxOutputTokens, attempt, triviaGenerationMinTokens)
 
-	prompt := buildTriviaPrompt(topic, difficulty, attempt, avoidKeys, avoidQuestions)
+	prompt := buildTriviaPrompt(topic, variant, difficulty, attempt, avoidKeys, avoidQuestions)
 	reasoningEffort := normalizeReasoningEffort(g.config.ReasoningEffort)
 
 	requestBody := map[string]any{
@@ -152,11 +152,11 @@ func (g *Generator) GenerateQuestion(ctx context.Context, topic, difficulty stri
 	}
 
 	var question GeneratedQuestion
-	if err := json.Unmarshal([]byte(jsonPayload), &question); err != nil {
+	if err := strictJSONUnmarshal([]byte(jsonPayload), &question); err != nil {
 		return nil, fmt.Errorf("failed to parse trivia JSON payload: %w", err)
 	}
 
-	if err := validateGeneratedQuestion(&question); err != nil {
+	if err := validateGeneratedQuestion(&question, variant); err != nil {
 		return nil, err
 	}
 
@@ -169,7 +169,7 @@ func (g *Generator) GenerateCodeQuestion(ctx context.Context, language, difficul
 		return nil, ErrGeneratorDisabled
 	}
 
-	canonicalLanguage, ok := NormalizeCodeLanguage(language)
+	normalizedLanguage, ok := NormalizeCodeLanguage(language)
 	if !ok {
 		return nil, ErrUnsupportedCodeLanguage
 	}
@@ -197,7 +197,7 @@ func (g *Generator) GenerateCodeQuestion(ctx context.Context, language, difficul
 	maxOutputTokens := resolveMaxOutputTokens(g.config.MaxOutputTokens, attempt, codeGenerationMinTokens)
 
 	difficulty = NormalizeDifficulty(difficulty)
-	prompt := buildCodePrompt(canonicalLanguage, difficulty, attempt, avoidKeys, avoidQuestions)
+	prompt := buildCodePrompt(normalizedLanguage, difficulty, attempt, avoidKeys, avoidQuestions)
 
 	requestBody := map[string]any{
 		"model":             model,
@@ -248,11 +248,11 @@ func (g *Generator) GenerateCodeQuestion(ctx context.Context, language, difficul
 	}
 
 	var question GeneratedCodeQuestion
-	if err := json.Unmarshal([]byte(jsonPayload), &question); err != nil {
+	if err := strictJSONUnmarshal([]byte(jsonPayload), &question); err != nil {
 		return nil, fmt.Errorf("failed to parse code JSON payload: %w", err)
 	}
 
-	if err := validateGeneratedCodeQuestion(&question, canonicalLanguage); err != nil {
+	if err := validateGeneratedCodeQuestion(&question, normalizedLanguage); err != nil {
 		return nil, err
 	}
 
@@ -355,29 +355,36 @@ func (g *Generator) JudgeClosestGuess(ctx context.Context, req JudgeRequest) (*J
 	return &decision, nil
 }
 
-func buildTriviaPrompt(topic, difficulty string, attempt int, avoidKeys, avoidQuestions []string) string {
+func buildTriviaPrompt(topic, variant, difficulty string, attempt int, avoidKeys, avoidQuestions []string) string {
 	now := time.Now().UTC().Format("2006-01-02")
 	difficulty = NormalizeDifficulty(difficulty)
+	variant = NormalizeTriviaVariant(variant)
+	variantSchema, variantRules := triviaVariantPromptRequirements(variant)
 	var prompt strings.Builder
 	_, _ = fmt.Fprintf(&prompt, `You are generating one IRC trivia question.
 Topic: %s
+Variant: %s
 Difficulty: %s
 Current date (UTC): %s
 
 Return ONLY valid JSON with this exact shape and keys:
 {
+  "variant": "%s",
   "question": "string",
   "answer": "string",
   "aliases": ["string"],
   "hint": "string",
+  "metadata": %s,
   "uniqueness_key": "string"
 }
 
 Rules:
-- question must be one concise trivia question.
+- variant must exactly be "%s".
+- question must be one concise trivia prompt or clue text suited to the chosen variant.
 - answer must be factual and concise when possible, but can be longer if accuracy requires it.
 - aliases should include optional alternative exact answers (can be empty array).
 - hint must help but not reveal the answer directly.
+- metadata must follow the variant contract exactly.
 - uniqueness_key should be short and stable for deduplication.
 - The question must be materially different from previous questions and facts.
 - Use up-to-date, modern, canonical terminology and facts as of the current date.
@@ -385,7 +392,10 @@ Rules:
 - If a fact is version-dependent or likely outdated, avoid it and choose a more stable current fact.
 - For SQLite metadata questions, prefer canonical 'sqlite_schema' over legacy alias-only answers.
 - Do not include markdown, explanations, or extra keys.
-`, strings.TrimSpace(topic), difficulty, now)
+- Keep the answer objectively judgeable.
+`, strings.TrimSpace(topic), variant, difficulty, now, variant, variantSchema, variant)
+
+	_, _ = fmt.Fprintf(&prompt, "\nVariant rules (%s):\n%s\n", variant, variantRules)
 
 	_, _ = fmt.Fprintf(&prompt, "\nDifficulty requirements (%s):\n%s\n", difficulty, difficultyPromptGuidance(difficulty))
 
@@ -443,8 +453,10 @@ Requirements:
 - The task must be solvable with exactly one line of code in %s
 - The answer must fit in one IRC message
 - No newline characters in the answer
-- Prefer expressions over statements
+- Prefer expressions over statements when the language allows it
 - Do not require multi-line syntax, indentation, class definitions, or full functions
+- Assume imports, helpers, common runtime setup, and normal library availability are already preloaded
+- Do not require import/using/require/include/package boilerplate unless the language truly cannot express the task otherwise
 - Only generate a question with one clear expected answer or a very small set of equivalent answers
 - Include a short hint
 - Keep the question concise and unambiguous
@@ -519,6 +531,10 @@ func buildJudgePrompt(req JudgeRequest) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal judge candidates: %w", err)
 	}
+	metadataJSON, err := json.Marshal(req.Metadata)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal judge metadata: %w", err)
+	}
 
 	var prompt strings.Builder
 	switch NormalizeMode(req.Mode) {
@@ -547,14 +563,16 @@ Return ONLY JSON with this exact shape:
   "confidence": number between 0 and 1,
   "reason": "short explanation"
 }
-`, strings.TrimSpace(req.Language), strings.TrimSpace(req.Question), strings.TrimSpace(req.Answer), string(aliasesJSON), string(candidatesJSON))
+		`, strings.TrimSpace(req.Language), strings.TrimSpace(req.Question), strings.TrimSpace(req.Answer), string(aliasesJSON), string(candidatesJSON))
 	default:
 		_, _ = fmt.Fprintf(&prompt, `You are a strict-but-fair IRC trivia judge.
 Topic: %s
+Variant: %s
 Question: %s
 Official answer: %s
 Official normalized answer: %s
 Accepted aliases (JSON): %s
+Variant metadata (JSON): %s
 
 Candidate guesses (chronological, JSON):
 %s
@@ -563,6 +581,8 @@ Decide if any candidate guess is clearly equivalent to the official answer.
 Strict judging rules:
 - Accept if the guess clearly identifies the same specific answer in this question's context.
 - Accept minor spelling/wording variation, abbreviations, and concise shorthand when meaning is unambiguous.
+- For xword, treat the clue and pattern as binding.
+- For connection rounds, require the unifying link, not just one clue repeated back.
 - Reject guesses that are wrong, too broad, ambiguous for this question, or only loosely related.
 - When in doubt, reject.
 - If multiple candidates qualify, pick the earliest one (lowest elapsed_ms).
@@ -575,7 +595,7 @@ Return ONLY JSON with this exact shape:
   "confidence": number between 0 and 1,
   "reason": "short explanation"
 }
-`, strings.TrimSpace(req.Topic), strings.TrimSpace(req.Question), strings.TrimSpace(req.Answer), NormalizeAnswer(req.Answer), string(aliasesJSON), string(candidatesJSON))
+`, strings.TrimSpace(req.Topic), NormalizeTriviaVariant(req.Variant), strings.TrimSpace(req.Question), strings.TrimSpace(req.Answer), NormalizeAnswer(req.Answer), string(aliasesJSON), string(metadataJSON), string(candidatesJSON))
 	}
 
 	return prompt.String(), nil
@@ -590,6 +610,17 @@ func difficultyPromptGuidance(difficulty string) string {
 	default:
 		return "- medium: balanced difficulty; not trivial, not obscure; typical knowledgeable user should solve with some thought."
 	}
+}
+
+func triviaVariantPromptRequirements(variant string) (string, string) {
+	spec := triviaVariantSpec(variant)
+	return spec.MetadataSchemaJSON, spec.PromptRules
+}
+
+func strictJSONUnmarshal(payload []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(target)
 }
 
 func normalizeReasoningEffort(input string) string {
@@ -1102,38 +1133,13 @@ func extractFirstJSONObject(input string) (string, bool) {
 	return "", false
 }
 
-func validateGeneratedQuestion(question *GeneratedQuestion) error {
-	question.Question = strings.TrimSpace(question.Question)
-	question.Answer = strings.TrimSpace(question.Answer)
-	question.Hint = strings.TrimSpace(question.Hint)
-	question.UniquenessKey = strings.TrimSpace(question.UniquenessKey)
-
-	if question.Question == "" {
-		return fmt.Errorf("invalid trivia payload: question is empty")
+func validateGeneratedQuestion(question *GeneratedQuestion, expectedVariant string) error {
+	if err := normalizeGeneratedTriviaQuestion(question); err != nil {
+		return err
 	}
-	if question.Answer == "" {
-		return fmt.Errorf("invalid trivia payload: answer is empty")
+	if NormalizeTriviaVariant(expectedVariant) != question.Variant {
+		return fmt.Errorf("invalid trivia payload: variant mismatch (got %s expected %s)", question.Variant, NormalizeTriviaVariant(expectedVariant))
 	}
-	if len(question.Answer) > maxAnswerLength {
-		return fmt.Errorf("invalid trivia payload: answer exceeds %d chars", maxAnswerLength)
-	}
-	if question.Hint == "" {
-		return fmt.Errorf("invalid trivia payload: hint is empty")
-	}
-
-	validAliases := make([]string, 0, len(question.Aliases))
-	for _, alias := range question.Aliases {
-		trimmed := strings.TrimSpace(alias)
-		if trimmed == "" {
-			continue
-		}
-		if len(trimmed) > maxAliasLength {
-			continue
-		}
-		validAliases = append(validAliases, trimmed)
-	}
-	question.Aliases = validAliases
-
 	return nil
 }
 

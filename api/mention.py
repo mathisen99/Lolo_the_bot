@@ -67,6 +67,7 @@ def handle_mention(request: MentionRequest) -> MentionResponse:
             nick=request.nick,
             channel=request.channel,
             conversation_history=request.history,
+            trivia_context=request.trivia_context.model_dump() if request.trivia_context else None,
             permission_level=request.permission_level,
             command_prefix=request.command_prefix,
             request_id=request.request_id,

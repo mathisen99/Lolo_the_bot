@@ -21,8 +21,8 @@ import (
 type APIClientInterface interface {
 	SendCommand(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool, timeout time.Duration) (*APIResponse, error)
 	SendCommandStream(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool, timeout time.Duration) (<-chan *APIResponse, error)
-	SendMention(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, deepMode bool) (*APIResponse, error)
-	SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, deepMode bool) (<-chan *APIResponse, error)
+	SendMention(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (*APIResponse, error)
+	SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (<-chan *APIResponse, error)
 	CheckHealth(ctx context.Context) (*HealthResponse, error)
 	GetCommands(ctx context.Context) (*CommandsResponse, error)
 	WaitForInflightRequests(timeout time.Duration) bool
@@ -117,7 +117,19 @@ type MentionRequest struct {
 	PermissionLevel string           `json:"permission_level"`
 	CommandPrefix   string           `json:"command_prefix"`
 	History         []HistoryMessage `json:"history,omitempty"`
+	TriviaContext   *TriviaContext   `json:"trivia_context,omitempty"`
 	DeepMode        bool             `json:"deep_mode,omitempty"`
+}
+
+// TriviaContext is a safe snapshot of an active trivia/code round for anti-cheat prompting.
+type TriviaContext struct {
+	Active   bool   `json:"active"`
+	Mode     string `json:"mode"`
+	Variant  string `json:"variant"`
+	Topic    string `json:"topic"`
+	Language string `json:"language"`
+	Question string `json:"question"`
+	HintUsed bool   `json:"hint_used"`
 }
 
 // APIResponse represents a response from the Python API
@@ -227,7 +239,7 @@ func (c *APIClient) SendCommandStream(ctx context.Context, command string, args 
 }
 
 // SendMention sends a mention request to the Python API with conversation history
-func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, deepMode bool) (*APIResponse, error) {
+func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (*APIResponse, error) {
 	requestID := uuid.New().String()
 
 	// Convert database messages to API format
@@ -249,6 +261,7 @@ func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, ch
 		PermissionLevel: permissionLevel,
 		CommandPrefix:   commandPrefix,
 		History:         historyMessages,
+		TriviaContext:   triviaContext,
 		DeepMode:        deepMode,
 	}
 
@@ -271,7 +284,7 @@ func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, ch
 
 // SendMentionStream sends a streaming mention request to the Python API with conversation history
 // Returns a channel that receives response chunks as they arrive
-func (c *APIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, deepMode bool) (<-chan *APIResponse, error) {
+func (c *APIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (<-chan *APIResponse, error) {
 	requestID := uuid.New().String()
 
 	// Convert database messages to API format
@@ -293,6 +306,7 @@ func (c *APIClient) SendMentionStream(ctx context.Context, message, nick, hostma
 		PermissionLevel: permissionLevel,
 		CommandPrefix:   commandPrefix,
 		History:         historyMessages,
+		TriviaContext:   triviaContext,
 		DeepMode:        deepMode,
 	}
 

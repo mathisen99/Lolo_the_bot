@@ -25,11 +25,12 @@ func (noopLogger) ChannelMessage(string, string, string) {}
 func (noopLogger) PrivateMessage(string, string)         {}
 
 type testAPIClient struct {
-	commandResponses   map[string]string
-	streamingResponses map[string][]*APIResponse
-	mentionResponse    string
-	mentionPrefix      string
-	commandsResponse   *CommandsResponse
+	commandResponses     map[string]string
+	streamingResponses   map[string][]*APIResponse
+	mentionResponse      string
+	mentionPrefix        string
+	mentionTriviaContext *TriviaContext
+	commandsResponse     *CommandsResponse
 }
 
 func (c *testAPIClient) SendCommand(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool, timeout time.Duration) (*APIResponse, error) {
@@ -59,13 +60,15 @@ func (c *testAPIClient) SendCommandStream(ctx context.Context, command string, a
 	return ch, nil
 }
 
-func (c *testAPIClient) SendMention(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, deepMode bool) (*APIResponse, error) {
+func (c *testAPIClient) SendMention(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (*APIResponse, error) {
 	c.mentionPrefix = commandPrefix
+	c.mentionTriviaContext = triviaContext
 	return &APIResponse{RequestID: "mention", Status: "success", Message: c.mentionResponse}, nil
 }
 
-func (c *testAPIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, deepMode bool) (<-chan *APIResponse, error) {
+func (c *testAPIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (<-chan *APIResponse, error) {
 	c.mentionPrefix = commandPrefix
+	c.mentionTriviaContext = triviaContext
 	ch := make(chan *APIResponse, 1)
 	go func() {
 		defer close(ch)

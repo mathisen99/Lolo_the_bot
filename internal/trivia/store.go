@@ -14,6 +14,7 @@ import (
 
 type historicalQuestion struct {
 	Mode     string
+	Variant  string
 	Language string
 	Question string
 	Answer   string
@@ -153,7 +154,7 @@ func (s *Store) GetRecentQuestionsByTopic(topic string, limit int) ([]historical
 	}
 
 	rows, err := s.conn.Query(`
-		SELECT mode, language, question, answer
+		SELECT mode, variant, language, question, answer
 		FROM trivia_questions
 		WHERE mode = ?
 		  AND LOWER(topic) = LOWER(?)
@@ -170,7 +171,7 @@ func (s *Store) GetRecentQuestionsByTopic(topic string, limit int) ([]historical
 	questions := make([]historicalQuestion, 0, limit)
 	for rows.Next() {
 		var q historicalQuestion
-		if err := rows.Scan(&q.Mode, &q.Language, &q.Question, &q.Answer); err != nil {
+		if err := rows.Scan(&q.Mode, &q.Variant, &q.Language, &q.Question, &q.Answer); err != nil {
 			return nil, fmt.Errorf("failed to scan historical trivia question: %w", err)
 		}
 		questions = append(questions, q)
@@ -190,7 +191,7 @@ func (s *Store) GetRecentCodeQuestionsByLanguage(language string, limit int) ([]
 	}
 
 	rows, err := s.conn.Query(`
-		SELECT mode, language, question, answer
+		SELECT mode, variant, language, question, answer
 		FROM trivia_questions
 		WHERE mode = ?
 		  AND LOWER(language) = LOWER(?)
@@ -207,7 +208,7 @@ func (s *Store) GetRecentCodeQuestionsByLanguage(language string, limit int) ([]
 	questions := make([]historicalQuestion, 0, limit)
 	for rows.Next() {
 		var q historicalQuestion
-		if err := rows.Scan(&q.Mode, &q.Language, &q.Question, &q.Answer); err != nil {
+		if err := rows.Scan(&q.Mode, &q.Variant, &q.Language, &q.Question, &q.Answer); err != nil {
 			return nil, fmt.Errorf("failed to scan historical code question: %w", err)
 		}
 		questions = append(questions, q)
@@ -226,19 +227,25 @@ func (s *Store) InsertQuestion(q *StoredQuestion) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal aliases: %w", err)
 	}
+	metadataJSON, err := json.Marshal(q.Metadata)
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal metadata: %w", err)
+	}
 
 	result, err := s.conn.Exec(`
 		INSERT INTO trivia_questions (
-			mode, topic, language, question, answer, aliases_json, hint, validator_type, uniqueness_key, uniqueness_hash, question_hash, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			mode, variant, topic, language, question, answer, aliases_json, hint, metadata_json, validator_type, uniqueness_key, uniqueness_hash, question_hash, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		NormalizeMode(q.Mode),
+		NormalizeTriviaVariant(q.Variant),
 		q.Topic,
 		strings.TrimSpace(q.Language),
 		q.Question,
 		q.Answer,
 		string(aliasesJSON),
 		q.Hint,
+		string(metadataJSON),
 		normalizeValidatorType(q.ValidatorType),
 		q.UniquenessKey,
 		q.UniquenessHash,
@@ -257,12 +264,17 @@ func (s *Store) InsertQuestion(q *StoredQuestion) (int64, error) {
 }
 
 // StartRound inserts a new active round.
-func (s *Store) StartRound(channel, topic, mode, language string, questionID int64, startedAt time.Time) (int64, error) {
+func (s *Store) StartRound(channel, topic, mode, variant, language string, questionID int64, modifiers []string, startedAt time.Time) (int64, error) {
+	modifiersJSON, err := json.Marshal(modifiers)
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal round modifiers: %w", err)
+	}
+
 	result, err := s.conn.Exec(`
 		INSERT INTO trivia_rounds (
-			channel, topic, mode, language, question_id, started_at, status
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, channel, topic, NormalizeMode(mode), strings.TrimSpace(language), questionID, startedAt, "active")
+			channel, topic, mode, variant, language, question_id, started_at, modifiers_json, status
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, channel, topic, NormalizeMode(mode), NormalizeTriviaVariant(variant), strings.TrimSpace(language), questionID, startedAt, string(modifiersJSON), "active")
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert trivia round: %w", err)
 	}
@@ -329,6 +341,81 @@ func (s *Store) FinalizeRoundNoWinner(roundID int64, hintUsed bool, status strin
 		return fmt.Errorf("failed to finalize trivia round with no winner: %w", err)
 	}
 	return nil
+}
+
+// GetRecentRoundVariants returns the most recent trivia round variants for a channel.
+func (s *Store) GetRecentRoundVariants(channel string, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+
+	rows, err := s.conn.Query(`
+		SELECT variant
+		FROM trivia_rounds
+		WHERE channel = ?
+		  AND mode = ?
+		ORDER BY id DESC
+		LIMIT ?
+	`, channel, ModeTrivia, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recent round variants: %w", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	var variants []string
+	for rows.Next() {
+		var variant string
+		if err := rows.Scan(&variant); err != nil {
+			return nil, fmt.Errorf("failed to scan round variant: %w", err)
+		}
+		variants = append(variants, NormalizeTriviaVariant(variant))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed iterating round variants: %w", err)
+	}
+	return variants, nil
+}
+
+// GetWinnerStreak returns the consecutive completed-round wins immediately preceding a new win.
+func (s *Store) GetWinnerStreak(channel, nick string, limit int) (int, error) {
+	if limit <= 0 {
+		limit = 12
+	}
+
+	rows, err := s.conn.Query(`
+		SELECT winner_nick
+		FROM trivia_rounds
+		WHERE channel = ?
+		  AND status = 'completed'
+		  AND winner_nick IS NOT NULL
+		  AND winner_nick <> ''
+		ORDER BY ended_at DESC, id DESC
+		LIMIT ?
+	`, channel, limit)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query winner streak: %w", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	streak := 0
+	for rows.Next() {
+		var winner string
+		if err := rows.Scan(&winner); err != nil {
+			return 0, fmt.Errorf("failed to scan winner streak row: %w", err)
+		}
+		if !strings.EqualFold(winner, nick) {
+			break
+		}
+		streak++
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("failed iterating winner streak rows: %w", err)
+	}
+	return streak, nil
 }
 
 // GetTopScores returns top scores for a channel.

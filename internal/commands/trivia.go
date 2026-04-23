@@ -96,13 +96,13 @@ func (c *CodeCommand) Execute(ctx *Context) (*Response, error) {
 	case 0:
 		rememberedLanguage, ok := c.manager.GetLastCodeLanguage(ctx.Channel)
 		if !ok {
-			return nil, boterrors.NewInvalidSyntaxError("code", "!code <"+supportedCodeLanguagePattern()+">")
+			return nil, boterrors.NewInvalidSyntaxError("code", "!code <language>")
 		}
 		language = rememberedLanguage
 	case 1:
 		language = ctx.Args[0]
 	default:
-		return nil, boterrors.NewInvalidSyntaxError("code", "!code <"+supportedCodeLanguagePattern()+">")
+		return nil, boterrors.NewInvalidSyntaxError("code", "!code <language>")
 	}
 
 	commandCtx, cancel := context.WithTimeout(context.Background(), triviaCommandTimeout)
@@ -112,7 +112,7 @@ func (c *CodeCommand) Execute(ctx *Context) (*Response, error) {
 	if err != nil {
 		switch {
 		case stderrors.Is(err, trivia.ErrUnsupportedCodeLanguage):
-			return NewResponse("Unsupported language. Supported: " + supportedCodeLanguageSummary() + " (aliases: js, ts, py, sh, c++, c#)."), nil
+			return NewResponse("Invalid language name. Use a short language name like scala, ruby, c++, c#, common lisp, etc."), nil
 		case stderrors.Is(err, trivia.ErrRoundAlreadyActive):
 			return NewResponse("A trivia/code round is already active in this channel."), nil
 		case stderrors.Is(err, trivia.ErrTriviaDisabled):
@@ -136,7 +136,7 @@ func (c *CodeCommand) RequiredPermission() database.PermissionLevel {
 }
 
 func (c *CodeCommand) Help() string {
-	return "!code [<" + supportedCodeLanguagePattern() + ">] - Start a one-line coding quiz round (reuse last language if omitted)"
+	return "!code [language] - Start a one-line coding quiz round (reuse last language if omitted)"
 }
 
 func (c *CodeCommand) CooldownDuration() time.Duration {
@@ -309,8 +309,8 @@ func formatTriviaRules(settings trivia.ChannelSettings) string {
 	}
 
 	return fmt.Sprintf(
-		"Trivia rules: Start with !trivia <topic> or !quiz <topic> (or omit topic to reuse last). Code mode: !code <lang> (or omit language to reuse last). "+
-			"Answer by typing normally in channel (code answers must be one line). "+
+		"Trivia rules: Start with !trivia <topic> or !quiz <topic> (or omit topic to reuse last). Trivia rotates a larger built-in mix automatically, including classic, pyramid, connection, real/fake, chronology, higher/lower, odd-one-out, xword, sequence, quote-source, acronym, title-completion, category-lock, definition-duel, and closest year/number rounds. "+
+			"Code mode: !code <language> (or omit language to reuse last). Answer by typing normally in channel (code answers must be one line, and imports/helpers are assumed ready). "+
 			"Time limits: trivia %ds, code %ds. Scoring: faster answers earn more points (base %d, minimum %d). "+
 			"Difficulties: trivia %s, code %s. Hints: trivia %s, code %s. Using !hint applies a -%d point penalty. "+
 			"If nobody matches exactly, timeout may trigger strict close-answer judging. "+
@@ -325,14 +325,6 @@ func formatTriviaRules(settings trivia.ChannelSettings) string {
 		codeHintStatus,
 		settings.HintPenalty,
 	)
-}
-
-func supportedCodeLanguageSummary() string {
-	return strings.Join(trivia.SupportedCodeLanguages(), ", ")
-}
-
-func supportedCodeLanguagePattern() string {
-	return strings.Join(trivia.SupportedCodeLanguages(), "|")
 }
 
 // Top10Command implements !top10.

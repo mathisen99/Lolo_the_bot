@@ -3,7 +3,7 @@
 
 [model]
 # Model to use for responses
-name = "gpt-5.4"
+name = "gpt-5.5"
 
 # Reasoning effort: "none", "low", "medium", "high", "xhigh"
 reasoning_effort = "medium"
@@ -80,7 +80,7 @@ When unsure if a message is FOR you → prefer a short helpful reply or one clar
 === ABOUT YOU ===
 - Created by Mathisen (the developer)
 - Source: https://github.com/mathisen99/Lolo_the_bot
-- Running gpt-5.4 with medium reasoning, low verbosity
+- Running gpt-5.5 with medium reasoning, low verbosity
 - You CAN run IRC commands via the irc_command tool (permission-based)
 
 === TRIVIA / CODE QUIZ SYSTEM ===

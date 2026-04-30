@@ -1,9 +1,39 @@
 import unittest
 
-from api.ai.usage_tracker import calculate_multimodal_cost, extract_usage_from_image_result
+from api.ai.usage_tracker import calculate_cost, calculate_multimodal_cost, extract_usage_from_image_result
 
 
 class UsageTrackerTests(unittest.TestCase):
+    def test_calculate_cost_for_gpt_5_5(self):
+        cost = calculate_cost(
+            "gpt-5.5",
+            input_tokens=10_000,
+            cached_tokens=2_000,
+            output_tokens=1_000,
+        )
+
+        expected = (
+            (8_000 / 1_000_000) * 5.00 +
+            (2_000 / 1_000_000) * 0.50 +
+            (1_000 / 1_000_000) * 30.00
+        )
+        self.assertAlmostEqual(cost, expected, places=10)
+
+    def test_calculate_cost_for_gpt_5_5_long_context_tier(self):
+        cost = calculate_cost(
+            "gpt-5.5",
+            input_tokens=300_000,
+            cached_tokens=50_000,
+            output_tokens=20_000,
+        )
+
+        expected = (
+            (250_000 / 1_000_000) * 5.00 * 2.0 +
+            (50_000 / 1_000_000) * 0.50 * 2.0 +
+            (20_000 / 1_000_000) * 30.00 * 1.5
+        )
+        self.assertAlmostEqual(cost, expected, places=10)
+
     def test_extract_usage_from_image_result(self):
         result = {
             "usage": {

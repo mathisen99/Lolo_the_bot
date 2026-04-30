@@ -510,7 +510,7 @@ Edit `api/config/ai_settings.toml` to personalize your bot. Key things to custom
 **AI Behavior:**
 ```toml
 [model]
-name = "gpt-5.4"          # Main model for AI conversations
+name = "gpt-5.5"          # Main model for AI conversations
 reasoning_effort = "low"  # none/low/medium/high/xhigh - affects AI thinking depth
 verbosity = "low"         # low/medium/high - response detail level
 ```

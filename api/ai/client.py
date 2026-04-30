@@ -29,6 +29,17 @@ class AIClient:
         
         # Initialize tools
         self._setup_tools()
+
+    @staticmethod
+    def _build_input_image_content(image_url: str, detail: Optional[str] = None) -> Dict[str, Any]:
+        """Build an input_image item while preserving explicit detail choices."""
+        content = {
+            "type": "input_image",
+            "image_url": image_url,
+        }
+        if detail:
+            content["detail"] = detail
+        return content
     
     def _check_tools_used(self, response: Any, request_id: str) -> None:
         """Check which tools were used in the response and log them."""
@@ -714,10 +725,10 @@ class AIClient:
                                         "type": "message",
                                         "role": "user",
                                         "content": [
-                                            {
-                                                "type": "input_image",
-                                                "image_url": image_data['image_url']
-                                            },
+                                            self._build_input_image_content(
+                                                image_data['image_url'],
+                                                image_data.get('detail') or detail,
+                                            ),
                                             {
                                                 "type": "input_text",
                                                 "text": f"Please analyze this image. {question}"

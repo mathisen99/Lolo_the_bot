@@ -6,6 +6,7 @@ import "time"
 type Config struct {
 	Server             ServerConfig             `toml:"server"`
 	Auth               AuthConfig               `toml:"auth"`
+	Networks           []NetworkConfig          `toml:"networks"`
 	Bot                BotConfig                `toml:"bot"`
 	Limits             LimitsConfig             `toml:"limits"`
 	Database           DatabaseConfig           `toml:"database"`
@@ -14,6 +15,26 @@ type Config struct {
 	Images             ImagesConfig             `toml:"images"`
 	PhoneNotifications PhoneNotificationsConfig `toml:"phone_notifications"`
 	Trivia             TriviaConfig             `toml:"trivia"`
+}
+
+const DefaultNetworkID = "libera"
+
+// NetworkConfig contains one IRC network connection's settings.
+type NetworkConfig struct {
+	ID               string   `toml:"id"`
+	Address          string   `toml:"address"`
+	Port             int      `toml:"port"`
+	TLS              bool     `toml:"tls"`
+	Nickname         string   `toml:"nickname"`
+	AltNicknames     []string `toml:"alt_nicknames"`
+	Username         string   `toml:"username"`
+	Realname         string   `toml:"realname"`
+	MaxMessageLength int      `toml:"max_message_length"`
+	SASLUsername     string   `toml:"sasl_username"`
+	SASLPassword     string   `toml:"sasl_password"`
+	NickServPassword string   `toml:"nickserv_password"`
+	Channels         []string `toml:"channels"`
+	Required         bool     `toml:"required"`
 }
 
 // ImagesConfig contains image download settings
@@ -44,6 +65,52 @@ type AuthConfig struct {
 	SASLUsername     string `toml:"sasl_username"`
 	SASLPassword     string `toml:"sasl_password"`
 	NickServPassword string `toml:"nickserv_password"`
+}
+
+// Server returns this network's server settings in the legacy shape used by
+// the IRC runtime.
+func (n NetworkConfig) Server() ServerConfig {
+	return ServerConfig{
+		Address:          n.Address,
+		Port:             n.Port,
+		TLS:              n.TLS,
+		Nickname:         n.Nickname,
+		AltNicknames:     n.AltNicknames,
+		Username:         n.Username,
+		Realname:         n.Realname,
+		MaxMessageLength: n.MaxMessageLength,
+	}
+}
+
+// Auth returns this network's auth settings in the legacy shape used by the
+// IRC authenticator.
+func (n NetworkConfig) Auth() AuthConfig {
+	return AuthConfig{
+		SASLUsername:     n.SASLUsername,
+		SASLPassword:     n.SASLPassword,
+		NickServPassword: n.NickServPassword,
+	}
+}
+
+// ConfigForNetwork returns a shallow config clone with Server/Auth/Bot.Channels
+// populated for the selected network. This keeps the existing IRC runtime
+// components usable while the top-level config supports multiple networks.
+func (c *Config) ConfigForNetwork(n NetworkConfig) *Config {
+	clone := *c
+	clone.Server = n.Server()
+	clone.Auth = n.Auth()
+	clone.Bot.Channels = append([]string(nil), n.Channels...)
+	return &clone
+}
+
+// EffectiveNetworks returns the normalized network list. Load/validate fills
+// this list, but this helper also preserves safe behavior for manually-created
+// Config values in tests.
+func (c *Config) EffectiveNetworks() []NetworkConfig {
+	if len(c.Networks) > 0 {
+		return c.Networks
+	}
+	return []NetworkConfig{legacyNetworkFromConfig(c)}
 }
 
 // BotConfig contains bot behavior settings

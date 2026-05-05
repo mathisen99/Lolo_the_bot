@@ -460,6 +460,30 @@ sasl_username = "YourBotName"   # For registered nicks (optional)
 sasl_password = ""              # SASL password (optional)
 nickserv_password = ""          # NickServ password (optional)
 
+[[networks]]
+id = "libera"
+address = "irc.libera.chat"
+port = 6697
+tls = true
+nickname = "YourBotName"
+username = "yourbot"
+realname = "Your IRC Bot"
+max_message_length = 400
+channels = ["#yourchannel"]
+required = true
+
+[[networks]]
+id = "rizon"
+address = "irc.rizon.net"
+port = 6697
+tls = true
+nickname = "YourBotName"
+username = "yourbot"
+realname = "Your IRC Bot"
+max_message_length = 400
+channels = ["#mathizen"]
+required = false
+
 [bot]
 command_prefix = "!"            # Command prefix (e.g., !help)
 channels = ["#yourchannel"]     # Channels to join on startup
@@ -484,6 +508,10 @@ default_hint_penalty = 20
 default_difficulty = "medium"   # easy/medium/hard
 default_code_difficulty = "medium"   # easy/medium/hard
 ```
+
+The legacy `[server]`, `[auth]`, and `[bot].channels` fields still load as a single `libera` network when `[[networks]]` is absent.
+
+Rizon owner authentication is intentionally stricter than Libera. On Rizon the bot must ignore hostmask, vHost, ident, and nickname-only identity for elevated permissions. Owner is granted only when the sender nick is exactly `Mathisen` and a fresh `NickServ STATUS Mathisen` reply is exactly `Mathisen 3`; statuses `0`, `1`, `2`, malformed replies, timeouts, and service failures are denied.
 
 ### Step 5: Initialize Semantic Search (Optional)
 

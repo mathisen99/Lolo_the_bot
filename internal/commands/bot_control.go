@@ -155,7 +155,7 @@ func (c *ChannelEnableCommand) Execute(ctx *Context) (*Response, error) {
 	}
 
 	// Set channel state to enabled (Requirement 18.4, 20.4)
-	err := c.db.SetChannelState(channel, true)
+	err := c.db.SetChannelStateForNetwork(ctx.Network, channel, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to enable channel: %w", err)
 	}
@@ -224,7 +224,7 @@ func (c *ChannelDisableCommand) Execute(ctx *Context) (*Response, error) {
 	}
 
 	// Set channel state to disabled (Requirement 18.4, 20.2)
-	err := c.db.SetChannelState(channel, false)
+	err := c.db.SetChannelStateForNetwork(ctx.Network, channel, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to disable channel: %w", err)
 	}

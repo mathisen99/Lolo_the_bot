@@ -20,6 +20,43 @@
   # NickServ authentication (alternative to SASL)
   nickserv_password = ""  # Leave empty if not using NickServ
 
+[[networks]]
+  id = "libera"
+  address = "irc.libera.chat"
+  port = 6697
+  tls = true
+  nickname = "YourBotName"
+  alt_nicknames = ["YourBotName_", "YourBotName__"]
+  username = "yourbot"
+  realname = "Your IRC Bot"
+  max_message_length = 400
+  sasl_username = "YourBotName"
+  sasl_password = ""
+  nickserv_password = ""
+  channels = ["#yourchannel"]
+  required = true
+
+[[networks]]
+  id = "rizon"
+  address = "irc.rizon.net"
+  port = 6697
+  tls = true
+  nickname = "YourBotName"
+  alt_nicknames = ["YourBotName_", "YourBotName__"]
+  username = "yourbot"
+  realname = "Your IRC Bot"
+  max_message_length = 400
+  sasl_username = "YourBotName"
+  sasl_password = ""
+  nickserv_password = ""
+  channels = ["#mathizen"]
+  required = false
+
+# Rizon owner authentication policy:
+# - Never trust hostmask, vHost, ident, or nickname alone for owner identity.
+# - Owner is only nick == "Mathisen" plus NickServ STATUS Mathisen returning exactly "Mathisen 3".
+# - Status 0, 1, 2, malformed replies, timeouts, and service failures are denied.
+
 [bot]
   command_prefix = "!"
   channels = ["#yourchannel"]  # Channels to join on startup

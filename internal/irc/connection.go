@@ -32,6 +32,7 @@ type ChannelUserTracker interface {
 	OnNamesReply(channel string, names []string)
 	OnNamesEnd(channel string)
 	OnJoin(channel, nick string, isSelf bool)
+	OnChannelMessage(channel, nick string)
 	OnPart(channel, nick string, isSelf bool)
 	OnQuit(nick string)
 	OnKick(channel, nick string, isSelf bool)
@@ -42,11 +43,12 @@ type ChannelUserTracker interface {
 
 // ConnectionManager manages the IRC connection lifecycle
 type ConnectionManager struct {
-	client *Client
-	auth   *Authenticator
-	config *config.Config
-	logger output.Logger
-	db     *database.DB
+	client  *Client
+	auth    *Authenticator
+	config  *config.Config
+	network string
+	logger  output.Logger
+	db      *database.DB
 
 	registered         bool
 	currentNick        string
@@ -71,6 +73,14 @@ type ConnectionManager struct {
 
 // NewConnectionManager creates a new connection manager
 func NewConnectionManager(cfg *config.Config, logger output.Logger, db *database.DB, userManager *user.Manager) *ConnectionManager {
+	return NewConnectionManagerForNetwork(config.DefaultNetworkID, cfg, logger, db, userManager)
+}
+
+// NewConnectionManagerForNetwork creates a connection manager bound to one IRC network id.
+func NewConnectionManagerForNetwork(network string, cfg *config.Config, logger output.Logger, db *database.DB, userManager *user.Manager) *ConnectionManager {
+	if network == "" {
+		network = config.DefaultNetworkID
+	}
 	client := NewClient(cfg, logger)
 	auth := NewAuthenticator(cfg, logger, client)
 
@@ -78,6 +88,7 @@ func NewConnectionManager(cfg *config.Config, logger output.Logger, db *database
 		client:             client,
 		auth:               auth,
 		config:             cfg,
+		network:            network,
 		logger:             logger,
 		db:                 db,
 		currentNick:        cfg.Server.Nickname,
@@ -97,7 +108,7 @@ func NewConnectionManager(cfg *config.Config, logger output.Logger, db *database
 	cm.kickManager = NewKickManager(logger)
 
 	// Create channel manager
-	cm.channelManager = NewChannelManager(db, logger, client, cfg.Bot.Channels)
+	cm.channelManager = NewChannelManager(db, logger, client, cm.network, cfg.Bot.Channels)
 
 	// Create CTCP handler (version 1.0.0 for now, can be made configurable later)
 	cm.ctcpHandler = NewCTCPHandler(client, logger, "1.0.0")
@@ -327,21 +338,21 @@ func (cm *ConnectionManager) logEventForTrackedChannels(eventType, nick, hostmas
 		return
 	}
 
-	channels, err := cm.db.FindUserChannels(nick)
+	channels, err := cm.db.FindUserChannelsForNetwork(cm.network, nick)
 	if err != nil {
 		cm.logger.Warning("Failed to find channels for %s event (%s): %v", eventType, nick, err)
 		channels = nil
 	}
 
 	if len(channels) == 0 {
-		if err := cm.db.LogEvent(eventType, "", nick, hostmask, content); err != nil {
+		if err := cm.db.LogEventForNetwork(cm.network, eventType, "", nick, hostmask, content); err != nil {
 			cm.logger.Warning("Failed to log %s event: %v", strings.ToLower(eventType), err)
 		}
 		return
 	}
 
 	for _, channel := range channels {
-		if err := cm.db.LogEvent(eventType, channel, nick, hostmask, content); err != nil {
+		if err := cm.db.LogEventForNetwork(cm.network, eventType, channel, nick, hostmask, content); err != nil {
 			cm.logger.Warning("Failed to log %s event for %s in %s: %v", strings.ToLower(eventType), nick, channel, err)
 		}
 	}
@@ -371,12 +382,12 @@ func (cm *ConnectionManager) handleNickChange(msg *irc.Message) {
 		cm.logNickChangeEvent(oldNick, newNick, hostmask)
 
 		// Check if it's our own nick change
-		if oldNick == cm.currentNick {
+		if strings.EqualFold(oldNick, cm.currentNick) {
 			cm.currentNick = newNick
 			cm.logger.Success("Nickname changed to: %s", newNick)
 
 			// If we successfully got the primary nickname, reset state
-			if newNick == cm.config.Server.Nickname {
+			if strings.EqualFold(newNick, cm.config.Server.Nickname) {
 				cm.altNickIndex = -1
 				cm.underscoreCount = 0
 				cm.primaryNickReclaim = false
@@ -387,7 +398,7 @@ func (cm *ConnectionManager) handleNickChange(msg *irc.Message) {
 			if cm.channelUserTracker != nil {
 				cm.channelUserTracker.OnNickChange(oldNick, newNick, true)
 			}
-		} else if oldNick == cm.config.Server.Nickname && newNick != cm.currentNick {
+		} else if strings.EqualFold(oldNick, cm.config.Server.Nickname) && !strings.EqualFold(newNick, cm.currentNick) {
 			// Someone else changed from our primary nickname - try to reclaim it
 			cm.attemptPrimaryNickReclaim()
 
@@ -422,7 +433,7 @@ func (cm *ConnectionManager) handleQuit(msg *irc.Message) {
 	}
 
 	// If the user who quit had our primary nickname, try to reclaim it
-	if nick == cm.config.Server.Nickname && cm.currentNick != cm.config.Server.Nickname {
+	if strings.EqualFold(nick, cm.config.Server.Nickname) && !strings.EqualFold(cm.currentNick, cm.config.Server.Nickname) {
 		cm.attemptPrimaryNickReclaim()
 	}
 }
@@ -430,7 +441,7 @@ func (cm *ConnectionManager) handleQuit(msg *irc.Message) {
 // attemptPrimaryNickReclaim attempts to reclaim the primary nickname
 func (cm *ConnectionManager) attemptPrimaryNickReclaim() {
 	// Only attempt if we're not already using the primary nickname
-	if cm.currentNick == cm.config.Server.Nickname {
+	if strings.EqualFold(cm.currentNick, cm.config.Server.Nickname) {
 		return
 	}
 
@@ -459,7 +470,7 @@ func (cm *ConnectionManager) handleJoin(msg *irc.Message) {
 		nick := msg.Name
 		hostmask := msg.User + "@" + msg.Host
 
-		if nick == cm.currentNick {
+		if strings.EqualFold(nick, cm.currentNick) {
 			// Notify channel manager
 			cm.channelManager.OnJoin(channel)
 
@@ -475,7 +486,7 @@ func (cm *ConnectionManager) handleJoin(msg *irc.Message) {
 			// Log the join event
 			if cm.db != nil {
 				content := fmt.Sprintf("%s has joined %s", nick, channel)
-				if err := cm.db.LogEvent(database.EventTypeJoin, channel, nick, hostmask, content); err != nil {
+				if err := cm.db.LogEventForNetwork(cm.network, database.EventTypeJoin, channel, nick, hostmask, content); err != nil {
 					cm.logger.Warning("Failed to log join event: %v", err)
 				}
 			}
@@ -505,7 +516,7 @@ func (cm *ConnectionManager) handlePart(msg *irc.Message) {
 		hostmask := msg.User + "@" + msg.Host
 		reason := msg.Trailing()
 
-		if nick == cm.currentNick {
+		if strings.EqualFold(nick, cm.currentNick) {
 			// Notify channel manager
 			cm.channelManager.OnPart(channel)
 
@@ -520,7 +531,7 @@ func (cm *ConnectionManager) handlePart(msg *irc.Message) {
 				if reason != "" {
 					content = fmt.Sprintf("%s has left %s (%s)", nick, channel, reason)
 				}
-				if err := cm.db.LogEvent(database.EventTypePart, channel, nick, hostmask, content); err != nil {
+				if err := cm.db.LogEventForNetwork(cm.network, database.EventTypePart, channel, nick, hostmask, content); err != nil {
 					cm.logger.Warning("Failed to log part event: %v", err)
 				}
 			}
@@ -550,12 +561,12 @@ func (cm *ConnectionManager) handleKick(msg *irc.Message) {
 			if reason != "" {
 				content = fmt.Sprintf("%s was kicked from %s by %s (%s)", kicked, channel, kicker, reason)
 			}
-			if err := cm.db.LogEvent(database.EventTypeKick, channel, kicked, kickerHostmask, content); err != nil {
+			if err := cm.db.LogEventForNetwork(cm.network, database.EventTypeKick, channel, kicked, kickerHostmask, content); err != nil {
 				cm.logger.Warning("Failed to log kick event: %v", err)
 			}
 		}
 
-		if kicked == cm.currentNick {
+		if strings.EqualFold(kicked, cm.currentNick) {
 			// Notify channel manager
 			cm.channelManager.OnKick(channel)
 
@@ -642,7 +653,11 @@ func (cm *ConnectionManager) handlePrivMsg(msg *irc.Message) {
 		nick := msg.Name
 		hostmask := msg.User + "@" + msg.Host
 
-		isPM := target == cm.currentNick
+		isPM := strings.EqualFold(target, cm.currentNick)
+
+		if !isPM && cm.channelUserTracker != nil {
+			cm.channelUserTracker.OnChannelMessage(target, nick)
+		}
 
 		// Don't log here - let the message handler do it to avoid duplicates
 		// The privMsgHandler callback will trigger HandleMessage which logs
@@ -880,7 +895,7 @@ func (cm *ConnectionManager) handleMode(msg *irc.Message) {
 					} else {
 						content = fmt.Sprintf("%s sets mode -%s on %s", setter, modeChar, nick)
 					}
-					if err := cm.db.LogEvent(database.EventTypeMode, channel, nick, setterHostmask, content); err != nil {
+					if err := cm.db.LogEventForNetwork(cm.network, database.EventTypeMode, channel, nick, setterHostmask, content); err != nil {
 						cm.logger.Warning("Failed to log mode event: %v", err)
 					}
 				}
@@ -914,7 +929,7 @@ func (cm *ConnectionManager) handleMode(msg *irc.Message) {
 						content = fmt.Sprintf("%s removes ban -b %s", setter, mask)
 						eventType = database.EventTypeUnban
 					}
-					if err := cm.db.LogEvent(eventType, channel, mask, setterHostmask, content); err != nil {
+					if err := cm.db.LogEventForNetwork(cm.network, eventType, channel, mask, setterHostmask, content); err != nil {
 						cm.logger.Warning("Failed to log ban event: %v", err)
 					}
 				}
@@ -953,7 +968,7 @@ func (cm *ConnectionManager) handleTopicChange(msg *irc.Message) {
 	// Log the topic change event
 	if cm.db != nil {
 		content := fmt.Sprintf("%s changed topic to: %s", setter, topic)
-		if err := cm.db.LogEvent(database.EventTypeTopic, channel, setter, setterHostmask, content); err != nil {
+		if err := cm.db.LogEventForNetwork(cm.network, database.EventTypeTopic, channel, setter, setterHostmask, content); err != nil {
 			cm.logger.Warning("Failed to log topic event: %v", err)
 		}
 	}

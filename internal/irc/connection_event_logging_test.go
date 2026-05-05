@@ -92,6 +92,50 @@ func latestEventContent(t *testing.T, db *database.DB, eventType, channel string
 	return content
 }
 
+func TestHandleJoinDetectsSelfCaseInsensitively(t *testing.T) {
+	cm, db, cleanup := newTestConnectionManager(t)
+	defer cleanup()
+
+	cm.handleJoin(&irc.Message{
+		Prefix: &irc.Prefix{Name: "lolo", User: "bot", Host: "example.test"},
+		Params: []string{"#robots"},
+	})
+
+	status, err := db.GetBotChannelStatus("#robots")
+	if err != nil {
+		t.Fatalf("GetBotChannelStatus failed: %v", err)
+	}
+	if status == nil || !status.IsJoined {
+		t.Fatal("expected case-insensitive self JOIN to mark bot joined")
+	}
+}
+
+func TestHandlePrivMsgRefreshesChannelState(t *testing.T) {
+	cm, db, cleanup := newTestConnectionManager(t)
+	defer cleanup()
+
+	cm.handlePrivMsg(&irc.Message{
+		Prefix: &irc.Prefix{Name: "alice", User: "alice", Host: "example.test"},
+		Params: []string{"#robots", "hello"},
+	})
+
+	status, err := db.GetBotChannelStatus("#robots")
+	if err != nil {
+		t.Fatalf("GetBotChannelStatus failed: %v", err)
+	}
+	if status == nil || !status.IsJoined {
+		t.Fatal("expected channel PRIVMSG to mark bot joined")
+	}
+
+	user, err := db.GetChannelUser("#robots", "alice")
+	if err != nil {
+		t.Fatalf("GetChannelUser failed: %v", err)
+	}
+	if user == nil {
+		t.Fatal("expected channel PRIVMSG speaker to be tracked")
+	}
+}
+
 func TestHandleNickChangeLogsPerTrackedChannel(t *testing.T) {
 	cm, db, cleanup := newTestConnectionManager(t)
 	defer cleanup()

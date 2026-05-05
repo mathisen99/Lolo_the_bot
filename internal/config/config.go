@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -28,6 +29,8 @@ func Load(path string) (*Config, error) {
 	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse configuration file: %w", err)
 	}
+
+	normalizeNetworks(&cfg)
 
 	// Validate the configuration
 	if err := validate(&cfg); err != nil {
@@ -112,6 +115,24 @@ func DefaultConfig() *Config {
 			SASLPassword:     "",
 			NickServPassword: "",
 		},
+		Networks: []NetworkConfig{
+			{
+				ID:               DefaultNetworkID,
+				Address:          "irc.libera.chat",
+				Port:             6697,
+				TLS:              true,
+				Nickname:         "Lolo",
+				AltNicknames:     []string{"Lolo_", "Lolo__"},
+				Username:         "lolo",
+				Realname:         "Lolo IRC Bot",
+				MaxMessageLength: 400,
+				SASLUsername:     "Lolo",
+				SASLPassword:     "",
+				NickServPassword: "",
+				Channels:         []string{"#yourchannel"},
+				Required:         true,
+			},
+		},
 		Bot: BotConfig{
 			CommandPrefix: "!",
 			Channels:      []string{"#yourchannel"},
@@ -170,28 +191,72 @@ func DefaultConfig() *Config {
 	}
 }
 
+func normalizeNetworks(cfg *Config) {
+	if len(cfg.Networks) == 0 {
+		cfg.Networks = []NetworkConfig{legacyNetworkFromConfig(cfg)}
+		return
+	}
+
+	for i := range cfg.Networks {
+		n := &cfg.Networks[i]
+		n.ID = normalizeNetworkID(n.ID)
+		if n.Port == 0 {
+			n.Port = 6697
+		}
+		if n.MaxMessageLength == 0 {
+			if cfg.Server.MaxMessageLength > 0 {
+				n.MaxMessageLength = cfg.Server.MaxMessageLength
+			} else {
+				n.MaxMessageLength = 400
+			}
+		}
+		if n.Nickname == "" {
+			n.Nickname = cfg.Server.Nickname
+		}
+		if len(n.AltNicknames) == 0 {
+			n.AltNicknames = cfg.Server.AltNicknames
+		}
+		if n.Username == "" {
+			n.Username = cfg.Server.Username
+		}
+		if n.Realname == "" {
+			n.Realname = cfg.Server.Realname
+		}
+		if n.SASLUsername == "" {
+			n.SASLUsername = cfg.Auth.SASLUsername
+		}
+	}
+}
+
+func legacyNetworkFromConfig(cfg *Config) NetworkConfig {
+	return NetworkConfig{
+		ID:               DefaultNetworkID,
+		Address:          cfg.Server.Address,
+		Port:             cfg.Server.Port,
+		TLS:              cfg.Server.TLS,
+		Nickname:         cfg.Server.Nickname,
+		AltNicknames:     append([]string(nil), cfg.Server.AltNicknames...),
+		Username:         cfg.Server.Username,
+		Realname:         cfg.Server.Realname,
+		MaxMessageLength: cfg.Server.MaxMessageLength,
+		SASLUsername:     cfg.Auth.SASLUsername,
+		SASLPassword:     cfg.Auth.SASLPassword,
+		NickServPassword: cfg.Auth.NickServPassword,
+		Channels:         append([]string(nil), cfg.Bot.Channels...),
+		Required:         true,
+	}
+}
+
+func normalizeNetworkID(id string) string {
+	return strings.ToLower(strings.TrimSpace(id))
+}
+
 // validate checks that all required configuration fields are present and valid
 func validate(cfg *Config) error {
 	applyTriviaDefaults(cfg)
 
-	// Validate server settings
-	if cfg.Server.Address == "" {
-		return fmt.Errorf("server.address is required")
-	}
-	if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
-		return fmt.Errorf("server.port must be between 1 and 65535, got %d", cfg.Server.Port)
-	}
-	if cfg.Server.Nickname == "" {
-		return fmt.Errorf("server.nickname is required")
-	}
-	if cfg.Server.Username == "" {
-		return fmt.Errorf("server.username is required")
-	}
-	if cfg.Server.Realname == "" {
-		return fmt.Errorf("server.realname is required")
-	}
-	if cfg.Server.MaxMessageLength <= 0 {
-		return fmt.Errorf("server.max_message_length must be positive, got %d", cfg.Server.MaxMessageLength)
+	if err := validateNetworks(cfg.Networks); err != nil {
+		return err
 	}
 
 	// Validate bot settings
@@ -319,6 +384,43 @@ func validate(cfg *Config) error {
 		}
 	}
 
+	return nil
+}
+
+func validateNetworks(networks []NetworkConfig) error {
+	if len(networks) == 0 {
+		return fmt.Errorf("at least one IRC network is required")
+	}
+
+	seen := make(map[string]struct{}, len(networks))
+	for i, n := range networks {
+		label := fmt.Sprintf("networks[%d]", i)
+		if n.ID == "" {
+			return fmt.Errorf("%s.id is required", label)
+		}
+		if _, exists := seen[n.ID]; exists {
+			return fmt.Errorf("duplicate network id %q", n.ID)
+		}
+		seen[n.ID] = struct{}{}
+		if n.Address == "" {
+			return fmt.Errorf("%s.address is required", label)
+		}
+		if n.Port <= 0 || n.Port > 65535 {
+			return fmt.Errorf("%s.port must be between 1 and 65535, got %d", label, n.Port)
+		}
+		if n.Nickname == "" {
+			return fmt.Errorf("%s.nickname is required", label)
+		}
+		if n.Username == "" {
+			return fmt.Errorf("%s.username is required", label)
+		}
+		if n.Realname == "" {
+			return fmt.Errorf("%s.realname is required", label)
+		}
+		if n.MaxMessageLength <= 0 {
+			return fmt.Errorf("%s.max_message_length must be positive, got %d", label, n.MaxMessageLength)
+		}
+	}
 	return nil
 }
 

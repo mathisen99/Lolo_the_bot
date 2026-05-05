@@ -13,7 +13,8 @@ from .base import Tool
 from api.utils.output import log_info, log_error, log_warning, log_success
 
 
-# Commands that normal users can execute (informational only)
+# Commands that normal users can execute (informational only).
+# Bulk nick-list commands are denied separately even though they are read-only.
 NORMAL_USER_COMMANDS = {
     # User info
     "whois", "whowas",
@@ -27,8 +28,25 @@ NORMAL_USER_COMMANDS = {
     "version", "time",
     # Bot channel/user database queries (anyone can ask)
     "bot_status", "channel_info", "channel_list", "user_status",
-    "channel_ops", "channel_voiced", "channel_topic", "find_user",
-    "channel_users", "channel_regular_users", "search_users",
+    "channel_topic", "find_user",
+}
+
+CHANNEL_FIRST_COMMANDS = {
+    "bot_status", "channel_info", "channel_ops", "channel_voiced",
+    "channel_topic", "channel_users", "channel_regular_users",
+}
+
+CHANNEL_FIRST_WITH_NICK_COMMANDS = {
+    "user_status",
+}
+
+CHANNEL_OPTIONAL_SECOND_COMMANDS = {
+    "search_users",
+}
+
+NORMAL_USER_BULK_NICK_COMMANDS = {
+    "channel_users", "channel_regular_users", "channel_ops",
+    "channel_voiced", "search_users",
 }
 
 # Commands that require admin or owner
@@ -95,10 +113,12 @@ NORMAL USERS can use:
 - channel_info <channel> - Get channel user/op/voice counts and topic
 - channel_list - List all channels the bot is in with user counts
 - user_status <channel> <nick> - Check if a user has op/voice in a channel
-- channel_ops <channel> - List all ops in a channel
-- channel_voiced <channel> - List all voiced users in a channel
 - channel_topic <channel> - Get just the topic of a channel
 - find_user <nick> - Find which channels a user is in
+
+ADMIN/OWNER can also use bulk nick lookup commands:
+- channel_ops <channel> - List all ops in a channel
+- channel_voiced <channel> - List all voiced users in a channel
 - channel_users <channel> - List ALL users in a channel
 - channel_regular_users <channel> - List users WITHOUT op/halfop/voice (regular users)
 - search_users <pattern> [channel] - Search users by nick pattern (* as wildcard)
@@ -166,6 +186,10 @@ Examples:
                     "channel": {
                         "type": "string",
                         "description": "Target channel (optional, some commands infer from context)"
+                    },
+                    "network": {
+                        "type": "string",
+                        "description": "IRC network id. Defaults to the current network."
                     }
                 },
                 "required": ["command"],
@@ -196,7 +220,7 @@ Examples:
         if permission_level == "normal":
             if command_lower in NORMAL_USER_COMMANDS:
                 return True, ""
-            return False, f"Command '{command}' requires admin privileges. You can use: whois, ns_info, cs_info, alis_search, version, time"
+            return False, f"Command '{command}' requires admin privileges. You can use: whois, ns_info, cs_info, alis_search, version, time, channel_info, user_status, find_user"
         
         # Ignored users can't do anything
         return False, "You don't have permission to use IRC commands."
@@ -205,7 +229,10 @@ Examples:
         self,
         command: str,
         args: Optional[List[str]] = None,
+        network: Optional[str] = None,
         channel: Optional[str] = None,
+        _current_network: str = "libera",
+        _current_channel: Optional[str] = None,
         permission_level: str = "normal",
         **kwargs
     ) -> str:
@@ -221,7 +248,36 @@ Examples:
         Returns:
             Command output or error message
         """
-        args = args or []
+        args = list(args or [])
+        command_lower = command.lower().strip()
+        requested_network = self._normalize_network(network or _current_network)
+        current_network = self._normalize_network(_current_network)
+        current_channel = self._normalize_channel(_current_channel or channel)
+
+        requested_channel = self._apply_current_channel_default(
+            command_lower,
+            args,
+            self._normalize_channel(channel),
+            current_channel,
+        )
+
+        if permission_level == "normal":
+            if command_lower in NORMAL_USER_BULK_NICK_COMMANDS:
+                return (
+                    "Permission denied: bulk nick lookups and multi-user lists "
+                    "are restricted to bot admins/owner. You can ask about one "
+                    "specific nick or ask for aggregate counts."
+                )
+            if requested_network != current_network:
+                return (
+                    "Permission denied: normal users can only run live IRC queries "
+                    f"on the current network ({current_network})."
+                )
+            if requested_channel and current_channel and requested_channel != current_channel:
+                return (
+                    "Permission denied: normal users can only run live IRC channel "
+                    f"queries for the current channel ({current_channel})."
+                )
         
         # Check permission
         allowed, error_msg = self._check_permission(command, permission_level)
@@ -229,7 +285,10 @@ Examples:
             log_warning(f"IRC command '{command}' denied for permission level '{permission_level}'")
             return f"Permission denied: {error_msg}"
         
-        log_info(f"Executing IRC command: {command} {args} (permission: {permission_level})")
+        log_info(
+            f"Executing IRC command: {command} {args} "
+            f"(network: {requested_network}, permission: {permission_level})"
+        )
         
         try:
             # Call Go bot's IRC execute endpoint
@@ -238,6 +297,7 @@ Examples:
                 json={
                     "command": command,
                     "args": args,
+                    "network": requested_network,
                     "channel": channel,
                 },
                 timeout=self.timeout
@@ -266,3 +326,42 @@ Examples:
         except Exception as e:
             log_error(f"IRC command error: {e}")
             return f"Error executing IRC command: {str(e)}"
+
+    def _apply_current_channel_default(
+        self,
+        command: str,
+        args: List[str],
+        explicit_channel: Optional[str],
+        current_channel: Optional[str],
+    ) -> Optional[str]:
+        """Default current-channel IRC DB commands without hiding explicit args."""
+        fallback = explicit_channel or current_channel
+
+        if command in CHANNEL_FIRST_COMMANDS:
+            if not args and fallback:
+                args.insert(0, fallback)
+            return self._normalize_channel(args[0]) if args else fallback
+
+        if command in CHANNEL_FIRST_WITH_NICK_COMMANDS:
+            if len(args) == 1 and fallback:
+                args.insert(0, fallback)
+            return self._normalize_channel(args[0]) if len(args) >= 2 else fallback
+
+        if command in CHANNEL_OPTIONAL_SECOND_COMMANDS:
+            if len(args) >= 2:
+                return self._normalize_channel(args[1])
+            return self._normalize_channel(explicit_channel)
+
+        return self._normalize_channel(explicit_channel)
+
+    @staticmethod
+    def _normalize_network(network: Optional[str]) -> str:
+        network = (network or "libera").strip().lower()
+        return network or "libera"
+
+    @staticmethod
+    def _normalize_channel(channel: Optional[str]) -> Optional[str]:
+        channel = (channel or "").strip()
+        if not channel:
+            return None
+        return channel.lower()

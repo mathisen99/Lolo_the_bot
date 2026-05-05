@@ -53,19 +53,19 @@ func (c *PrefixCommand) Execute(ctx *Context) (*Response, error) {
 	}
 
 	if arg == defaultPrefix {
-		if err := c.db.ClearChannelCommandPrefix(ctx.Channel); err != nil {
+		if err := c.db.ClearChannelCommandPrefixForNetwork(ctx.Network, ctx.Channel); err != nil {
 			return nil, fmt.Errorf("failed to clear channel command prefix: %w", err)
 		}
 		c.dispatcher.ClearChannelPrefix(ctx.Channel)
-		c.logAudit(ctx, "channel_prefix_reset", fmt.Sprintf("channel=%s", ctx.Channel))
+		c.logAudit(ctx, "channel_prefix_reset", fmt.Sprintf("network=%s channel=%s", ctx.Network, ctx.Channel))
 		return NewResponse(fmt.Sprintf("Command prefix for %s reset to %q. Use %sprefix <symbol> to set a custom prefix again.", ctx.Channel, defaultPrefix, defaultPrefix)), nil
 	}
 
-	if err := c.db.SetChannelCommandPrefix(ctx.Channel, arg); err != nil {
+	if err := c.db.SetChannelCommandPrefixForNetwork(ctx.Network, ctx.Channel, arg); err != nil {
 		return nil, fmt.Errorf("failed to set channel command prefix: %w", err)
 	}
 	c.dispatcher.SetChannelPrefix(ctx.Channel, arg)
-	c.logAudit(ctx, "channel_prefix_set", fmt.Sprintf("channel=%s prefix=%s", ctx.Channel, arg))
+	c.logAudit(ctx, "channel_prefix_set", fmt.Sprintf("network=%s channel=%s prefix=%s", ctx.Network, ctx.Channel, arg))
 
 	return NewResponse(fmt.Sprintf("Command prefix for %s set to %q. Use %sprefix %s to reset it.", ctx.Channel, arg, arg, defaultPrefix)), nil
 }

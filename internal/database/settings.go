@@ -8,6 +8,7 @@ import (
 
 // ChannelState represents the enabled/disabled state of a channel
 type ChannelState struct {
+	Network       string
 	Channel       string
 	Enabled       bool
 	CommandPrefix string
@@ -17,9 +18,15 @@ type ChannelState struct {
 
 // GetChannelState retrieves the enabled/disabled state for a channel
 func (db *DB) GetChannelState(channel string) (bool, error) {
+	return db.GetChannelStateForNetwork(DefaultNetwork, channel)
+}
+
+// GetChannelStateForNetwork retrieves the enabled/disabled state for a channel on a network.
+func (db *DB) GetChannelStateForNetwork(network, channel string) (bool, error) {
+	network = normalizeNetwork(network)
 	var enabled bool
-	query := `SELECT enabled FROM channel_states WHERE channel = ?`
-	err := db.conn.QueryRow(query, channel).Scan(&enabled)
+	query := `SELECT enabled FROM channel_states WHERE network = ? AND channel = ?`
+	err := db.conn.QueryRow(query, network, channel).Scan(&enabled)
 	if err == sql.ErrNoRows {
 		// Default to enabled if not found
 		return true, nil
@@ -32,14 +39,20 @@ func (db *DB) GetChannelState(channel string) (bool, error) {
 
 // SetChannelState sets the enabled/disabled state for a channel
 func (db *DB) SetChannelState(channel string, enabled bool) error {
+	return db.SetChannelStateForNetwork(DefaultNetwork, channel, enabled)
+}
+
+// SetChannelStateForNetwork sets the enabled/disabled state for a network channel.
+func (db *DB) SetChannelStateForNetwork(network, channel string, enabled bool) error {
+	network = normalizeNetwork(network)
 	query := `
-		INSERT INTO channel_states (channel, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(channel) DO UPDATE SET
+		INSERT INTO channel_states (network, channel, enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(network, channel) DO UPDATE SET
 			enabled = excluded.enabled,
 			updated_at = excluded.updated_at
 	`
-	_, err := db.conn.Exec(query, channel, enabled, time.Now(), time.Now())
+	_, err := db.conn.Exec(query, network, channel, enabled, time.Now(), time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to set channel state: %w", err)
 	}
@@ -48,12 +61,19 @@ func (db *DB) SetChannelState(channel string, enabled bool) error {
 
 // ListChannelStates returns all channel states
 func (db *DB) ListChannelStates() ([]*ChannelState, error) {
+	return db.ListChannelStatesForNetwork(DefaultNetwork)
+}
+
+// ListChannelStatesForNetwork returns all channel states for a network.
+func (db *DB) ListChannelStatesForNetwork(network string) ([]*ChannelState, error) {
+	network = normalizeNetwork(network)
 	query := `
-		SELECT channel, enabled, COALESCE(command_prefix, ''), created_at, updated_at
+		SELECT network, channel, enabled, COALESCE(command_prefix, ''), created_at, updated_at
 		FROM channel_states
+		WHERE network = ?
 		ORDER BY channel ASC
 	`
-	rows, err := db.conn.Query(query)
+	rows, err := db.conn.Query(query, network)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list channel states: %w", err)
 	}
@@ -65,6 +85,7 @@ func (db *DB) ListChannelStates() ([]*ChannelState, error) {
 	for rows.Next() {
 		state := &ChannelState{}
 		err := rows.Scan(
+			&state.Network,
 			&state.Channel,
 			&state.Enabled,
 			&state.CommandPrefix,
@@ -87,9 +108,15 @@ func (db *DB) ListChannelStates() ([]*ChannelState, error) {
 // GetChannelCommandPrefix retrieves a channel-specific command prefix override.
 // Returns an empty string when the channel uses the default prefix.
 func (db *DB) GetChannelCommandPrefix(channel string) (string, error) {
+	return db.GetChannelCommandPrefixForNetwork(DefaultNetwork, channel)
+}
+
+// GetChannelCommandPrefixForNetwork retrieves a network/channel-specific command prefix override.
+func (db *DB) GetChannelCommandPrefixForNetwork(network, channel string) (string, error) {
+	network = normalizeNetwork(network)
 	var prefix sql.NullString
-	query := `SELECT command_prefix FROM channel_states WHERE channel = ?`
-	err := db.conn.QueryRow(query, channel).Scan(&prefix)
+	query := `SELECT command_prefix FROM channel_states WHERE network = ? AND channel = ?`
+	err := db.conn.QueryRow(query, network, channel).Scan(&prefix)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
@@ -104,15 +131,21 @@ func (db *DB) GetChannelCommandPrefix(channel string) (string, error) {
 
 // SetChannelCommandPrefix stores a channel-specific command prefix override.
 func (db *DB) SetChannelCommandPrefix(channel, prefix string) error {
+	return db.SetChannelCommandPrefixForNetwork(DefaultNetwork, channel, prefix)
+}
+
+// SetChannelCommandPrefixForNetwork stores a network/channel-specific command prefix override.
+func (db *DB) SetChannelCommandPrefixForNetwork(network, channel, prefix string) error {
+	network = normalizeNetwork(network)
 	query := `
-		INSERT INTO channel_states (channel, enabled, command_prefix, created_at, updated_at)
-		VALUES (?, 1, ?, ?, ?)
-		ON CONFLICT(channel) DO UPDATE SET
+		INSERT INTO channel_states (network, channel, enabled, command_prefix, created_at, updated_at)
+		VALUES (?, ?, 1, ?, ?, ?)
+		ON CONFLICT(network, channel) DO UPDATE SET
 			command_prefix = excluded.command_prefix,
 			updated_at = excluded.updated_at
 	`
 	now := time.Now()
-	_, err := db.conn.Exec(query, channel, prefix, now, now)
+	_, err := db.conn.Exec(query, network, channel, prefix, now, now)
 	if err != nil {
 		return fmt.Errorf("failed to set channel command prefix: %w", err)
 	}
@@ -121,15 +154,21 @@ func (db *DB) SetChannelCommandPrefix(channel, prefix string) error {
 
 // ClearChannelCommandPrefix removes a channel-specific command prefix override.
 func (db *DB) ClearChannelCommandPrefix(channel string) error {
+	return db.ClearChannelCommandPrefixForNetwork(DefaultNetwork, channel)
+}
+
+// ClearChannelCommandPrefixForNetwork removes a network/channel-specific command prefix override.
+func (db *DB) ClearChannelCommandPrefixForNetwork(network, channel string) error {
+	network = normalizeNetwork(network)
 	query := `
-		INSERT INTO channel_states (channel, enabled, command_prefix, created_at, updated_at)
-		VALUES (?, 1, NULL, ?, ?)
-		ON CONFLICT(channel) DO UPDATE SET
+		INSERT INTO channel_states (network, channel, enabled, command_prefix, created_at, updated_at)
+		VALUES (?, ?, 1, NULL, ?, ?)
+		ON CONFLICT(network, channel) DO UPDATE SET
 			command_prefix = NULL,
 			updated_at = excluded.updated_at
 	`
 	now := time.Now()
-	_, err := db.conn.Exec(query, channel, now, now)
+	_, err := db.conn.Exec(query, network, channel, now, now)
 	if err != nil {
 		return fmt.Errorf("failed to clear channel command prefix: %w", err)
 	}
@@ -138,12 +177,18 @@ func (db *DB) ClearChannelCommandPrefix(channel string) error {
 
 // ListChannelCommandPrefixes returns all explicit per-channel command prefix overrides.
 func (db *DB) ListChannelCommandPrefixes() (map[string]string, error) {
+	return db.ListChannelCommandPrefixesForNetwork(DefaultNetwork)
+}
+
+// ListChannelCommandPrefixesForNetwork returns explicit prefix overrides for one network.
+func (db *DB) ListChannelCommandPrefixesForNetwork(network string) (map[string]string, error) {
+	network = normalizeNetwork(network)
 	rows, err := db.conn.Query(`
 		SELECT channel, command_prefix
 		FROM channel_states
-		WHERE command_prefix IS NOT NULL AND command_prefix != ''
+		WHERE network = ? AND command_prefix IS NOT NULL AND command_prefix != ''
 		ORDER BY channel ASC
-	`)
+	`, network)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list channel command prefixes: %w", err)
 	}

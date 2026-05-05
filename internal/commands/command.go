@@ -39,6 +39,7 @@ type Context struct {
 	// Sender information
 	Nick     string
 	Hostmask string
+	Network  string
 
 	// Channel information (empty for PMs)
 	Channel string
@@ -71,12 +72,18 @@ type Response struct {
 
 // NewContext creates a new command context
 func NewContext(command string, args []string, rawMessage, nick, hostmask, channel string, isPM bool, userLevel database.PermissionLevel, isRegistered bool, activePrefix string) *Context {
+	return NewContextForNetwork(command, args, rawMessage, nick, hostmask, database.DefaultNetwork, channel, isPM, userLevel, isRegistered, activePrefix)
+}
+
+// NewContextForNetwork creates a new command context for a specific IRC network.
+func NewContextForNetwork(command string, args []string, rawMessage, nick, hostmask, network, channel string, isPM bool, userLevel database.PermissionLevel, isRegistered bool, activePrefix string) *Context {
 	return &Context{
 		Command:      command,
 		Args:         args,
 		RawMessage:   rawMessage,
 		Nick:         nick,
 		Hostmask:     hostmask,
+		Network:      network,
 		Channel:      channel,
 		IsPM:         isPM,
 		UserLevel:    userLevel,

@@ -33,6 +33,8 @@ type ResponseCollector struct {
 // Server handles callback requests from Python API
 type Server struct {
 	executor        IRCExecutor
+	executors       map[string]IRCExecutor
+	defaultNetwork  string
 	logger          output.Logger
 	port            int
 	server          *http.Server
@@ -43,11 +45,31 @@ type Server struct {
 
 // NewServer creates a new callback server
 func NewServer(executor IRCExecutor, logger output.Logger, port int) *Server {
-	return &Server{
+	s := &Server{
 		executor:        executor,
+		executors:       make(map[string]IRCExecutor),
+		defaultNetwork:  database.DefaultNetwork,
 		logger:          logger,
 		port:            port,
 		pendingRequests: make(map[string]*ResponseCollector),
+	}
+	if executor != nil {
+		s.executors[database.DefaultNetwork] = executor
+	}
+	return s
+}
+
+// RegisterNetwork registers an IRC executor for a specific network.
+func (s *Server) RegisterNetwork(network string, executor IRCExecutor) {
+	network = normalizeNetwork(network)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.executors == nil {
+		s.executors = make(map[string]IRCExecutor)
+	}
+	s.executors[network] = executor
+	if s.executor == nil || network == s.defaultNetwork {
+		s.executor = executor
 	}
 }
 
@@ -56,11 +78,33 @@ func (s *Server) SetDatabase(db *database.DB) {
 	s.db = db
 }
 
+func normalizeNetwork(network string) string {
+	network = strings.ToLower(strings.TrimSpace(network))
+	if network == "" {
+		return database.DefaultNetwork
+	}
+	return network
+}
+
+func (s *Server) executorFor(network string) (IRCExecutor, string, error) {
+	network = normalizeNetwork(network)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if executor := s.executors[network]; executor != nil {
+		return executor, network, nil
+	}
+	if network == database.DefaultNetwork && s.executor != nil {
+		return s.executor, network, nil
+	}
+	return nil, network, fmt.Errorf("IRC network %q is not available", network)
+}
+
 // IRCExecuteRequest represents a request to execute an IRC command
 type IRCExecuteRequest struct {
 	Command string   `json:"command"`
 	Args    []string `json:"args"`
 	Channel string   `json:"channel,omitempty"`
+	Network string   `json:"network,omitempty"`
 }
 
 // IRCExecuteResponse represents the response from an IRC command
@@ -136,123 +180,124 @@ func (s *Server) handleIRCExecute(w http.ResponseWriter, r *http.Request) {
 // executeCommand executes an IRC command and returns the output
 func (s *Server) executeCommand(req IRCExecuteRequest) (string, error) {
 	cmd := strings.ToLower(req.Command)
+	network := normalizeNetwork(req.Network)
 
 	switch cmd {
 	// User info commands
 	case "whois":
-		return s.executeWHOIS(req.Args)
+		return s.executeWHOIS(network, req.Args)
 	case "whowas":
-		return s.executeWHOWAS(req.Args)
+		return s.executeWHOWAS(network, req.Args)
 	case "version":
-		return s.executeCTCP(req.Args, "VERSION")
+		return s.executeCTCP(network, req.Args, "VERSION")
 	case "time":
-		return s.executeCTCP(req.Args, "TIME")
+		return s.executeCTCP(network, req.Args, "TIME")
 
 	// NickServ commands
 	case "ns_info", "nickserv_info":
-		return s.executeNickServInfo(req.Args)
+		return s.executeNickServInfo(network, req.Args)
 	case "ns_ghost":
-		return s.executeNickServCommand("GHOST", req.Args)
+		return s.executeNickServCommand(network, "GHOST", req.Args)
 	case "ns_release":
-		return s.executeNickServCommand("RELEASE", req.Args)
+		return s.executeNickServCommand(network, "RELEASE", req.Args)
 	case "ns_regain":
-		return s.executeNickServCommand("REGAIN", req.Args)
+		return s.executeNickServCommand(network, "REGAIN", req.Args)
 
 	// ChanServ commands
 	case "cs_info", "chanserv_info":
-		return s.executeChanServInfo(req.Args)
+		return s.executeChanServInfo(network, req.Args)
 	case "cs_op":
-		return s.executeChanServCommand("OP", req.Args)
+		return s.executeChanServCommand(network, "OP", req.Args)
 	case "cs_deop":
-		return s.executeChanServCommand("DEOP", req.Args)
+		return s.executeChanServCommand(network, "DEOP", req.Args)
 	case "cs_voice":
-		return s.executeChanServCommand("VOICE", req.Args)
+		return s.executeChanServCommand(network, "VOICE", req.Args)
 	case "cs_devoice":
-		return s.executeChanServCommand("DEVOICE", req.Args)
+		return s.executeChanServCommand(network, "DEVOICE", req.Args)
 	case "cs_kick":
-		return s.executeChanServCommand("KICK", req.Args)
+		return s.executeChanServCommand(network, "KICK", req.Args)
 	case "cs_ban":
-		return s.executeChanServCommand("BAN", req.Args)
+		return s.executeChanServCommand(network, "BAN", req.Args)
 	case "cs_unban":
-		return s.executeChanServCommand("UNBAN", req.Args)
+		return s.executeChanServCommand(network, "UNBAN", req.Args)
 	case "cs_quiet":
-		return s.executeChanServCommand("QUIET", req.Args)
+		return s.executeChanServCommand(network, "QUIET", req.Args)
 	case "cs_unquiet":
-		return s.executeChanServCommand("UNQUIET", req.Args)
+		return s.executeChanServCommand(network, "UNQUIET", req.Args)
 	case "cs_topic":
-		return s.executeChanServCommand("TOPIC", req.Args)
+		return s.executeChanServCommand(network, "TOPIC", req.Args)
 	case "cs_flags":
-		return s.executeChanServCommand("FLAGS", req.Args)
+		return s.executeChanServCommand(network, "FLAGS", req.Args)
 	case "cs_access":
-		return s.executeChanServCommand("ACCESS", req.Args)
+		return s.executeChanServCommand(network, "ACCESS", req.Args)
 	case "cs_akick":
-		return s.executeChanServCommand("AKICK", req.Args)
+		return s.executeChanServCommand(network, "AKICK", req.Args)
 	case "cs_invite":
-		return s.executeChanServCommand("INVITE", req.Args)
+		return s.executeChanServCommand(network, "INVITE", req.Args)
 	case "cs_clear":
-		return s.executeChanServCommand("CLEAR", req.Args)
+		return s.executeChanServCommand(network, "CLEAR", req.Args)
 
 	// ALIS channel search
 	case "alis_list", "alis_search":
-		return s.executeALIS(req.Args)
+		return s.executeALIS(network, req.Args)
 
 	// Direct channel commands (bot must have op)
 	case "kick":
-		return s.executeKick(req.Args)
+		return s.executeKick(network, req.Args)
 	case "ban":
-		return s.executeMode(req.Args, "+b")
+		return s.executeMode(network, req.Args, "+b")
 	case "unban":
-		return s.executeMode(req.Args, "-b")
+		return s.executeMode(network, req.Args, "-b")
 	case "quiet":
-		return s.executeMode(req.Args, "+q")
+		return s.executeMode(network, req.Args, "+q")
 	case "unquiet":
-		return s.executeMode(req.Args, "-q")
+		return s.executeMode(network, req.Args, "-q")
 	case "op":
-		return s.executeMode(req.Args, "+o")
+		return s.executeMode(network, req.Args, "+o")
 	case "deop":
-		return s.executeMode(req.Args, "-o")
+		return s.executeMode(network, req.Args, "-o")
 	case "voice":
-		return s.executeMode(req.Args, "+v")
+		return s.executeMode(network, req.Args, "+v")
 	case "devoice":
-		return s.executeMode(req.Args, "-v")
+		return s.executeMode(network, req.Args, "-v")
 	case "halfop":
-		return s.executeMode(req.Args, "+h")
+		return s.executeMode(network, req.Args, "+h")
 	case "dehalfop":
-		return s.executeMode(req.Args, "-h")
+		return s.executeMode(network, req.Args, "-h")
 	case "topic":
-		return s.executeTopic(req.Args)
+		return s.executeTopic(network, req.Args)
 	case "mode":
-		return s.executeRawMode(req.Args)
+		return s.executeRawMode(network, req.Args)
 	case "invite":
-		return s.executeInvite(req.Args)
+		return s.executeInvite(network, req.Args)
 
 	// Send message to a channel/user (used by reminder scheduler, etc.)
 	case "send_message":
-		return s.executeSendMessage(req.Args)
+		return s.executeSendMessage(network, req.Args)
 
 	// Bot status commands (local database queries)
 	case "bot_status":
-		return s.executeBotStatus(req.Args)
+		return s.executeBotStatus(network, req.Args)
 	case "channel_info":
-		return s.executeChannelInfo(req.Args)
+		return s.executeChannelInfo(network, req.Args)
 	case "channel_list":
-		return s.executeChannelList()
+		return s.executeChannelList(network)
 	case "user_status":
-		return s.executeUserStatus(req.Args)
+		return s.executeUserStatus(network, req.Args)
 	case "channel_ops":
-		return s.executeChannelOps(req.Args)
+		return s.executeChannelOps(network, req.Args)
 	case "channel_voiced":
-		return s.executeChannelVoiced(req.Args)
+		return s.executeChannelVoiced(network, req.Args)
 	case "channel_topic":
-		return s.executeChannelTopic(req.Args)
+		return s.executeChannelTopic(network, req.Args)
 	case "find_user":
-		return s.executeFindUser(req.Args)
+		return s.executeFindUser(network, req.Args)
 	case "channel_users":
-		return s.executeChannelUsers(req.Args)
+		return s.executeChannelUsers(network, req.Args)
 	case "channel_regular_users":
-		return s.executeChannelRegularUsers(req.Args)
+		return s.executeChannelRegularUsers(network, req.Args)
 	case "search_users":
-		return s.executeSearchUsers(req.Args)
+		return s.executeSearchUsers(network, req.Args)
 
 	default:
 		return "", fmt.Errorf("unknown command: %s", req.Command)
@@ -278,7 +323,7 @@ func (s *Server) sendError(w http.ResponseWriter, errMsg string) {
 }
 
 // executeBotStatus returns the bot's status in a channel
-func (s *Server) executeBotStatus(args []string) (string, error) {
+func (s *Server) executeBotStatus(network string, args []string) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("bot_status requires a channel argument")
 	}
@@ -288,17 +333,17 @@ func (s *Server) executeBotStatus(args []string) (string, error) {
 	}
 
 	channel := args[0]
-	status, err := s.db.GetBotChannelStatus(channel)
+	status, err := s.db.GetBotChannelStatusForNetwork(network, channel)
 	if err != nil {
 		return "", fmt.Errorf("failed to get bot status: %w", err)
 	}
 
 	if status == nil {
-		return fmt.Sprintf("Bot is not in channel %s", channel), nil
+		return fmt.Sprintf("Bot is not in channel %s/%s", normalizeNetwork(network), channel), nil
 	}
 
 	if !status.IsJoined {
-		return fmt.Sprintf("Bot is not currently in channel %s", channel), nil
+		return fmt.Sprintf("Bot is not currently in channel %s/%s", normalizeNetwork(network), channel), nil
 	}
 
 	// Build status string
@@ -318,12 +363,12 @@ func (s *Server) executeBotStatus(args []string) (string, error) {
 		modeStr = strings.Join(modes, ", ")
 	}
 
-	return fmt.Sprintf("Bot status in %s: joined=yes, modes=%s, has_op=%v",
-		channel, modeStr, status.IsOp), nil
+	return fmt.Sprintf("Bot status in %s/%s: joined=yes, modes=%s, has_op=%v",
+		normalizeNetwork(network), channel, modeStr, status.IsOp), nil
 }
 
 // executeChannelInfo returns information about a channel
-func (s *Server) executeChannelInfo(args []string) (string, error) {
+func (s *Server) executeChannelInfo(network string, args []string) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("channel_info requires a channel argument")
 	}
@@ -333,18 +378,18 @@ func (s *Server) executeChannelInfo(args []string) (string, error) {
 	}
 
 	channel := args[0]
-	status, err := s.db.GetBotChannelStatus(channel)
+	status, err := s.db.GetBotChannelStatusForNetwork(network, channel)
 	if err != nil {
 		return "", fmt.Errorf("failed to get channel info: %w", err)
 	}
 
 	if status == nil || !status.IsJoined {
-		return fmt.Sprintf("Bot is not in channel %s, cannot provide info", channel), nil
+		return fmt.Sprintf("Bot is not in channel %s/%s, cannot provide info", normalizeNetwork(network), channel), nil
 	}
 
 	// Build info string
-	info := fmt.Sprintf("Channel %s: users=%d, ops=%d, voiced=%d",
-		channel, status.UserCount, status.OpCount, status.VoiceCount)
+	info := fmt.Sprintf("Channel %s/%s: users=%d, ops=%d, voiced=%d",
+		normalizeNetwork(network), channel, status.UserCount, status.OpCount, status.VoiceCount)
 
 	if status.Topic != "" {
 		// Truncate topic if too long
@@ -361,12 +406,12 @@ func (s *Server) executeChannelInfo(args []string) (string, error) {
 }
 
 // executeChannelList returns a list of all channels the bot is in
-func (s *Server) executeChannelList() (string, error) {
+func (s *Server) executeChannelList(network string) (string, error) {
 	if s.db == nil {
 		return "", fmt.Errorf("database not available")
 	}
 
-	statuses, err := s.db.GetAllBotChannelStatuses()
+	statuses, err := s.db.GetAllBotChannelStatusesForNetwork(network)
 	if err != nil {
 		return "", fmt.Errorf("failed to get channel list: %w", err)
 	}
@@ -388,7 +433,7 @@ func (s *Server) executeChannelList() (string, error) {
 }
 
 // executeUserStatus returns a user's status in a channel (op, voice, etc.)
-func (s *Server) executeUserStatus(args []string) (string, error) {
+func (s *Server) executeUserStatus(network string, args []string) (string, error) {
 	if len(args) < 2 {
 		return "", fmt.Errorf("user_status requires channel and nick arguments")
 	}
@@ -400,7 +445,7 @@ func (s *Server) executeUserStatus(args []string) (string, error) {
 	channel := args[0]
 	nick := args[1]
 
-	user, err := s.db.GetChannelUser(channel, nick)
+	user, err := s.db.GetChannelUserForNetwork(network, channel, nick)
 	if err != nil {
 		return "", fmt.Errorf("failed to get user status: %w", err)
 	}
@@ -430,7 +475,7 @@ func (s *Server) executeUserStatus(args []string) (string, error) {
 }
 
 // executeChannelOps returns list of ops in a channel
-func (s *Server) executeChannelOps(args []string) (string, error) {
+func (s *Server) executeChannelOps(network string, args []string) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("channel_ops requires a channel argument")
 	}
@@ -440,7 +485,7 @@ func (s *Server) executeChannelOps(args []string) (string, error) {
 	}
 
 	channel := args[0]
-	users, err := s.db.GetChannelUsersByMode(channel, "op")
+	users, err := s.db.GetChannelUsersByModeForNetwork(network, channel, "op")
 	if err != nil {
 		return "", fmt.Errorf("failed to get channel ops: %w", err)
 	}
@@ -453,7 +498,7 @@ func (s *Server) executeChannelOps(args []string) (string, error) {
 }
 
 // executeChannelVoiced returns list of voiced users in a channel
-func (s *Server) executeChannelVoiced(args []string) (string, error) {
+func (s *Server) executeChannelVoiced(network string, args []string) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("channel_voiced requires a channel argument")
 	}
@@ -463,7 +508,7 @@ func (s *Server) executeChannelVoiced(args []string) (string, error) {
 	}
 
 	channel := args[0]
-	users, err := s.db.GetChannelUsersByMode(channel, "voice")
+	users, err := s.db.GetChannelUsersByModeForNetwork(network, channel, "voice")
 	if err != nil {
 		return "", fmt.Errorf("failed to get voiced users: %w", err)
 	}
@@ -476,7 +521,7 @@ func (s *Server) executeChannelVoiced(args []string) (string, error) {
 }
 
 // executeChannelTopic returns just the topic of a channel
-func (s *Server) executeChannelTopic(args []string) (string, error) {
+func (s *Server) executeChannelTopic(network string, args []string) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("channel_topic requires a channel argument")
 	}
@@ -486,7 +531,7 @@ func (s *Server) executeChannelTopic(args []string) (string, error) {
 	}
 
 	channel := args[0]
-	status, err := s.db.GetBotChannelStatus(channel)
+	status, err := s.db.GetBotChannelStatusForNetwork(network, channel)
 	if err != nil {
 		return "", fmt.Errorf("failed to get channel topic: %w", err)
 	}
@@ -503,7 +548,7 @@ func (s *Server) executeChannelTopic(args []string) (string, error) {
 }
 
 // executeFindUser searches for a user across all channels
-func (s *Server) executeFindUser(args []string) (string, error) {
+func (s *Server) executeFindUser(network string, args []string) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("find_user requires a nick argument")
 	}
@@ -513,7 +558,7 @@ func (s *Server) executeFindUser(args []string) (string, error) {
 	}
 
 	nick := args[0]
-	channels, err := s.db.FindUserChannels(nick)
+	channels, err := s.db.FindUserChannelsForNetwork(network, nick)
 	if err != nil {
 		return "", fmt.Errorf("failed to find user: %w", err)
 	}
@@ -526,7 +571,7 @@ func (s *Server) executeFindUser(args []string) (string, error) {
 }
 
 // executeChannelUsers returns all users in a channel
-func (s *Server) executeChannelUsers(args []string) (string, error) {
+func (s *Server) executeChannelUsers(network string, args []string) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("channel_users requires a channel argument")
 	}
@@ -536,7 +581,7 @@ func (s *Server) executeChannelUsers(args []string) (string, error) {
 	}
 
 	channel := args[0]
-	nicks, err := s.db.GetChannelUserNicks(channel)
+	nicks, err := s.db.GetChannelUserNicksForNetwork(network, channel)
 	if err != nil {
 		return "", fmt.Errorf("failed to get channel users: %w", err)
 	}
@@ -549,7 +594,7 @@ func (s *Server) executeChannelUsers(args []string) (string, error) {
 }
 
 // executeChannelRegularUsers returns users without op/halfop/voice in a channel
-func (s *Server) executeChannelRegularUsers(args []string) (string, error) {
+func (s *Server) executeChannelRegularUsers(network string, args []string) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("channel_regular_users requires a channel argument")
 	}
@@ -559,7 +604,7 @@ func (s *Server) executeChannelRegularUsers(args []string) (string, error) {
 	}
 
 	channel := args[0]
-	nicks, err := s.db.GetChannelRegularUsers(channel)
+	nicks, err := s.db.GetChannelRegularUsersForNetwork(network, channel)
 	if err != nil {
 		return "", fmt.Errorf("failed to get regular users: %w", err)
 	}
@@ -572,7 +617,7 @@ func (s *Server) executeChannelRegularUsers(args []string) (string, error) {
 }
 
 // executeSearchUsers searches for users by nick pattern
-func (s *Server) executeSearchUsers(args []string) (string, error) {
+func (s *Server) executeSearchUsers(network string, args []string) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("search_users requires a pattern argument (use %% as wildcard)")
 	}
@@ -597,7 +642,7 @@ func (s *Server) executeSearchUsers(args []string) (string, error) {
 
 	if channel != "" {
 		// Search in specific channel
-		users, err := s.db.SearchChannelUsers(channel, pattern)
+		users, err := s.db.SearchChannelUsersForNetwork(network, channel, pattern)
 		if err != nil {
 			return "", fmt.Errorf("failed to search users: %w", err)
 		}
@@ -624,7 +669,7 @@ func (s *Server) executeSearchUsers(args []string) (string, error) {
 	}
 
 	// Search globally
-	users, err := s.db.SearchUsersGlobal(pattern)
+	users, err := s.db.SearchUsersGlobalForNetwork(network, pattern)
 	if err != nil {
 		return "", fmt.Errorf("failed to search users: %w", err)
 	}
@@ -649,15 +694,19 @@ func (s *Server) executeSearchUsers(args []string) (string, error) {
 
 // executeSendMessage sends a PRIVMSG to a channel or user
 // Args: [target, message]
-func (s *Server) executeSendMessage(args []string) (string, error) {
+func (s *Server) executeSendMessage(network string, args []string) (string, error) {
 	if len(args) < 2 {
 		return "", fmt.Errorf("send_message requires target and message arguments")
+	}
+	executor, _, execErr := s.executorFor(network)
+	if execErr != nil {
+		return "", execErr
 	}
 
 	target := args[0]
 	message := strings.Join(args[1:], " ")
 
-	if err := s.executor.SendMessage(target, message); err != nil {
+	if err := executor.SendMessage(target, message); err != nil {
 		return "", fmt.Errorf("failed to send message: %w", err)
 	}
 

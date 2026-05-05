@@ -26,6 +26,15 @@ import (
 	"github.com/yourusername/lolo/internal/user"
 )
 
+type networkRuntime struct {
+	id            string
+	required      bool
+	cfg           *config.Config
+	connManager   *irc.ConnectionManager
+	messageHandle *handler.MessageHandler
+	ownerVerifier *irc.OwnerVerifier
+}
+
 func main() {
 	// Parse command-line flags
 	rollbackFlag := flag.Bool("rollback", false, "Rollback the last applied database migration")
@@ -46,6 +55,7 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Success("Configuration loaded")
+	networkConfigs := cfg.EffectiveNetworks()
 
 	// Initialize database first (needed for rollback)
 	// Use test database if test mode is enabled
@@ -100,13 +110,6 @@ func main() {
 		RequestTimeout:  cfg.Trivia.GetRequestTimeoutDuration(),
 		MaxOutputTokens: cfg.Trivia.MaxOutputTokens,
 	}, logger)
-
-	triviaManager := trivia.NewManager(trivia.ManagerConfig{
-		Store:             triviaStore,
-		Generator:         triviaGenerator,
-		Logger:            logger,
-		GenerationRetries: cfg.Trivia.GenerationRetryLimit,
-	})
 
 	// Handle rollback if requested
 	if *rollbackFlag {
@@ -184,22 +187,11 @@ func main() {
 
 		logger.Success("Owner password set successfully!")
 		logger.Info("To become owner, send this command via PM (NOT in channel):")
-		logger.Info("  /msg %s !verify %s", cfg.Server.Nickname, password)
-	}
-
-	// Create command registry and dispatcher
-	registry := commands.NewRegistry()
-	dispatcher := commands.NewDispatcher(registry, userMgr, cfg.Bot.CommandPrefix)
-
-	channelPrefixes, err := db.ListChannelCommandPrefixes()
-	if err != nil {
-		logger.Error("Failed to load channel command prefixes: %v", err)
-		_ = triviaStore.Close()
-		_ = db.Close()
-		os.Exit(1)
-	}
-	for channel, prefix := range channelPrefixes {
-		dispatcher.SetChannelPrefix(channel, prefix)
+		ownerVerifyNick := "Lolo"
+		if len(networkConfigs) > 0 && networkConfigs[0].Nickname != "" {
+			ownerVerifyNick = networkConfigs[0].Nickname
+		}
+		logger.Info("  /msg %s !verify %s", ownerVerifyNick, password)
 	}
 
 	// Capture start time for metrics and uptime tracking
@@ -220,12 +212,6 @@ func main() {
 	// Create API health checker adapter for info commands
 	apiHealthChecker := newAPIHealthCheckerAdapter(apiClient)
 
-	// Create IRC connection manager (needed for commands that interact with IRC)
-	connManager := irc.NewConnectionManager(cfg, logger, db, userMgr)
-
-	// Register all core commands (after API client and IRC client are created)
-	registerCoreCommands(registry, dispatcher, db, userMgr, logger, startTime, cfg.Bot.APIEndpoint, apiHealthChecker, connManager.GetClient(), triviaManager)
-
 	// Check Python API health at startup (Requirement 16.5)
 	logger.Info("Checking API health...")
 	healthCtx, healthCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -240,57 +226,119 @@ func main() {
 			healthResp.Version, healthResp.Uptime)
 	}
 
-	// Create message splitter
-	msgSplitter := splitter.New(cfg.Server.MaxMessageLength)
-
 	// Create error handler
 	errorHandler := errors.NewErrorHandler(out)
 
-	// Create message handler
-	handlerConfig := &handler.MessageHandlerConfig{
-		Dispatcher:               dispatcher,
-		APIClient:                apiClient,
-		UserManager:              userMgr,
-		DB:                       db,
-		Logger:                   logger,
-		ErrorHandler:             errorHandler,
-		Splitter:                 msgSplitter,
-		BotNick:                  cfg.Server.Nickname,
-		TestMode:                 cfg.Bot.TestMode,
-		ImageDownloadChannels:    cfg.Images.DownloadChannels,
-		PhoneNotificationsActive: cfg.PhoneNotifications.Active,
-		PhoneNotificationsURL:    cfg.PhoneNotifications.URL,
-		MentionAggregateDelay:    cfg.Limits.GetMentionAggregateDelayDuration(),
-		TriviaManager:            triviaManager,
+	runtimes := make([]*networkRuntime, 0, len(networkConfigs))
+	for _, netCfg := range networkConfigs {
+		networkID := netCfg.ID
+		networkCfg := cfg.ConfigForNetwork(netCfg)
+
+		connManager := irc.NewConnectionManagerForNetwork(networkID, networkCfg, logger, db, userMgr)
+		registry := commands.NewRegistry()
+
+		var ownerVerifier *irc.OwnerVerifier
+		var ownerVerifierFunc func(string) (bool, error)
+		if networkID == "rizon" {
+			ownerVerifier = irc.NewOwnerVerifier(connManager.GetClient())
+			ownerVerifierFunc = ownerVerifier.Verify
+		}
+
+		dispatcher := commands.NewDispatcherForNetwork(registry, userMgr, cfg.Bot.CommandPrefix, networkID, ownerVerifierFunc)
+		channelPrefixes, err := db.ListChannelCommandPrefixesForNetwork(networkID)
+		if err != nil {
+			logger.Error("Failed to load channel command prefixes for %s: %v", networkID, err)
+			_ = triviaStore.Close()
+			_ = db.Close()
+			os.Exit(1)
+		}
+		for channel, prefix := range channelPrefixes {
+			dispatcher.SetChannelPrefix(channel, prefix)
+		}
+
+		triviaManager := trivia.NewManager(trivia.ManagerConfig{
+			Network:           networkID,
+			Store:             triviaStore,
+			Generator:         triviaGenerator,
+			Logger:            logger,
+			GenerationRetries: cfg.Trivia.GenerationRetryLimit,
+		})
+
+		registerCoreCommands(registry, dispatcher, db, userMgr, logger, startTime, cfg.Bot.APIEndpoint, apiHealthChecker, connManager.GetClient(), triviaManager)
+
+		msgSplitter := splitter.New(netCfg.MaxMessageLength)
+		messageHandler := handler.NewMessageHandler(&handler.MessageHandlerConfig{
+			Network:                  networkID,
+			Dispatcher:               dispatcher,
+			APIClient:                apiClient,
+			UserManager:              userMgr,
+			DB:                       db,
+			Logger:                   logger,
+			ErrorHandler:             errorHandler,
+			Splitter:                 msgSplitter,
+			BotNick:                  netCfg.Nickname,
+			TestMode:                 cfg.Bot.TestMode,
+			ImageDownloadChannels:    cfg.Images.DownloadChannels,
+			PhoneNotificationsActive: cfg.PhoneNotifications.Active,
+			PhoneNotificationsURL:    cfg.PhoneNotifications.URL,
+			MentionAggregateDelay:    cfg.Limits.GetMentionAggregateDelayDuration(),
+			TriviaManager:            triviaManager,
+		})
+
+		channelTracker := irc.NewChannelTrackerForNetwork(db, logger, networkID, netCfg.Nickname)
+		connManager.SetChannelUserTracker(channelTracker)
+
+		if !cfg.Bot.TestMode {
+			reminderChecker := reminder.NewCheckerForNetwork(cfg.Bot.APIEndpoint, connManager.GetClient(), logger, networkID)
+			connManager.SetJoinHandler(reminderChecker.OnJoinAsync)
+			logger.Success("Reminder checker initialized for %s (on-join delivery enabled)", networkID)
+		}
+
+		setupIRCHandlers(connManager, messageHandler, networkCfg, logger)
+
+		runtimes = append(runtimes, &networkRuntime{
+			id:            networkID,
+			required:      netCfg.Required,
+			cfg:           networkCfg,
+			connManager:   connManager,
+			messageHandle: messageHandler,
+			ownerVerifier: ownerVerifier,
+		})
 	}
-	messageHandler := handler.NewMessageHandler(handlerConfig)
 
 	// Start callback server for Python API to call back (IRC command tool)
 	var callbackServer *callback.Server
 	if cfg.Bot.CallbackPort > 0 {
-		callbackServer = callback.NewServer(connManager.GetClient(), logger, cfg.Bot.CallbackPort)
+		callbackServer = callback.NewServer(nil, logger, cfg.Bot.CallbackPort)
 		callbackServer.SetDatabase(db) // Enable bot_status and channel_info commands
+		for _, rt := range runtimes {
+			callbackServer.RegisterNetwork(rt.id, rt.connManager.GetClient())
+		}
 		if err := callbackServer.Start(); err != nil {
 			logger.Error("Failed to start callback server: %v", err)
 		} else {
 			logger.Success("Callback server started on port %d", cfg.Bot.CallbackPort)
-
-			// Wire up IRC response handlers to callback server
-			connManager.SetNoticeHandler(callbackServer.HandleServiceResponse)
-			connManager.SetNumericHandler(callbackServer.HandleNumericResponse)
-			connManager.SetCTCPResponseHandler(callbackServer.HandleCTCPResponse)
 		}
 	}
 
-	// Create and wire up channel user tracker for tracking op status, user counts, etc.
-	channelTracker := irc.NewChannelTracker(db, logger, cfg.Server.Nickname)
-	connManager.SetChannelUserTracker(channelTracker)
-
-	// Create and wire up reminder checker for on-join reminder delivery
-	if !cfg.Bot.TestMode {
-		reminderChecker := reminder.NewChecker(cfg.Bot.APIEndpoint, connManager.GetClient(), logger)
-		connManager.SetJoinHandler(reminderChecker.OnJoinAsync)
-		logger.Success("Reminder checker initialized (on-join delivery enabled)")
+	for _, rt := range runtimes {
+		runtime := rt
+		runtime.connManager.SetNoticeHandler(func(source, message string) {
+			if runtime.ownerVerifier != nil {
+				runtime.ownerVerifier.HandleNotice(source, message)
+			}
+			if callbackServer != nil {
+				callbackServer.HandleServiceResponseForNetwork(runtime.id, source, message)
+			}
+		})
+		if callbackServer != nil {
+			runtime.connManager.SetNumericHandler(func(numeric int, params []string) {
+				callbackServer.HandleNumericResponseForNetwork(runtime.id, numeric, params)
+			})
+			runtime.connManager.SetCTCPResponseHandler(func(source, ctcpType, response string) {
+				callbackServer.HandleCTCPResponseForNetwork(runtime.id, source, ctcpType, response)
+			})
+		}
 	}
 
 	// Cache command metadata from Python API (Requirement 31.5)
@@ -299,9 +347,11 @@ func main() {
 		metadataCtx, metadataCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer metadataCancel()
 
-		if err := messageHandler.CacheCommandMetadata(metadataCtx); err != nil {
-			logger.Warning("Failed to cache command metadata: %v", err)
-			logger.Warning("Help text and validation may not be available for API commands")
+		for _, rt := range runtimes {
+			if err := rt.messageHandle.CacheCommandMetadata(metadataCtx); err != nil {
+				logger.Warning("Failed to cache command metadata for %s: %v", rt.id, err)
+				logger.Warning("Help text and validation may not be available for API commands")
+			}
 		}
 	}
 
@@ -311,14 +361,22 @@ func main() {
 	// Register shutdown functions in order
 	// 1. Send IRC QUIT message (Requirement 10.1)
 	shutdownHandler.RegisterShutdownFunc(func() error {
-		logger.Info("Sending QUIT message to IRC server...")
-		return connManager.Disconnect()
+		logger.Info("Sending QUIT message to IRC servers...")
+		var firstErr error
+		for _, rt := range runtimes {
+			if err := rt.connManager.Disconnect(); err != nil && firstErr == nil {
+				firstErr = fmt.Errorf("%s disconnect failed: %w", rt.id, err)
+			}
+		}
+		return firstErr
 	})
 
 	// 2. Stop reconnection manager
 	shutdownHandler.RegisterShutdownFunc(func() error {
-		logger.Info("Stopping reconnection manager...")
-		connManager.StopReconnectionManager()
+		logger.Info("Stopping reconnection managers...")
+		for _, rt := range runtimes {
+			rt.connManager.StopReconnectionManager()
+		}
 		return nil
 	})
 
@@ -343,8 +401,10 @@ func main() {
 
 	// 3.6. Shutdown message handler (cancels pending mention aggregations)
 	shutdownHandler.RegisterShutdownFunc(func() error {
-		logger.Info("Shutting down message handler...")
-		messageHandler.Shutdown()
+		logger.Info("Shutting down message handlers...")
+		for _, rt := range runtimes {
+			rt.messageHandle.Shutdown()
+		}
 		return nil
 	})
 
@@ -388,74 +448,88 @@ func main() {
 	// Start shutdown handler in background
 	go shutdownHandler.WaitForShutdown()
 
-	// Set up IRC message handler BEFORE connecting
-	setupIRCHandlers(connManager, messageHandler, cfg, logger)
+	for _, rt := range runtimes {
+		startNetworkRunLoop(rt, shutdownHandler, logger)
+	}
 
-	// Start the IRC client event loop in a goroutine
-	// This must run BEFORE Connect() because Connect() waits for registration messages
-	// which are processed by the event loop
-	//
-	// IMPORTANT: When Run() returns due to a connection error (e.g., "connection reset by peer"),
-	// we should NOT trigger shutdown. Instead, we let the reconnection manager handle it.
-	// Only trigger shutdown for intentional disconnects (SIGINT/SIGTERM or !quit command).
-	go func() {
-		for {
-			if err := connManager.Run(); err != nil {
-				logger.Error("IRC client error: %v", err)
-
-				// Check if this is a shutdown-initiated disconnect
-				// If shutdown is already in progress, don't try to reconnect
-				select {
-				case <-shutdownHandler.Done():
-					// Shutdown already completed, exit the loop
-					return
-				default:
-					// Not a shutdown - this is a connection error
-					// Let the reconnection manager handle it
-					// Run() will be called again immediately - it internally waits for
-					// a new connection to be established (waits for c.conn != nil)
-					logger.Info("Connection lost, reconnection manager will handle it...")
-
-					// Small delay to avoid tight loop while reconnection manager works
-					time.Sleep(500 * time.Millisecond)
-
-					// Continue the loop to call Run() again
-					// Run() will wait for the new connection to be ready
-					continue
-				}
-			}
-			// Run() returned without error (clean disconnect)
-			// This happens when we intentionally disconnect
-			break
-		}
-	}()
-
-	// Give the event loop a moment to start
 	time.Sleep(100 * time.Millisecond)
 
-	// Connect to IRC server (handles authentication and waits for registration)
-	if err := connManager.Connect(); err != nil {
-		logger.Error("Failed to connect to IRC: %v", err)
-		shutdownHandler.Shutdown()
-		<-shutdownHandler.Done()
-		os.Exit(1)
+	for _, rt := range runtimes {
+		if err := connectNetworkRuntime(rt, logger); err != nil {
+			if rt.required {
+				logger.Error("Failed to connect required IRC network %s: %v", rt.id, err)
+				shutdownHandler.Shutdown()
+				<-shutdownHandler.Done()
+				os.Exit(1)
+			}
+			logger.Warning("Failed to connect optional IRC network %s: %v", rt.id, err)
+			go retryOptionalNetworkRuntime(rt, shutdownHandler, logger, cfg.Limits.GetReconnectDelayMinDuration())
+			continue
+		}
 	}
 
-	// Start reconnection manager for automatic reconnection on disconnect
-	connManager.StartReconnectionManager()
-
-	// Join configured channels
-	if err := connManager.JoinChannels(); err != nil {
-		logger.Error("Failed to join channels: %v", err)
-	}
-
-	// Start ping monitor to detect connection issues
-	connManager.StartPingMonitor()
-
-	logger.Success("Bot initialization complete. Connected and ready.")
+	logger.Success("Bot initialization complete. IRC runtimes are ready.")
 
 	// Wait for graceful shutdown to complete
 	<-shutdownHandler.Done()
+}
+
+func startNetworkRunLoop(rt *networkRuntime, shutdownHandler *shutdown.Handler, logger output.Logger) {
+	go func() {
+		for {
+			if err := rt.connManager.Run(); err != nil {
+				logger.Error("[%s] IRC client error: %v", rt.id, err)
+
+				select {
+				case <-shutdownHandler.Done():
+					return
+				default:
+					logger.Info("[%s] Connection lost, reconnection manager will handle it...", rt.id)
+					time.Sleep(500 * time.Millisecond)
+					continue
+				}
+			}
+			break
+		}
+	}()
+}
+
+func connectNetworkRuntime(rt *networkRuntime, logger output.Logger) error {
+	logger.Info("[%s] Connecting to IRC...", rt.id)
+	if err := rt.connManager.Connect(); err != nil {
+		return err
+	}
+
+	rt.connManager.StartReconnectionManager()
+	if err := rt.connManager.JoinChannels(); err != nil {
+		logger.Error("[%s] Failed to join channels: %v", rt.id, err)
+	}
+	rt.connManager.StartPingMonitor()
+	logger.Success("[%s] Connected and ready", rt.id)
+	return nil
+}
+
+func retryOptionalNetworkRuntime(rt *networkRuntime, shutdownHandler *shutdown.Handler, logger output.Logger, delay time.Duration) {
+	if delay <= 0 {
+		delay = 30 * time.Second
+	}
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-shutdownHandler.Done():
+			return
+		case <-timer.C:
+			if err := connectNetworkRuntime(rt, logger); err != nil {
+				logger.Warning("[%s] Optional network reconnect failed: %v", rt.id, err)
+				timer.Reset(delay)
+				continue
+			}
+			return
+		}
+	}
 }
 
 // apiHealthCheckerAdapter adapts handler.APIClientInterface to commands.APIHealthChecker

@@ -265,6 +265,11 @@ func (s *Store) InsertQuestion(q *StoredQuestion) (int64, error) {
 
 // StartRound inserts a new active round.
 func (s *Store) StartRound(channel, topic, mode, variant, language string, questionID int64, modifiers []string, startedAt time.Time) (int64, error) {
+	return s.StartRoundForNetwork(defaultNetwork, channel, topic, mode, variant, language, questionID, modifiers, startedAt)
+}
+
+// StartRoundForNetwork inserts a new active round for a network/channel pair.
+func (s *Store) StartRoundForNetwork(network, channel, topic, mode, variant, language string, questionID int64, modifiers []string, startedAt time.Time) (int64, error) {
 	modifiersJSON, err := json.Marshal(modifiers)
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal round modifiers: %w", err)
@@ -272,9 +277,9 @@ func (s *Store) StartRound(channel, topic, mode, variant, language string, quest
 
 	result, err := s.conn.Exec(`
 		INSERT INTO trivia_rounds (
-			channel, topic, mode, variant, language, question_id, started_at, modifiers_json, status
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, channel, topic, NormalizeMode(mode), NormalizeTriviaVariant(variant), strings.TrimSpace(language), questionID, startedAt, string(modifiersJSON), "active")
+			network, channel, topic, mode, variant, language, question_id, started_at, modifiers_json, status
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, normalizeNetwork(network), channel, topic, NormalizeMode(mode), NormalizeTriviaVariant(variant), strings.TrimSpace(language), questionID, startedAt, string(modifiersJSON), "active")
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert trivia round: %w", err)
 	}
@@ -288,6 +293,13 @@ func (s *Store) StartRound(channel, topic, mode, variant, language string, quest
 
 // FinalizeRoundWin persists winner details and updates score atomically.
 func (s *Store) FinalizeRoundWin(roundID int64, channel, winnerNick, winningAnswer string, points int, hintUsed bool, endedAt time.Time) (int, error) {
+	return s.FinalizeRoundWinForNetwork(defaultNetwork, roundID, channel, winnerNick, winningAnswer, points, hintUsed, endedAt)
+}
+
+// FinalizeRoundWinForNetwork persists winner details and updates network-scoped score atomically.
+func (s *Store) FinalizeRoundWinForNetwork(network string, roundID int64, channel, winnerNick, winningAnswer string, points int, hintUsed bool, endedAt time.Time) (int, error) {
+	network = normalizeNetwork(network)
+
 	tx, err := s.conn.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin trivia win transaction: %w", err)
@@ -296,7 +308,7 @@ func (s *Store) FinalizeRoundWin(roundID int64, channel, winnerNick, winningAnsw
 		_ = tx.Rollback()
 	}()
 
-	if err := s.addScoreTx(tx, channel, winnerNick, points); err != nil {
+	if err := s.addScoreTxForNetwork(tx, network, channel, winnerNick, points); err != nil {
 		return 0, err
 	}
 
@@ -319,8 +331,8 @@ func (s *Store) FinalizeRoundWin(roundID int64, channel, winnerNick, winningAnsw
 	var updatedScore int
 	if err := tx.QueryRow(`
 		SELECT score FROM trivia_scores
-		WHERE channel = ? AND nick = ?
-	`, channel, winnerNick).Scan(&updatedScore); err != nil {
+		WHERE network = ? AND channel = ? AND nick = ?
+	`, network, channel, winnerNick).Scan(&updatedScore); err != nil {
 		return 0, fmt.Errorf("failed to fetch updated trivia score: %w", err)
 	}
 
@@ -345,6 +357,11 @@ func (s *Store) FinalizeRoundNoWinner(roundID int64, hintUsed bool, status strin
 
 // GetRecentRoundVariants returns the most recent trivia round variants for a channel.
 func (s *Store) GetRecentRoundVariants(channel string, limit int) ([]string, error) {
+	return s.GetRecentRoundVariantsForNetwork(defaultNetwork, channel, limit)
+}
+
+// GetRecentRoundVariantsForNetwork returns the most recent trivia round variants for a network/channel pair.
+func (s *Store) GetRecentRoundVariantsForNetwork(network, channel string, limit int) ([]string, error) {
 	if limit <= 0 {
 		limit = 5
 	}
@@ -352,11 +369,12 @@ func (s *Store) GetRecentRoundVariants(channel string, limit int) ([]string, err
 	rows, err := s.conn.Query(`
 		SELECT variant
 		FROM trivia_rounds
-		WHERE channel = ?
+		WHERE network = ?
+		  AND channel = ?
 		  AND mode = ?
 		ORDER BY id DESC
 		LIMIT ?
-	`, channel, ModeTrivia, limit)
+	`, normalizeNetwork(network), channel, ModeTrivia, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query recent round variants: %w", err)
 	}
@@ -380,6 +398,11 @@ func (s *Store) GetRecentRoundVariants(channel string, limit int) ([]string, err
 
 // GetWinnerStreak returns the consecutive completed-round wins immediately preceding a new win.
 func (s *Store) GetWinnerStreak(channel, nick string, limit int) (int, error) {
+	return s.GetWinnerStreakForNetwork(defaultNetwork, channel, nick, limit)
+}
+
+// GetWinnerStreakForNetwork returns consecutive completed-round wins for a network/channel pair.
+func (s *Store) GetWinnerStreakForNetwork(network, channel, nick string, limit int) (int, error) {
 	if limit <= 0 {
 		limit = 12
 	}
@@ -387,13 +410,14 @@ func (s *Store) GetWinnerStreak(channel, nick string, limit int) (int, error) {
 	rows, err := s.conn.Query(`
 		SELECT winner_nick
 		FROM trivia_rounds
-		WHERE channel = ?
+		WHERE network = ?
+		  AND channel = ?
 		  AND status = 'completed'
 		  AND winner_nick IS NOT NULL
 		  AND winner_nick <> ''
 		ORDER BY ended_at DESC, id DESC
 		LIMIT ?
-	`, channel, limit)
+	`, normalizeNetwork(network), channel, limit)
 	if err != nil {
 		return 0, fmt.Errorf("failed to query winner streak: %w", err)
 	}
@@ -420,13 +444,19 @@ func (s *Store) GetWinnerStreak(channel, nick string, limit int) (int, error) {
 
 // GetTopScores returns top scores for a channel.
 func (s *Store) GetTopScores(channel string, limit int) ([]ScoreEntry, error) {
+	return s.GetTopScoresForNetwork(defaultNetwork, channel, limit)
+}
+
+// GetTopScoresForNetwork returns top scores for a network/channel pair.
+func (s *Store) GetTopScoresForNetwork(network, channel string, limit int) ([]ScoreEntry, error) {
 	rows, err := s.conn.Query(`
 		SELECT nick, score
 		FROM trivia_scores
-		WHERE channel = ?
+		WHERE network = ?
+		  AND channel = ?
 		ORDER BY score DESC, nick COLLATE NOCASE ASC
 		LIMIT ?
-	`, channel, limit)
+	`, normalizeNetwork(network), channel, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query top scores: %w", err)
 	}
@@ -452,12 +482,17 @@ func (s *Store) GetTopScores(channel string, limit int) ([]ScoreEntry, error) {
 
 // GetScore returns a nick's score in a channel.
 func (s *Store) GetScore(channel, nick string) (int, bool, error) {
+	return s.GetScoreForNetwork(defaultNetwork, channel, nick)
+}
+
+// GetScoreForNetwork returns a nick's score in a network/channel pair.
+func (s *Store) GetScoreForNetwork(network, channel, nick string) (int, bool, error) {
 	var score int
 	err := s.conn.QueryRow(`
 		SELECT score
 		FROM trivia_scores
-		WHERE channel = ? AND nick = ?
-	`, channel, nick).Scan(&score)
+		WHERE network = ? AND channel = ? AND nick = ?
+	`, normalizeNetwork(network), channel, nick).Scan(&score)
 	if err == sql.ErrNoRows {
 		return 0, false, nil
 	}
@@ -469,17 +504,22 @@ func (s *Store) GetScore(channel, nick string) (int, bool, error) {
 
 // SetScore sets a score to an exact value for a nick in a channel.
 func (s *Store) SetScore(channel, nick string, score int) error {
+	return s.SetScoreForNetwork(defaultNetwork, channel, nick, score)
+}
+
+// SetScoreForNetwork sets a score to an exact value for a network/channel pair.
+func (s *Store) SetScoreForNetwork(network, channel, nick string, score int) error {
 	if score < 0 {
 		score = 0
 	}
 	_, err := s.conn.Exec(`
-		INSERT INTO trivia_scores (channel, nick, score, updated_at)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(channel, nick) DO UPDATE SET
+		INSERT INTO trivia_scores (network, channel, nick, score, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(network, channel, nick) DO UPDATE SET
 			nick = excluded.nick,
 			score = excluded.score,
 			updated_at = excluded.updated_at
-	`, channel, nick, score, time.Now())
+	`, normalizeNetwork(network), channel, nick, score, time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to set trivia score: %w", err)
 	}
@@ -488,6 +528,13 @@ func (s *Store) SetScore(channel, nick string, score int) error {
 
 // AddScore adds/subtracts points and returns the resulting score.
 func (s *Store) AddScore(channel, nick string, delta int) (int, error) {
+	return s.AddScoreForNetwork(defaultNetwork, channel, nick, delta)
+}
+
+// AddScoreForNetwork adds/subtracts points and returns the resulting score for a network/channel pair.
+func (s *Store) AddScoreForNetwork(network, channel, nick string, delta int) (int, error) {
+	network = normalizeNetwork(network)
+
 	tx, err := s.conn.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin trivia score transaction: %w", err)
@@ -500,8 +547,8 @@ func (s *Store) AddScore(channel, nick string, delta int) (int, error) {
 	err = tx.QueryRow(`
 		SELECT score
 		FROM trivia_scores
-		WHERE channel = ? AND nick = ?
-	`, channel, nick).Scan(&current)
+		WHERE network = ? AND channel = ? AND nick = ?
+	`, network, channel, nick).Scan(&current)
 	if err != nil && err != sql.ErrNoRows {
 		return 0, fmt.Errorf("failed to read current trivia score: %w", err)
 	}
@@ -516,13 +563,13 @@ func (s *Store) AddScore(channel, nick string, delta int) (int, error) {
 	}
 
 	if _, err := tx.Exec(`
-		INSERT INTO trivia_scores (channel, nick, score, updated_at)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(channel, nick) DO UPDATE SET
+		INSERT INTO trivia_scores (network, channel, nick, score, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(network, channel, nick) DO UPDATE SET
 			nick = excluded.nick,
 			score = excluded.score,
 			updated_at = excluded.updated_at
-	`, channel, nick, next, time.Now()); err != nil {
+	`, network, channel, nick, next, time.Now()); err != nil {
 		return 0, fmt.Errorf("failed to update trivia score: %w", err)
 	}
 
@@ -535,10 +582,15 @@ func (s *Store) AddScore(channel, nick string, delta int) (int, error) {
 
 // ResetScore removes a score row for a nick in a channel.
 func (s *Store) ResetScore(channel, nick string) error {
+	return s.ResetScoreForNetwork(defaultNetwork, channel, nick)
+}
+
+// ResetScoreForNetwork removes a score row for a nick in a network/channel pair.
+func (s *Store) ResetScoreForNetwork(network, channel, nick string) error {
 	if _, err := s.conn.Exec(`
 		DELETE FROM trivia_scores
-		WHERE channel = ? AND nick = ?
-	`, channel, nick); err != nil {
+		WHERE network = ? AND channel = ? AND nick = ?
+	`, normalizeNetwork(network), channel, nick); err != nil {
 		return fmt.Errorf("failed to reset trivia score: %w", err)
 	}
 	return nil
@@ -546,6 +598,11 @@ func (s *Store) ResetScore(channel, nick string) error {
 
 // GetSettings loads channel settings, returning defaults if none are persisted.
 func (s *Store) GetSettings(channel string) (ChannelSettings, error) {
+	return s.GetSettingsForNetwork(defaultNetwork, channel)
+}
+
+// GetSettingsForNetwork loads channel settings for a network/channel pair, returning defaults if none are persisted.
+func (s *Store) GetSettingsForNetwork(network, channel string) (ChannelSettings, error) {
 	settings := s.defaults.Settings
 	settings.Difficulty = NormalizeDifficulty(settings.Difficulty)
 	if settings.CodeAnswerTimeSeconds <= 0 {
@@ -566,8 +623,8 @@ func (s *Store) GetSettings(channel string) (ChannelSettings, error) {
 	err := s.conn.QueryRow(`
 		SELECT answer_time_seconds, code_answer_time_seconds, hints_enabled, trivia_hints_enabled, code_hints_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty, code_difficulty
 		FROM trivia_settings
-		WHERE channel = ?
-	`, channel).Scan(
+		WHERE network = ? AND channel = ?
+	`, normalizeNetwork(network), channel).Scan(
 		&settings.AnswerTimeSeconds,
 		&settings.CodeAnswerTimeSeconds,
 		&legacyHintsEnabled,
@@ -606,6 +663,11 @@ func (s *Store) GetSettings(channel string) (ChannelSettings, error) {
 
 // SaveSettings upserts settings for a channel.
 func (s *Store) SaveSettings(channel string, settings ChannelSettings) error {
+	return s.SaveSettingsForNetwork(defaultNetwork, channel, settings)
+}
+
+// SaveSettingsForNetwork upserts settings for a network/channel pair.
+func (s *Store) SaveSettingsForNetwork(network, channel string, settings ChannelSettings) error {
 	settings.Difficulty = NormalizeDifficulty(settings.Difficulty)
 	if settings.CodeAnswerTimeSeconds <= 0 {
 		settings.CodeAnswerTimeSeconds = settings.AnswerTimeSeconds
@@ -617,9 +679,9 @@ func (s *Store) SaveSettings(channel string, settings ChannelSettings) error {
 
 	_, err := s.conn.Exec(`
 		INSERT INTO trivia_settings (
-			channel, answer_time_seconds, code_answer_time_seconds, hints_enabled, trivia_hints_enabled, code_hints_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty, code_difficulty, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(channel) DO UPDATE SET
+			network, channel, answer_time_seconds, code_answer_time_seconds, hints_enabled, trivia_hints_enabled, code_hints_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty, code_difficulty, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(network, channel) DO UPDATE SET
 			answer_time_seconds = excluded.answer_time_seconds,
 			code_answer_time_seconds = excluded.code_answer_time_seconds,
 			hints_enabled = excluded.hints_enabled,
@@ -633,6 +695,7 @@ func (s *Store) SaveSettings(channel string, settings ChannelSettings) error {
 			code_difficulty = excluded.code_difficulty,
 			updated_at = excluded.updated_at
 	`,
+		normalizeNetwork(network),
 		channel,
 		settings.AnswerTimeSeconds,
 		settings.CodeAnswerTimeSeconds,
@@ -653,13 +716,15 @@ func (s *Store) SaveSettings(channel string, settings ChannelSettings) error {
 	return nil
 }
 
-func (s *Store) addScoreTx(tx *sql.Tx, channel, nick string, delta int) error {
+func (s *Store) addScoreTxForNetwork(tx *sql.Tx, network, channel, nick string, delta int) error {
+	network = normalizeNetwork(network)
+
 	var current int
 	err := tx.QueryRow(`
 		SELECT score
 		FROM trivia_scores
-		WHERE channel = ? AND nick = ?
-	`, channel, nick).Scan(&current)
+		WHERE network = ? AND channel = ? AND nick = ?
+	`, network, channel, nick).Scan(&current)
 	if err != nil && err != sql.ErrNoRows {
 		return fmt.Errorf("failed to read score in transaction: %w", err)
 	}
@@ -673,13 +738,13 @@ func (s *Store) addScoreTx(tx *sql.Tx, channel, nick string, delta int) error {
 	}
 
 	if _, err := tx.Exec(`
-		INSERT INTO trivia_scores (channel, nick, score, updated_at)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(channel, nick) DO UPDATE SET
+		INSERT INTO trivia_scores (network, channel, nick, score, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(network, channel, nick) DO UPDATE SET
 			nick = excluded.nick,
 			score = excluded.score,
 			updated_at = excluded.updated_at
-	`, channel, nick, next, time.Now()); err != nil {
+	`, network, channel, nick, next, time.Now()); err != nil {
 		return fmt.Errorf("failed to write score in transaction: %w", err)
 	}
 	return nil

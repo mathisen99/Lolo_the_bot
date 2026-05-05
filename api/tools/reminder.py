@@ -56,6 +56,7 @@ class ReminderTool(Tool):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 creator_nick TEXT NOT NULL,
                 target_nick TEXT NOT NULL,
+                network TEXT NOT NULL DEFAULT 'libera',
                 channel TEXT NOT NULL,
                 message TEXT NOT NULL,
                 reminder_type TEXT NOT NULL,
@@ -69,6 +70,11 @@ class ReminderTool(Tool):
             )
         """)
 
+        cursor.execute("PRAGMA table_info(reminders)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "network" not in columns:
+            cursor.execute("ALTER TABLE reminders ADD COLUMN network TEXT NOT NULL DEFAULT 'libera'")
+
         # Index for scheduler queries
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_reminders_pending_time
@@ -76,7 +82,7 @@ class ReminderTool(Tool):
         """)
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_reminders_pending_join
-            ON reminders (status, reminder_type, target_nick, channel)
+            ON reminders (status, reminder_type, network, target_nick, channel)
         """)
 
         conn.commit()
@@ -133,13 +139,14 @@ class ReminderTool(Tool):
         """Attempt to deliver a reminder. Checks if user is online first."""
         rid = reminder["id"]
         target = reminder["target_nick"]
+        network = reminder.get("network", "libera")
         channel = reminder["channel"]
         creator = reminder["creator_nick"]
         message = reminder["message"]
         recurrence = reminder.get("recurrence")
 
         # Check if target user is online in the channel
-        online = self._check_user_online(target, channel)
+        online = self._check_user_online(target, channel, network)
 
         if online:
             # Deliver it
@@ -148,7 +155,7 @@ class ReminderTool(Tool):
             else:
                 irc_msg = f"{target}: Reminder from {creator}: {message}"
 
-            success = self._send_to_irc(channel, irc_msg)
+            success = self._send_to_irc(channel, irc_msg, network)
 
             if success:
                 log_success(f"[REMINDER] Delivered #{rid} to {target} in {channel}")
@@ -181,12 +188,12 @@ class ReminderTool(Tool):
             conn.commit()
             conn.close()
 
-    def _check_user_online(self, nick: str, channel: str) -> bool:
+    def _check_user_online(self, nick: str, channel: str, network: str = "libera") -> bool:
         """Check if a user is currently in a channel via Go bot callback."""
         try:
             resp = requests.post(
                 f"{self.GO_BOT_CALLBACK_URL}/irc/execute",
-                json={"command": "user_status", "args": [channel, nick]},
+                json={"command": "user_status", "network": network or "libera", "args": [channel, nick]},
                 timeout=5
             )
             if resp.status_code == 200:
@@ -202,12 +209,12 @@ class ReminderTool(Tool):
             log_error(f"[REMINDER] Failed to check user online status: {e}")
             return False
 
-    def _send_to_irc(self, channel: str, message: str) -> bool:
+    def _send_to_irc(self, channel: str, message: str, network: str = "libera") -> bool:
         """Send a message to IRC via Go bot callback."""
         try:
             resp = requests.post(
                 f"{self.GO_BOT_CALLBACK_URL}/irc/execute",
-                json={"command": "send_message", "args": [channel, message]},
+                json={"command": "send_message", "network": network or "libera", "args": [channel, message]},
                 timeout=10
             )
             return resp.status_code == 200 and resp.json().get("status") == "success"
@@ -270,7 +277,7 @@ class ReminderTool(Tool):
         conn.close()
         log_info(f"[REMINDER] #{reminder_id} rescheduled ({recurrence}) to {next_time.isoformat()}")
 
-    def check_join_reminders(self, nick: str, channel: str) -> List[str]:
+    def check_join_reminders(self, nick: str, channel: str, network: str = "libera") -> List[str]:
         """
         Check for pending on-join reminders for a user in a channel.
         Called by the Go bot via API when a user JOINs.
@@ -285,10 +292,11 @@ class ReminderTool(Tool):
             SELECT * FROM reminders
             WHERE status = 'pending'
               AND reminder_type = 'join'
+              AND network = ?
               AND LOWER(target_nick) = LOWER(?)
               AND LOWER(channel) = LOWER(?)
             ORDER BY created_at ASC
-        """, (nick, channel))
+        """, (network or "libera", nick, channel))
 
         reminders = cursor.fetchall()
         messages = []
@@ -314,7 +322,7 @@ class ReminderTool(Tool):
         conn.close()
 
         if messages:
-            log_success(f"[REMINDER] Delivering {len(messages)} on-join reminder(s) to {nick} in {channel}")
+            log_success(f"[REMINDER] Delivering {len(messages)} on-join reminder(s) to {nick} in {network}/{channel}")
 
         return messages
 
@@ -388,6 +396,10 @@ IMPORTANT: The deliver_at time should be in UTC. Convert from the user's context
                     "channel": {
                         "type": "string",
                         "description": "Channel for the reminder (auto-filled from context)"
+                    },
+                    "network": {
+                        "type": "string",
+                        "description": "IRC network id (auto-filled from context)"
                     }
                 },
                 "required": ["action"],
@@ -431,7 +443,7 @@ IMPORTANT: The deliver_at time should be in UTC. Convert from the user's context
             return None
 
     def _create_reminder(
-        self, creator: str, target: str, channel: str, message: str,
+        self, creator: str, target: str, network: str, channel: str, message: str,
         reminder_type: str, deliver_at: Optional[str], recurrence: Optional[str]
     ) -> str:
         """Create a new reminder."""
@@ -476,8 +488,8 @@ IMPORTANT: The deliver_at time should be in UTC. Convert from the user's context
 
         # Limit: max 20 pending reminders per user
         cursor.execute(
-            "SELECT COUNT(*) FROM reminders WHERE LOWER(creator_nick) = LOWER(?) AND status = 'pending'",
-            (creator,)
+            "SELECT COUNT(*) FROM reminders WHERE LOWER(creator_nick) = LOWER(?) AND network = ? AND status = 'pending'",
+            (creator, network)
         )
         count = cursor.fetchone()[0]
         if count >= 20:
@@ -486,25 +498,25 @@ IMPORTANT: The deliver_at time should be in UTC. Convert from the user's context
 
         cursor.execute("""
             INSERT INTO reminders
-            (creator_nick, target_nick, channel, message, reminder_type, deliver_at, recurrence, status, created_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
-        """, (creator, target, channel, message.strip(), reminder_type, deliver_at_iso, recurrence, now, expires_at))
+            (creator_nick, target_nick, network, channel, message, reminder_type, deliver_at, recurrence, status, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        """, (creator, target, network, channel, message.strip(), reminder_type, deliver_at_iso, recurrence, now, expires_at))
 
         rid = cursor.lastrowid
         conn.commit()
         conn.close()
 
-        log_success(f"[REMINDER] #{rid} created by {creator} for {target} ({reminder_type})")
+        log_success(f"[REMINDER] #{rid} created by {creator} for {target} on {network} ({reminder_type})")
 
         # Build confirmation
         if reminder_type == "join":
-            return f"Reminder #{rid} set! I'll remind {target} when they join {channel}: \"{message.strip()}\""
+            return f"Reminder #{rid} set! I'll remind {target} when they join {network}/{channel}: \"{message.strip()}\""
         elif reminder_type == "recurring":
             return f"Recurring reminder #{rid} set ({recurrence})! First delivery at {deliver_at_iso} UTC for {target}: \"{message.strip()}\""
         else:
-            return f"Reminder #{rid} set for {deliver_at_iso} UTC! I'll remind {target} in {channel}: \"{message.strip()}\""
+            return f"Reminder #{rid} set for {deliver_at_iso} UTC! I'll remind {target} in {network}/{channel}: \"{message.strip()}\""
 
-    def _list_reminders(self, nick: str, permission_level: str) -> str:
+    def _list_reminders(self, nick: str, permission_level: str, network: str) -> str:
         """List pending reminders."""
         conn = sqlite3.connect(str(self.DB_PATH))
         conn.row_factory = sqlite3.Row
@@ -512,12 +524,13 @@ IMPORTANT: The deliver_at time should be in UTC. Convert from the user's context
 
         if permission_level in ("owner", "admin"):
             cursor.execute(
-                "SELECT * FROM reminders WHERE status = 'pending' ORDER BY created_at DESC LIMIT 25"
+                "SELECT * FROM reminders WHERE status = 'pending' AND network = ? ORDER BY created_at DESC LIMIT 25",
+                (network,)
             )
         else:
             cursor.execute(
-                "SELECT * FROM reminders WHERE status = 'pending' AND (LOWER(creator_nick) = LOWER(?) OR LOWER(target_nick) = LOWER(?)) ORDER BY created_at DESC LIMIT 15",
-                (nick, nick)
+                "SELECT * FROM reminders WHERE status = 'pending' AND network = ? AND (LOWER(creator_nick) = LOWER(?) OR LOWER(target_nick) = LOWER(?)) ORDER BY created_at DESC LIMIT 15",
+                (network, nick, nick)
             )
 
         reminders = cursor.fetchall()
@@ -530,7 +543,7 @@ IMPORTANT: The deliver_at time should be in UTC. Convert from the user's context
         for r in reminders:
             rtype = r["reminder_type"]
             if rtype == "join":
-                trigger = f"on-join in {r['channel']}"
+                trigger = f"on-join in {r['network']}/{r['channel']}"
             elif r["recurrence"]:
                 trigger = f"{r['recurrence']} at {r['deliver_at'][:16]}"
             else:
@@ -541,13 +554,13 @@ IMPORTANT: The deliver_at time should be in UTC. Convert from the user's context
 
         return "Pending reminders: " + " | ".join(lines)
 
-    def _cancel_reminder(self, reminder_id: int, nick: str, permission_level: str) -> str:
+    def _cancel_reminder(self, reminder_id: int, nick: str, permission_level: str, network: str) -> str:
         """Cancel a pending reminder."""
         conn = sqlite3.connect(str(self.DB_PATH))
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        cursor.execute("SELECT * FROM reminders WHERE id = ?", (reminder_id,))
+        cursor.execute("SELECT * FROM reminders WHERE id = ? AND network = ?", (reminder_id, network))
         rem = cursor.fetchone()
 
         if not rem:
@@ -574,14 +587,14 @@ IMPORTANT: The deliver_at time should be in UTC. Convert from the user's context
         log_info(f"[REMINDER] #{reminder_id} cancelled by {nick}")
         return f"Reminder #{reminder_id} cancelled."
 
-    def _check_reminders(self, nick: str) -> str:
+    def _check_reminders(self, nick: str, network: str) -> str:
         """Quick count of pending reminders for a user."""
         conn = sqlite3.connect(str(self.DB_PATH))
         cursor = conn.cursor()
 
         cursor.execute(
-            "SELECT COUNT(*) FROM reminders WHERE status = 'pending' AND (LOWER(creator_nick) = LOWER(?) OR LOWER(target_nick) = LOWER(?))",
-            (nick, nick)
+            "SELECT COUNT(*) FROM reminders WHERE status = 'pending' AND network = ? AND (LOWER(creator_nick) = LOWER(?) OR LOWER(target_nick) = LOWER(?))",
+            (network, nick, nick)
         )
         count = cursor.fetchone()[0]
         conn.close()
@@ -599,12 +612,14 @@ IMPORTANT: The deliver_at time should be in UTC. Convert from the user's context
         deliver_at: Optional[str] = None,
         recurrence: Optional[str] = None,
         reminder_id: Optional[int] = None,
+        network: str = "libera",
         channel: str = "",
         permission_level: str = "normal",
         requesting_user: str = "unknown",
         **kwargs
     ) -> str:
         """Execute reminder action."""
+        network = (network or "libera").strip().lower()
 
         if action == "create":
             if not reminder_type:
@@ -615,6 +630,7 @@ IMPORTANT: The deliver_at time should be in UTC. Convert from the user's context
             return self._create_reminder(
                 creator=requesting_user,
                 target=target_nick or requesting_user,
+                network=network,
                 channel=channel,
                 message=message,
                 reminder_type=actual_type,
@@ -623,15 +639,15 @@ IMPORTANT: The deliver_at time should be in UTC. Convert from the user's context
             )
 
         elif action == "list":
-            return self._list_reminders(requesting_user, permission_level)
+            return self._list_reminders(requesting_user, permission_level, network)
 
         elif action == "cancel":
             if not reminder_id:
                 return "Error: reminder_id is required."
-            return self._cancel_reminder(reminder_id, requesting_user, permission_level)
+            return self._cancel_reminder(reminder_id, requesting_user, permission_level, network)
 
         elif action == "check":
-            return self._check_reminders(requesting_user)
+            return self._check_reminders(requesting_user, network)
 
         else:
             return f"Error: Unknown action '{action}'. Use: create, list, cancel, check"

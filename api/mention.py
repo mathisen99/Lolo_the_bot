@@ -50,7 +50,7 @@ def handle_mention(request: MentionRequest) -> MentionResponse:
     Returns:
         MentionResponse with the bot's AI-generated reply
     """
-    log_info(f"[{request.request_id}] Processing mention from {request.nick} in {request.channel}" + 
+    log_info(f"[{request.request_id}] Processing mention from {request.nick} in {request.network}/{request.channel}" +
              (" [DEEP MODE]" if request.deep_mode else ""))
     
     # Log conversation history if provided
@@ -65,6 +65,7 @@ def handle_mention(request: MentionRequest) -> MentionResponse:
         response_message = ai_client.generate_response_with_context(
             user_message=request.message,
             nick=request.nick,
+            network=request.network,
             channel=request.channel,
             conversation_history=request.history,
             trivia_context=request.trivia_context.model_dump() if request.trivia_context else None,

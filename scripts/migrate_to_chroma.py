@@ -63,7 +63,7 @@ def migrate(limit=None, batch_size=100):
         cursor = conn.cursor()
         
         # Determine query based on limit and incremental state
-        query = f"SELECT id, timestamp, channel, nick, content, is_bot FROM messages WHERE content IS NOT NULL AND content != '' AND id > {last_id}"
+        query = f"SELECT id, timestamp, COALESCE(network, 'libera'), channel, nick, content, is_bot FROM messages WHERE content IS NOT NULL AND content != '' AND id > {last_id}"
         if limit:
             query += f" LIMIT {limit}"
             
@@ -91,7 +91,7 @@ def migrate(limit=None, batch_size=100):
             texts_to_embed = []
             
             for row in batch:
-                msg_id, timestamp, channel, nick, content, is_bot = row
+                msg_id, timestamp, network, channel, nick, content, is_bot = row
                 
                 # Create unique ID for Chroma
                 chroma_id = f"msg_{msg_id}"
@@ -103,6 +103,7 @@ def migrate(limit=None, batch_size=100):
                     "original_id": msg_id,
                     "timestamp": timestamp,
                     "timestamp_unix": int(time.mktime(time.strptime(timestamp[:19], "%Y-%m-%d %H:%M:%S"))) if timestamp else 0,
+                    "network": network or "libera",
                     "channel": channel if channel else "PM",
                     "nick": nick,
                     "is_bot": bool(is_bot)

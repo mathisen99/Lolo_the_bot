@@ -40,6 +40,7 @@ type MessageHandler struct {
 	imageDownloadChannels []string                           // Channels to auto-download images from
 	sendMessageFunc       func(target, message string) error // Callback to send IRC messages
 	triviaManager         *trivia.Manager
+	network               string
 }
 
 // MessageHandlerConfig contains configuration for the message handler
@@ -58,6 +59,7 @@ type MessageHandlerConfig struct {
 	PhoneNotificationsURL    string
 	MentionAggregateDelay    time.Duration // How long to wait for overflow messages (default: 1s)
 	TriviaManager            *trivia.Manager
+	Network                  string
 }
 
 // NewMessageHandler creates a new message handler
@@ -71,6 +73,8 @@ func NewMessageHandler(config *MessageHandlerConfig) *MessageHandler {
 		config.TestMode,
 		config.PhoneNotificationsActive,
 		config.PhoneNotificationsURL,
+		config.Network,
+		config.Dispatcher,
 	)
 
 	// Default aggregate delay to 1 second if not specified
@@ -94,6 +98,7 @@ func NewMessageHandler(config *MessageHandlerConfig) *MessageHandler {
 		commandMetadata:       make(map[string]*CommandMetadata),
 		imageDownloadChannels: config.ImageDownloadChannels,
 		triviaManager:         config.TriviaManager,
+		network:               defaultNetwork(config.Network),
 	}
 }
 
@@ -218,7 +223,7 @@ func (h *MessageHandler) handleCommand(ctx context.Context, nick, hostmask, chan
 func (h *MessageHandler) handleCoreCommand(_ context.Context, nick, hostmask, channel, message string, isPM bool) ([]string, error) {
 	// Check if channel is enabled (for channel messages)
 	if !isPM {
-		enabled, err := h.db.GetChannelState(channel)
+		enabled, err := h.db.GetChannelStateForNetwork(h.network, channel)
 		if err != nil {
 			dbErr := errors.NewDatabaseError("check channel state", err)
 			return []string{h.errorHandler.Handle(dbErr)}, nil
@@ -276,7 +281,7 @@ func (h *MessageHandler) handleCoreCommand(_ context.Context, nick, hostmask, ch
 func (h *MessageHandler) handleAPICommand(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool) ([]string, error) {
 	// Check if channel is enabled (for channel messages)
 	if !isPM {
-		enabled, err := h.db.GetChannelState(channel)
+		enabled, err := h.db.GetChannelStateForNetwork(h.network, channel)
 		if err != nil {
 			dbErr := errors.NewDatabaseError("check channel state", err)
 			return []string{h.errorHandler.Handle(dbErr)}, nil
@@ -325,7 +330,7 @@ func (h *MessageHandler) handleAPICommand(ctx context.Context, command string, a
 
 	// Send command to Python API (non-streaming) and measure latency
 	startTime := time.Now()
-	apiResp, err := h.apiClient.SendCommand(ctx, command, args, nick, hostmask, channel, isPM, timeout)
+	apiResp, err := h.apiClient.SendCommand(ctx, command, args, nick, hostmask, h.network, channel, isPM, timeout)
 	latencyMs := float64(time.Since(startTime).Milliseconds())
 
 	// Record API latency metric (Requirement 30.2)
@@ -368,7 +373,7 @@ func (h *MessageHandler) handleAPICommand(ctx context.Context, command string, a
 	// Check if response requires specific permission level
 	if apiResp.RequiredLevel != "" {
 		requiredLevel := parsePermissionLevel(apiResp.RequiredLevel)
-		hasPermission, err := h.userManager.CheckPermission(nick, hostmask, requiredLevel)
+		hasPermission, err := h.dispatcher.CheckPermission(nick, hostmask, requiredLevel)
 		if err != nil {
 			dbErr := errors.NewDatabaseError("check permission", err)
 			return []string{h.errorHandler.Handle(dbErr)}, nil
@@ -401,7 +406,7 @@ func (h *MessageHandler) handleStreamingAPICommand(ctx context.Context, command 
 	}
 
 	// Send streaming command to Python API
-	responseChan, err := h.apiClient.SendCommandStream(ctx, command, args, nick, hostmask, channel, isPM, timeout)
+	responseChan, err := h.apiClient.SendCommandStream(ctx, command, args, nick, hostmask, h.network, channel, isPM, timeout)
 	if err != nil {
 		// Handle API error with proper error type
 		apiErr := errors.NewAPIError(err)
@@ -431,7 +436,7 @@ func (h *MessageHandler) handleStreamingAPICommand(ctx context.Context, command 
 		// Check if response requires specific permission level
 		if apiResp.RequiredLevel != "" {
 			requiredLevel := parsePermissionLevel(apiResp.RequiredLevel)
-			hasPermission, err := h.userManager.CheckPermission(nick, hostmask, requiredLevel)
+			hasPermission, err := h.dispatcher.CheckPermission(nick, hostmask, requiredLevel)
 			if err != nil {
 				dbErr := errors.NewDatabaseError("check permission", err)
 				return []string{h.errorHandler.Handle(dbErr)}, nil
@@ -478,7 +483,7 @@ func (h *MessageHandler) handleMention(ctx context.Context, nick, hostmask, chan
 		}
 	}
 
-	response, err := h.mentionHandler.HandleMention(ctx, message, nick, hostmask, channel, h.dispatcher.GetActivePrefix(channel, false), rewrittenStatusCallback)
+	response, err := h.mentionHandler.HandleMention(ctx, message, nick, hostmask, h.network, channel, h.dispatcher.GetActivePrefix(channel, false), rewrittenStatusCallback)
 	if err != nil {
 		h.logger.Error("Mention handling failed: %v", err)
 		return nil, nil // Don't send error messages for mentions
@@ -711,6 +716,7 @@ func (h *MessageHandler) logMessage(nick, hostmask, channel, content string, isB
 
 	msg := &database.Message{
 		Timestamp: time.Now(),
+		Network:   h.network,
 		Channel:   channel,
 		Nick:      nick,
 		Hostmask:  hostmask,
@@ -719,6 +725,13 @@ func (h *MessageHandler) logMessage(nick, hostmask, channel, content string, isB
 	}
 
 	return h.db.LogMessage(msg)
+}
+
+func defaultNetwork(network string) string {
+	if network == "" {
+		return database.DefaultNetwork
+	}
+	return network
 }
 
 // UpdateBotNick updates the bot's current nickname

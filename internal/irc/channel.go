@@ -14,6 +14,7 @@ type ChannelManager struct {
 	db             *database.DB
 	logger         output.Logger
 	client         *Client
+	network        string
 	joinedChannels map[string]bool
 	channelStates  map[string]bool // channel -> enabled/disabled
 	mu             sync.RWMutex
@@ -21,11 +22,15 @@ type ChannelManager struct {
 }
 
 // NewChannelManager creates a new channel manager
-func NewChannelManager(db *database.DB, logger output.Logger, client *Client, autoJoinList []string) *ChannelManager {
+func NewChannelManager(db *database.DB, logger output.Logger, client *Client, network string, autoJoinList []string) *ChannelManager {
+	if network == "" {
+		network = database.DefaultNetwork
+	}
 	return &ChannelManager{
 		db:             db,
 		logger:         logger,
 		client:         client,
+		network:        network,
 		joinedChannels: make(map[string]bool),
 		channelStates:  make(map[string]bool),
 		autoJoinList:   autoJoinList,
@@ -37,7 +42,7 @@ func (cm *ChannelManager) LoadChannelStates() error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	states, err := cm.db.ListChannelStates()
+	states, err := cm.db.ListChannelStatesForNetwork(cm.network)
 	if err != nil {
 		return fmt.Errorf("failed to load channel states: %w", err)
 	}
@@ -72,7 +77,7 @@ func (cm *ChannelManager) SetChannelEnabled(channel string, enabled bool) error 
 	defer cm.mu.Unlock()
 
 	// Update database
-	err := cm.db.SetChannelState(channel, enabled)
+	err := cm.db.SetChannelStateForNetwork(cm.network, channel, enabled)
 	if err != nil {
 		return fmt.Errorf("failed to set channel state: %w", err)
 	}
@@ -215,7 +220,7 @@ func (cm *ChannelManager) OnJoin(channel string) {
 	// Ensure channel is marked as enabled in database (default state)
 	if _, exists := cm.channelStates[channel]; !exists {
 		// Set default enabled state
-		err := cm.db.SetChannelState(channel, true)
+		err := cm.db.SetChannelStateForNetwork(cm.network, channel, true)
 		if err != nil {
 			cm.logger.Error("Failed to set default channel state for %s: %v", channel, err)
 		} else {

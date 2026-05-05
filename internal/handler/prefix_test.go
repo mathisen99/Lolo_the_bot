@@ -33,7 +33,7 @@ type testAPIClient struct {
 	commandsResponse     *CommandsResponse
 }
 
-func (c *testAPIClient) SendCommand(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool, timeout time.Duration) (*APIResponse, error) {
+func (c *testAPIClient) SendCommand(ctx context.Context, command string, args []string, nick, hostmask, network, channel string, isPM bool, timeout time.Duration) (*APIResponse, error) {
 	message, ok := c.commandResponses[command]
 	if !ok {
 		return &APIResponse{RequestID: "api-test", Status: "error", Message: "Unknown command: " + command}, nil
@@ -41,7 +41,7 @@ func (c *testAPIClient) SendCommand(ctx context.Context, command string, args []
 	return &APIResponse{RequestID: "api-test", Status: "success", Message: message}, nil
 }
 
-func (c *testAPIClient) SendCommandStream(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool, timeout time.Duration) (<-chan *APIResponse, error) {
+func (c *testAPIClient) SendCommandStream(ctx context.Context, command string, args []string, nick, hostmask, network, channel string, isPM bool, timeout time.Duration) (<-chan *APIResponse, error) {
 	ch := make(chan *APIResponse, 4)
 	go func() {
 		defer close(ch)
@@ -60,13 +60,13 @@ func (c *testAPIClient) SendCommandStream(ctx context.Context, command string, a
 	return ch, nil
 }
 
-func (c *testAPIClient) SendMention(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (*APIResponse, error) {
+func (c *testAPIClient) SendMention(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (*APIResponse, error) {
 	c.mentionPrefix = commandPrefix
 	c.mentionTriviaContext = triviaContext
 	return &APIResponse{RequestID: "mention", Status: "success", Message: c.mentionResponse}, nil
 }
 
-func (c *testAPIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (<-chan *APIResponse, error) {
+func (c *testAPIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (<-chan *APIResponse, error) {
 	c.mentionPrefix = commandPrefix
 	c.mentionTriviaContext = triviaContext
 	ch := make(chan *APIResponse, 1)

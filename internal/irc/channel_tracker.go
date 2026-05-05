@@ -15,6 +15,7 @@ type ChannelTracker struct {
 	db      *database.DB
 	logger  output.Logger
 	botNick string
+	network string
 
 	// Buffering for NAMES replies (353) - IRC sends multiple messages for large channels
 	namesBuf   map[string][]database.ChannelUserEntry // channel -> pending users
@@ -27,10 +28,19 @@ type ChannelTracker struct {
 
 // NewChannelTracker creates a new channel tracker
 func NewChannelTracker(db *database.DB, logger output.Logger, botNick string) *ChannelTracker {
+	return NewChannelTrackerForNetwork(db, logger, database.DefaultNetwork, botNick)
+}
+
+// NewChannelTrackerForNetwork creates a channel tracker bound to a network.
+func NewChannelTrackerForNetwork(db *database.DB, logger output.Logger, network, botNick string) *ChannelTracker {
+	if network == "" {
+		network = database.DefaultNetwork
+	}
 	return &ChannelTracker{
 		db:         db,
 		logger:     logger,
 		botNick:    botNick,
+		network:    network,
 		namesBuf:   make(map[string][]database.ChannelUserEntry),
 		namesTimer: make(map[string]*time.Timer),
 		// Keep this safely above normal inter-packet gaps for large channels.
@@ -107,7 +117,7 @@ func (ct *ChannelTracker) OnNamesReply(channel string, names []string) {
 		// Track bot status separately (we'll update it during flush)
 		if strings.EqualFold(nick, ct.botNick) {
 			// Update bot status immediately so we know our op status
-			if err := ct.db.SetBotChannelStatus(channelLower, true, isOp, isHalfop, isVoice); err != nil {
+			if err := ct.db.SetBotChannelStatusForNetwork(ct.network, channelLower, true, isOp, isHalfop, isVoice); err != nil {
 				ct.logger.Warning("Failed to set bot channel status for %s: %v", channel, err)
 			}
 		}
@@ -150,7 +160,7 @@ func (ct *ChannelTracker) flushNamesBuffer(channel string) {
 	ct.logger.Info("Flushing names snapshot (%d users) for %s to database", len(users), channel)
 
 	// Replace channel membership with authoritative NAMES snapshot.
-	if err := ct.db.ReplaceChannelUsersSnapshot(channel, users); err != nil {
+	if err := ct.db.ReplaceChannelUsersSnapshotForNetwork(ct.network, channel, users); err != nil {
 		ct.logger.Warning("Failed to replace user snapshot for %s: %v", channel, err)
 	}
 }
@@ -159,14 +169,30 @@ func (ct *ChannelTracker) flushNamesBuffer(channel string) {
 func (ct *ChannelTracker) OnJoin(channel, nick string, isSelf bool) {
 	if isSelf {
 		// Bot joined - set initial status (no modes yet)
-		if err := ct.db.SetBotChannelStatus(channel, true, false, false, false); err != nil {
+		if err := ct.db.SetBotChannelStatusForNetwork(ct.network, channel, true, false, false, false); err != nil {
 			ct.logger.Warning("Failed to set bot channel status for %s: %v", channel, err)
 		}
 	}
 
 	// Add user to channel (no modes on join)
-	if err := ct.db.UpsertChannelUser(channel, nick, false, false, false); err != nil {
+	if err := ct.db.UpsertChannelUserForNetwork(ct.network, channel, nick, false, false, false); err != nil {
 		ct.logger.Warning("Failed to add user %s to %s: %v", nick, channel, err)
+	}
+}
+
+// OnChannelMessage refreshes channel membership state from observed traffic.
+// Receiving channel PRIVMSG proves the bot is currently in that channel, even
+// if an earlier JOIN/NAMES event was missed during reconnect or registration.
+func (ct *ChannelTracker) OnChannelMessage(channel, nick string) {
+	if err := ct.db.TouchBotChannelActivityForNetwork(ct.network, channel); err != nil {
+		ct.logger.Warning("Failed to touch bot channel activity for %s: %v", channel, err)
+	}
+
+	if nick == "" || strings.EqualFold(nick, ct.botNick) {
+		return
+	}
+	if err := ct.db.TouchChannelUserActivityForNetwork(ct.network, channel, nick); err != nil {
+		ct.logger.Warning("Failed to refresh user %s in %s from channel message: %v", nick, channel, err)
 	}
 }
 
@@ -174,12 +200,12 @@ func (ct *ChannelTracker) OnJoin(channel, nick string, isSelf bool) {
 func (ct *ChannelTracker) OnPart(channel, nick string, isSelf bool) {
 	if isSelf {
 		// Bot left - clear all channel data
-		if err := ct.db.MarkBotLeftChannel(channel); err != nil {
+		if err := ct.db.MarkBotLeftChannelForNetwork(ct.network, channel); err != nil {
 			ct.logger.Warning("Failed to mark bot left %s: %v", channel, err)
 		}
 	} else {
 		// Remove user from channel
-		if err := ct.db.RemoveChannelUser(channel, nick); err != nil {
+		if err := ct.db.RemoveChannelUserForNetwork(ct.network, channel, nick); err != nil {
 			ct.logger.Warning("Failed to remove user %s from %s: %v", nick, channel, err)
 		}
 	}
@@ -189,7 +215,7 @@ func (ct *ChannelTracker) OnPart(channel, nick string, isSelf bool) {
 func (ct *ChannelTracker) OnQuit(nick string) {
 	// Get all channels and remove user from each
 	// For simplicity, we use a direct query to remove from all channels
-	if err := ct.db.RemoveUserFromAllChannels(nick); err != nil {
+	if err := ct.db.RemoveUserFromAllChannelsForNetwork(ct.network, nick); err != nil {
 		ct.logger.Warning("Failed to remove user %s from all channels: %v", nick, err)
 	}
 }
@@ -198,12 +224,12 @@ func (ct *ChannelTracker) OnQuit(nick string) {
 func (ct *ChannelTracker) OnKick(channel, nick string, isSelf bool) {
 	if isSelf {
 		// Bot was kicked - clear all channel data
-		if err := ct.db.MarkBotLeftChannel(channel); err != nil {
+		if err := ct.db.MarkBotLeftChannelForNetwork(ct.network, channel); err != nil {
 			ct.logger.Warning("Failed to mark bot left %s: %v", channel, err)
 		}
 	} else {
 		// Remove user from channel
-		if err := ct.db.RemoveChannelUser(channel, nick); err != nil {
+		if err := ct.db.RemoveChannelUserForNetwork(ct.network, channel, nick); err != nil {
 			ct.logger.Warning("Failed to remove kicked user %s from %s: %v", nick, channel, err)
 		}
 	}
@@ -212,13 +238,13 @@ func (ct *ChannelTracker) OnKick(channel, nick string, isSelf bool) {
 // OnMode handles mode changes for a user in a channel
 func (ct *ChannelTracker) OnMode(channel, nick, mode string, adding bool, isSelf bool) {
 	// Update user mode in database
-	if err := ct.db.UpdateUserMode(channel, nick, mode, adding); err != nil {
+	if err := ct.db.UpdateUserModeForNetwork(ct.network, channel, nick, mode, adding); err != nil {
 		ct.logger.Warning("Failed to update mode %s for %s in %s: %v", mode, nick, channel, err)
 	}
 
 	// If this affects the bot, update bot status
 	if isSelf {
-		if err := ct.db.UpdateBotChannelMode(channel, mode, adding); err != nil {
+		if err := ct.db.UpdateBotChannelModeForNetwork(ct.network, channel, mode, adding); err != nil {
 			ct.logger.Warning("Failed to update bot mode %s in %s: %v", mode, channel, err)
 		}
 	}
@@ -227,7 +253,7 @@ func (ct *ChannelTracker) OnMode(channel, nick, mode string, adding bool, isSelf
 // OnNickChange handles a user changing their nickname
 func (ct *ChannelTracker) OnNickChange(oldNick, newNick string, isSelf bool) {
 	// Update nick in all channels
-	if err := ct.db.RenameChannelUser(oldNick, newNick); err != nil {
+	if err := ct.db.RenameChannelUserForNetwork(ct.network, oldNick, newNick); err != nil {
 		ct.logger.Warning("Failed to rename user %s to %s: %v", oldNick, newNick, err)
 	}
 
@@ -239,7 +265,7 @@ func (ct *ChannelTracker) OnNickChange(oldNick, newNick string, isSelf bool) {
 
 // OnTopic handles topic changes
 func (ct *ChannelTracker) OnTopic(channel, topic string) {
-	if err := ct.db.SetBotChannelTopic(channel, topic); err != nil {
+	if err := ct.db.SetBotChannelTopicForNetwork(ct.network, channel, topic); err != nil {
 		ct.logger.Warning("Failed to set topic for %s: %v", channel, err)
 	}
 }

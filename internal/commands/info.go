@@ -452,7 +452,7 @@ func (c *SeenCommand) Execute(ctx *Context) (*Response, error) {
 	nick := ctx.Args[0]
 
 	// Query database for last message from this user
-	msg, err := c.db.GetLastSeen(nick)
+	msg, err := c.db.GetLastSeenForNetwork(ctx.Network, nick)
 	if err != nil {
 		// Check if it's a "not found" error
 		if errors.Is(err, sql.ErrNoRows) {

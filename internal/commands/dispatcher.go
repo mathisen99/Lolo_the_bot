@@ -15,16 +15,28 @@ type Dispatcher struct {
 	userManager     *user.Manager
 	defaultPrefix   string
 	channelPrefixes map[string]string
+	network         string
+	ownerVerifier   func(nick string) (bool, error)
 	mu              sync.RWMutex
 }
 
 // NewDispatcher creates a new command dispatcher
 func NewDispatcher(registry *Registry, userManager *user.Manager, commandPrefix string) *Dispatcher {
+	return NewDispatcherForNetwork(registry, userManager, commandPrefix, database.DefaultNetwork, nil)
+}
+
+// NewDispatcherForNetwork creates a new command dispatcher for one IRC network.
+func NewDispatcherForNetwork(registry *Registry, userManager *user.Manager, commandPrefix, network string, ownerVerifier func(nick string) (bool, error)) *Dispatcher {
+	if network == "" {
+		network = database.DefaultNetwork
+	}
 	return &Dispatcher{
 		registry:        registry,
 		userManager:     userManager,
 		defaultPrefix:   commandPrefix,
 		channelPrefixes: make(map[string]string),
+		network:         network,
+		ownerVerifier:   ownerVerifier,
 	}
 }
 
@@ -94,13 +106,13 @@ func (d *Dispatcher) Dispatch(nick, hostmask, channel, message string, isPM bool
 	}
 
 	// Get user information and permission level
-	userLevel, isRegistered, err := d.getUserPermissionLevel(nick, hostmask)
+	userLevel, isRegistered, err := d.ResolvePermission(nick, hostmask)
 	if err != nil {
 		return nil, true, fmt.Errorf("failed to get user permission level: %w", err)
 	}
 
 	// Create command context
-	ctx := NewContext(command, args, message, nick, hostmask, channel, isPM, userLevel, isRegistered, d.GetActivePrefix(channel, isPM))
+	ctx := NewContextForNetwork(command, args, message, nick, hostmask, d.network, channel, isPM, userLevel, isRegistered, d.GetActivePrefix(channel, isPM))
 
 	// Check command cooldown before executing (Requirement 15.8, 15.9)
 	// Get the command to check its cooldown duration
@@ -140,7 +152,27 @@ func (d *Dispatcher) Dispatch(nick, hostmask, channel, message string, isPM bool
 
 // getUserPermissionLevel retrieves the user's permission level
 // Returns the permission level, whether the user is registered, and any error
-func (d *Dispatcher) getUserPermissionLevel(nick, hostmask string) (database.PermissionLevel, bool, error) {
+func (d *Dispatcher) ResolvePermission(nick, hostmask string) (database.PermissionLevel, bool, error) {
+	if d.network == "rizon" {
+		user, err := d.userManager.GetUser(nick)
+		if err != nil {
+			return database.LevelNormal, false, fmt.Errorf("failed to get user by nick: %w", err)
+		}
+		if user != nil && user.Level == database.LevelIgnored {
+			return database.LevelIgnored, true, nil
+		}
+		if d.ownerVerifier != nil {
+			verified, err := d.ownerVerifier(nick)
+			if err != nil {
+				return database.LevelNormal, user != nil, err
+			}
+			if verified {
+				return database.LevelOwner, true, nil
+			}
+		}
+		return database.LevelNormal, user != nil, nil
+	}
+
 	// Try to get user by nickname first
 	user, err := d.userManager.GetUser(nick)
 	if err != nil {
@@ -166,6 +198,15 @@ func (d *Dispatcher) getUserPermissionLevel(nick, hostmask string) (database.Per
 
 	// User not found - they are unregistered with normal level (no special permissions)
 	return database.LevelNormal, false, nil
+}
+
+// CheckPermission checks whether the current network policy grants a required level.
+func (d *Dispatcher) CheckPermission(nick, hostmask string, required database.PermissionLevel) (bool, error) {
+	level, _, err := d.ResolvePermission(nick, hostmask)
+	if err != nil {
+		return false, err
+	}
+	return HasPermission(level, required), nil
 }
 
 // GetRegistry returns the command registry

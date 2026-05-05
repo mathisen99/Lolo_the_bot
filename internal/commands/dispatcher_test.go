@@ -110,3 +110,43 @@ func TestDispatcherDispatchesActivePrefixInContext(t *testing.T) {
 		t.Fatalf("expected active prefix '-' in response, got %#v", response)
 	}
 }
+
+func TestRizonOwnerPermissionRequiresNickServVerifier(t *testing.T) {
+	db, cleanup := database.NewTestDB(t)
+	defer cleanup()
+
+	userMgr := user.NewManager(db)
+	if err := userMgr.AddUser("admin", "admin@host", database.LevelAdmin); err != nil {
+		t.Fatalf("AddUser(admin) failed: %v", err)
+	}
+
+	verified := false
+	dispatcher := NewDispatcherForNetwork(NewRegistry(), userMgr, "!", "rizon", func(nick string) (bool, error) {
+		return verified && nick == "Mathisen", nil
+	})
+
+	level, registered, err := dispatcher.ResolvePermission("admin", "admin@host")
+	if err != nil {
+		t.Fatalf("ResolvePermission(admin) failed: %v", err)
+	}
+	if level != database.LevelNormal || !registered {
+		t.Fatalf("expected Rizon DB admin to be normal/registered, got level=%v registered=%v", level, registered)
+	}
+
+	level, registered, err = dispatcher.ResolvePermission("Mathisen", "any@host")
+	if err != nil {
+		t.Fatalf("ResolvePermission(Mathisen unverified) failed: %v", err)
+	}
+	if level != database.LevelNormal || registered {
+		t.Fatalf("expected unverified Mathisen to be normal/unregistered, got level=%v registered=%v", level, registered)
+	}
+
+	verified = true
+	level, registered, err = dispatcher.ResolvePermission("Mathisen", "other@host")
+	if err != nil {
+		t.Fatalf("ResolvePermission(Mathisen verified) failed: %v", err)
+	}
+	if level != database.LevelOwner || !registered {
+		t.Fatalf("expected verified Mathisen to be owner/registered, got level=%v registered=%v", level, registered)
+	}
+}

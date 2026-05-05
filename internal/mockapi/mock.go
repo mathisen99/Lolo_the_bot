@@ -31,7 +31,7 @@ func New() *MockAPIClient {
 }
 
 // SendCommand returns a mock response for the given command
-func (m *MockAPIClient) SendCommand(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool, timeout time.Duration) (*handler.APIResponse, error) {
+func (m *MockAPIClient) SendCommand(ctx context.Context, command string, args []string, nick, hostmask, network, channel string, isPM bool, timeout time.Duration) (*handler.APIResponse, error) {
 	// Simulate latency if configured
 	if m.latency > 0 {
 		select {
@@ -60,7 +60,7 @@ func (m *MockAPIClient) SendCommand(ctx context.Context, command string, args []
 }
 
 // SendCommandStream returns a mock streaming response
-func (m *MockAPIClient) SendCommandStream(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool, timeout time.Duration) (<-chan *handler.APIResponse, error) {
+func (m *MockAPIClient) SendCommandStream(ctx context.Context, command string, args []string, nick, hostmask, network, channel string, isPM bool, timeout time.Duration) (<-chan *handler.APIResponse, error) {
 	responseChan := make(chan *handler.APIResponse, 1)
 
 	go func() {
@@ -96,7 +96,7 @@ func (m *MockAPIClient) SendCommandStream(ctx context.Context, command string, a
 }
 
 // SendMention returns a mock response for mentions
-func (m *MockAPIClient) SendMention(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *handler.TriviaContext, deepMode bool) (*handler.APIResponse, error) {
+func (m *MockAPIClient) SendMention(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *handler.TriviaContext, deepMode bool) (*handler.APIResponse, error) {
 	// Simulate latency if configured
 	if m.latency > 0 {
 		select {
@@ -126,7 +126,7 @@ func (m *MockAPIClient) SendMention(ctx context.Context, message, nick, hostmask
 }
 
 // SendMentionStream returns a mock streaming response for mentions
-func (m *MockAPIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *handler.TriviaContext, deepMode bool) (<-chan *handler.APIResponse, error) {
+func (m *MockAPIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *handler.TriviaContext, deepMode bool) (<-chan *handler.APIResponse, error) {
 	responseChan := make(chan *handler.APIResponse, 1)
 
 	go func() {

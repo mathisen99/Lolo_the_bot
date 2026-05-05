@@ -26,6 +26,7 @@ const (
 type Message struct {
 	ID        int64
 	Timestamp time.Time
+	Network   string
 	Channel   string // Empty for PMs or global events (QUIT)
 	Nick      string
 	Hostmask  string
@@ -36,11 +37,12 @@ type Message struct {
 
 // LogMessage stores a message in the database
 func (db *DB) LogMessage(msg *Message) error {
+	msg.Network = normalizeNetwork(msg.Network)
 	query := `
-		INSERT INTO messages (timestamp, channel, nick, hostmask, content, is_bot, event_type)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO messages (timestamp, network, channel, nick, hostmask, content, is_bot, event_type)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	result, err := db.conn.Exec(query, msg.Timestamp, msg.Channel, msg.Nick, msg.Hostmask, msg.Content, msg.IsBot, msg.EventType)
+	result, err := db.conn.Exec(query, msg.Timestamp, msg.Network, msg.Channel, msg.Nick, msg.Hostmask, msg.Content, msg.IsBot, msg.EventType)
 	if err != nil {
 		return fmt.Errorf("failed to log message: %w", err)
 	}
@@ -56,8 +58,14 @@ func (db *DB) LogMessage(msg *Message) error {
 
 // LogEvent logs an IRC event (join, part, kick, quit, nick change, etc.)
 func (db *DB) LogEvent(eventType, channel, nick, hostmask, content string) error {
+	return db.LogEventForNetwork(DefaultNetwork, eventType, channel, nick, hostmask, content)
+}
+
+// LogEventForNetwork logs an IRC event (join, part, kick, quit, nick change, etc.) for a network.
+func (db *DB) LogEventForNetwork(network, eventType, channel, nick, hostmask, content string) error {
 	msg := &Message{
 		Timestamp: time.Now(),
+		Network:   network,
 		Channel:   channel,
 		Nick:      nick,
 		Hostmask:  hostmask,
@@ -70,17 +78,24 @@ func (db *DB) LogEvent(eventType, channel, nick, hostmask, content string) error
 
 // GetLastSeen retrieves the last message from a user (case-insensitive)
 func (db *DB) GetLastSeen(nick string) (*Message, error) {
+	return db.GetLastSeenForNetwork(DefaultNetwork, nick)
+}
+
+// GetLastSeenForNetwork retrieves the last message from a user on one network (case-insensitive).
+func (db *DB) GetLastSeenForNetwork(network, nick string) (*Message, error) {
+	network = normalizeNetwork(network)
 	query := `
-		SELECT id, timestamp, channel, nick, hostmask, content, is_bot, COALESCE(event_type, '')
+		SELECT id, timestamp, COALESCE(network, 'libera'), channel, nick, hostmask, content, is_bot, COALESCE(event_type, '')
 		FROM messages
-		WHERE LOWER(nick) = LOWER(?)
+		WHERE COALESCE(network, 'libera') = ? AND LOWER(nick) = LOWER(?)
 		ORDER BY timestamp DESC
 		LIMIT 1
 	`
 	msg := &Message{}
-	err := db.conn.QueryRow(query, nick).Scan(
+	err := db.conn.QueryRow(query, network, nick).Scan(
 		&msg.ID,
 		&msg.Timestamp,
+		&msg.Network,
 		&msg.Channel,
 		&msg.Nick,
 		&msg.Hostmask,
@@ -96,6 +111,7 @@ func (db *DB) GetLastSeen(nick string) (*Message, error) {
 
 // MessageFilter represents filters for querying messages
 type MessageFilter struct {
+	Network       string
 	Channel       string
 	Nick          string
 	StartTime     time.Time
@@ -108,44 +124,51 @@ type MessageFilter struct {
 // QueryMessages retrieves messages based on filters
 func (db *DB) QueryMessages(filter *MessageFilter) ([]*Message, error) {
 	query := `
-		SELECT id, timestamp, channel, nick, hostmask, content, is_bot, COALESCE(event_type, '')
+		SELECT id, timestamp, COALESCE(network, 'libera'), channel, nick, hostmask, content, is_bot, COALESCE(event_type, '')
 		FROM messages
 		WHERE 1=1
 	`
 	args := []interface{}{}
 
-	if filter.Channel != "" {
+	network := DefaultNetwork
+	if filter != nil {
+		network = normalizeNetwork(filter.Network)
+	}
+	query += " AND network = ?"
+	args = append(args, network)
+
+	if filter != nil && filter.Channel != "" {
 		query += " AND channel = ?"
 		args = append(args, filter.Channel)
 	}
 
-	if filter.Nick != "" {
+	if filter != nil && filter.Nick != "" {
 		query += " AND nick = ?"
 		args = append(args, filter.Nick)
 	}
 
-	if !filter.StartTime.IsZero() {
+	if filter != nil && !filter.StartTime.IsZero() {
 		query += " AND timestamp >= ?"
 		args = append(args, filter.StartTime)
 	}
 
-	if !filter.EndTime.IsZero() {
+	if filter != nil && !filter.EndTime.IsZero() {
 		query += " AND timestamp <= ?"
 		args = append(args, filter.EndTime)
 	}
 
 	// Filter by event type
-	if filter.EventType != "" {
+	if filter != nil && filter.EventType != "" {
 		query += " AND event_type = ?"
 		args = append(args, filter.EventType)
-	} else if !filter.IncludeEvents {
+	} else if filter == nil || !filter.IncludeEvents {
 		// By default, only return regular messages (no events)
 		query += " AND (event_type IS NULL OR event_type = '')"
 	}
 
 	query += " ORDER BY timestamp DESC"
 
-	if filter.Limit > 0 {
+	if filter != nil && filter.Limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, filter.Limit)
 	}
@@ -164,6 +187,7 @@ func (db *DB) QueryMessages(filter *MessageFilter) ([]*Message, error) {
 		err := rows.Scan(
 			&msg.ID,
 			&msg.Timestamp,
+			&msg.Network,
 			&msg.Channel,
 			&msg.Nick,
 			&msg.Hostmask,

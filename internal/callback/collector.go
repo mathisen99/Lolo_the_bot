@@ -26,11 +26,23 @@ func (s *Server) startCollecting(key string, timeout time.Duration) *ResponseCol
 	return collector
 }
 
+func collectorKey(network, key string) string {
+	return normalizeNetwork(network) + "|" + key
+}
+
+func (s *Server) startCollectingForNetwork(network, key string, timeout time.Duration) *ResponseCollector {
+	return s.startCollecting(collectorKey(network, key), timeout)
+}
+
 // stopCollecting removes a collector
 func (s *Server) stopCollecting(key string) {
 	s.mu.Lock()
 	delete(s.pendingRequests, key)
 	s.mu.Unlock()
+}
+
+func (s *Server) stopCollectingForNetwork(network, key string) {
+	s.stopCollecting(collectorKey(network, key))
 }
 
 // AddResponse adds a response line to a collector
@@ -73,9 +85,15 @@ func (c *ResponseCollector) Wait() string {
 // HandleServiceResponse routes incoming service responses to the appropriate collector
 // This should be called from the IRC message handler when receiving NOTICEs
 func (s *Server) HandleServiceResponse(source, message string) {
+	s.HandleServiceResponseForNetwork("", source, message)
+}
+
+// HandleServiceResponseForNetwork routes incoming service responses for one IRC network.
+func (s *Server) HandleServiceResponseForNetwork(network, source, message string) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	network = normalizeNetwork(network)
 	sourceLower := strings.ToLower(source)
 
 	// Route based on source
@@ -83,15 +101,20 @@ func (s *Server) HandleServiceResponse(source, message string) {
 
 	switch sourceLower {
 	case "nickserv":
-		collector = s.pendingRequests["nickserv"]
+		collector = s.pendingRequests[collectorKey(network, "nickserv")]
 	case "chanserv":
-		collector = s.pendingRequests["chanserv"]
+		collector = s.pendingRequests[collectorKey(network, "chanserv")]
 	case "alis":
-		collector = s.pendingRequests["alis"]
+		collector = s.pendingRequests[collectorKey(network, "alis")]
 	default:
 		// Check for CTCP responses or WHOIS numerics
+		prefix := network + "|"
 		for key, c := range s.pendingRequests {
-			if strings.HasPrefix(key, "ctcp_") || strings.HasPrefix(key, "whois_") || strings.HasPrefix(key, "whowas_") {
+			if !strings.HasPrefix(key, prefix) {
+				continue
+			}
+			rawKey := strings.TrimPrefix(key, prefix)
+			if strings.HasPrefix(rawKey, "ctcp_") || strings.HasPrefix(rawKey, "whois_") || strings.HasPrefix(rawKey, "whowas_") {
 				collector = c
 				break
 			}
@@ -105,6 +128,11 @@ func (s *Server) HandleServiceResponse(source, message string) {
 
 // HandleNumericResponse handles numeric IRC responses (WHOIS, WHOWAS, etc.)
 func (s *Server) HandleNumericResponse(numeric int, params []string) {
+	s.HandleNumericResponseForNetwork("", numeric, params)
+}
+
+// HandleNumericResponseForNetwork handles numeric IRC responses for one network.
+func (s *Server) HandleNumericResponseForNetwork(network string, numeric int, params []string) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -118,8 +146,13 @@ func (s *Server) HandleNumericResponse(numeric int, params []string) {
 	}
 
 	// Find the appropriate collector
+	networkPrefix := normalizeNetwork(network) + "|"
 	for key, collector := range s.pendingRequests {
-		if (isWhois && strings.HasPrefix(key, "whois_")) || (isWhowas && strings.HasPrefix(key, "whowas_")) {
+		if !strings.HasPrefix(key, networkPrefix) {
+			continue
+		}
+		rawKey := strings.TrimPrefix(key, networkPrefix)
+		if (isWhois && strings.HasPrefix(rawKey, "whois_")) || (isWhowas && strings.HasPrefix(rawKey, "whowas_")) {
 			// Format the response nicely
 			if len(params) > 1 {
 				message := formatNumericResponse(numeric, params)
@@ -192,10 +225,15 @@ func formatNumericResponse(numeric int, params []string) string {
 
 // HandleCTCPResponse handles CTCP responses
 func (s *Server) HandleCTCPResponse(source, ctcpType, response string) {
+	s.HandleCTCPResponseForNetwork("", source, ctcpType, response)
+}
+
+// HandleCTCPResponseForNetwork handles CTCP responses for one network.
+func (s *Server) HandleCTCPResponseForNetwork(network, source, ctcpType, response string) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	key := "ctcp_" + source
+	key := collectorKey(network, "ctcp_"+source)
 	if collector, ok := s.pendingRequests[key]; ok {
 		collector.AddResponse(ctcpType + ": " + response)
 		collector.Complete()

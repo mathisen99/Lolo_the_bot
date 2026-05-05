@@ -11,6 +11,8 @@ import (
 	"github.com/yourusername/lolo/internal/output"
 )
 
+const defaultNetwork = "libera"
+
 // IRCSender can send messages to IRC channels/users
 type IRCSender interface {
 	SendMessage(target, message string) error
@@ -20,6 +22,7 @@ type IRCSender interface {
 type CheckJoinRequest struct {
 	Nick    string `json:"nick"`
 	Channel string `json:"channel"`
+	Network string `json:"network,omitempty"`
 }
 
 // CheckJoinResponse is the response from the Python API
@@ -33,14 +36,24 @@ type Checker struct {
 	sender      IRCSender
 	logger      output.Logger
 	httpClient  *http.Client
+	network     string
 }
 
 // NewChecker creates a new reminder checker
 func NewChecker(apiEndpoint string, sender IRCSender, logger output.Logger) *Checker {
+	return NewCheckerForNetwork(apiEndpoint, sender, logger, defaultNetwork)
+}
+
+// NewCheckerForNetwork creates a reminder checker scoped to one IRC network.
+func NewCheckerForNetwork(apiEndpoint string, sender IRCSender, logger output.Logger, network string) *Checker {
+	if network == "" {
+		network = defaultNetwork
+	}
 	return &Checker{
 		apiEndpoint: apiEndpoint,
 		sender:      sender,
 		logger:      logger,
+		network:     network,
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
@@ -53,6 +66,7 @@ func (c *Checker) OnJoin(nick, channel string) {
 	req := CheckJoinRequest{
 		Nick:    nick,
 		Channel: channel,
+		Network: c.network,
 	}
 
 	body, err := json.Marshal(req)

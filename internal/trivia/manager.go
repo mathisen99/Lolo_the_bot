@@ -13,6 +13,8 @@ import (
 	"github.com/yourusername/lolo/internal/output"
 )
 
+const defaultNetwork = "libera"
+
 var ignoredSimilarityTokens = map[string]struct{}{
 	"what":  {},
 	"which": {},
@@ -115,6 +117,7 @@ type ManagerConfig struct {
 	Generator         *Generator
 	Logger            output.Logger
 	GenerationRetries int
+	Network           string
 }
 
 // Manager coordinates active rounds, generation, and persistence.
@@ -123,6 +126,7 @@ type Manager struct {
 	generator         *Generator
 	logger            output.Logger
 	generationRetries int
+	network           string
 
 	mu               sync.Mutex
 	activeRounds     map[string]*activeRound
@@ -144,11 +148,19 @@ func NewManager(config ManagerConfig) *Manager {
 		generator:         config.Generator,
 		logger:            config.Logger,
 		generationRetries: retries,
+		network:           normalizeNetwork(config.Network),
 		activeRounds:      make(map[string]*activeRound),
 		startingRound:     make(map[string]bool),
 		lastTriviaTopic:   make(map[string]string),
 		lastCodeLanguage:  make(map[string]string),
 	}
+}
+
+func normalizeNetwork(network string) string {
+	if strings.TrimSpace(network) == "" {
+		return defaultNetwork
+	}
+	return strings.ToLower(strings.TrimSpace(network))
 }
 
 // SetSendMessageFunc sets callback used for async timeout announcements.
@@ -216,7 +228,7 @@ func (m *Manager) StartRound(ctx context.Context, channel, topic string) (string
 		return "", ErrTopicRequired
 	}
 
-	settings, err := m.store.GetSettings(channel)
+	settings, err := m.store.GetSettingsForNetwork(m.network, channel)
 	if err != nil {
 		return "", err
 	}
@@ -261,7 +273,7 @@ func (m *Manager) StartCodeRound(ctx context.Context, channel, language string) 
 		return "", ErrUnsupportedCodeLanguage
 	}
 
-	settings, err := m.store.GetSettings(channel)
+	settings, err := m.store.GetSettingsForNetwork(m.network, channel)
 	if err != nil {
 		return "", err
 	}
@@ -335,7 +347,7 @@ func (m *Manager) startRoundFromStoredQuestion(channel string, settings ChannelS
 	roundSettings.Difficulty = roundDifficulty
 
 	startedAt := time.Now()
-	roundID, err := m.store.StartRound(channel, topic, mode, question.Variant, language, question.ID, modifiers, startedAt)
+	roundID, err := m.store.StartRoundForNetwork(m.network, channel, topic, mode, question.Variant, language, question.ID, modifiers, startedAt)
 	if err != nil {
 		return "", err
 	}
@@ -576,11 +588,11 @@ func (m *Manager) GetLastCodeLanguage(channel string) (string, bool) {
 
 // GetSettings returns the channel trivia settings.
 func (m *Manager) GetSettings(channel string) (ChannelSettings, error) {
-	return m.store.GetSettings(channel)
+	return m.store.GetSettingsForNetwork(m.network, channel)
 }
 
 func (m *Manager) selectTriviaVariant(channel string) (string, error) {
-	recent, err := m.store.GetRecentRoundVariants(channel, 5)
+	recent, err := m.store.GetRecentRoundVariantsForNetwork(m.network, channel, 5)
 	if err != nil {
 		return "", err
 	}
@@ -592,12 +604,12 @@ func (m *Manager) UpdateAnswerTime(channel string, seconds int) (ChannelSettings
 	if seconds < 5 || seconds > 600 {
 		return ChannelSettings{}, fmt.Errorf("answer time must be between 5 and 600 seconds")
 	}
-	settings, err := m.store.GetSettings(channel)
+	settings, err := m.store.GetSettingsForNetwork(m.network, channel)
 	if err != nil {
 		return ChannelSettings{}, err
 	}
 	settings.AnswerTimeSeconds = seconds
-	if err := m.store.SaveSettings(channel, settings); err != nil {
+	if err := m.store.SaveSettingsForNetwork(m.network, channel, settings); err != nil {
 		return ChannelSettings{}, err
 	}
 	return settings, nil
@@ -608,12 +620,12 @@ func (m *Manager) UpdateCodeAnswerTime(channel string, seconds int) (ChannelSett
 	if seconds < 5 || seconds > 600 {
 		return ChannelSettings{}, fmt.Errorf("code answer time must be between 5 and 600 seconds")
 	}
-	settings, err := m.store.GetSettings(channel)
+	settings, err := m.store.GetSettingsForNetwork(m.network, channel)
 	if err != nil {
 		return ChannelSettings{}, err
 	}
 	settings.CodeAnswerTimeSeconds = seconds
-	if err := m.store.SaveSettings(channel, settings); err != nil {
+	if err := m.store.SaveSettingsForNetwork(m.network, channel, settings); err != nil {
 		return ChannelSettings{}, err
 	}
 	return settings, nil
@@ -621,12 +633,12 @@ func (m *Manager) UpdateCodeAnswerTime(channel string, seconds int) (ChannelSett
 
 // UpdateTriviaHintsEnabled updates trivia-round hint usage behavior for a channel.
 func (m *Manager) UpdateTriviaHintsEnabled(channel string, enabled bool) (ChannelSettings, error) {
-	settings, err := m.store.GetSettings(channel)
+	settings, err := m.store.GetSettingsForNetwork(m.network, channel)
 	if err != nil {
 		return ChannelSettings{}, err
 	}
 	settings.TriviaHintsEnabled = enabled
-	if err := m.store.SaveSettings(channel, settings); err != nil {
+	if err := m.store.SaveSettingsForNetwork(m.network, channel, settings); err != nil {
 		return ChannelSettings{}, err
 	}
 	return settings, nil
@@ -634,12 +646,12 @@ func (m *Manager) UpdateTriviaHintsEnabled(channel string, enabled bool) (Channe
 
 // UpdateCodeHintsEnabled updates code-round hint usage behavior for a channel.
 func (m *Manager) UpdateCodeHintsEnabled(channel string, enabled bool) (ChannelSettings, error) {
-	settings, err := m.store.GetSettings(channel)
+	settings, err := m.store.GetSettingsForNetwork(m.network, channel)
 	if err != nil {
 		return ChannelSettings{}, err
 	}
 	settings.CodeHintsEnabled = enabled
-	if err := m.store.SaveSettings(channel, settings); err != nil {
+	if err := m.store.SaveSettingsForNetwork(m.network, channel, settings); err != nil {
 		return ChannelSettings{}, err
 	}
 	return settings, nil
@@ -647,13 +659,13 @@ func (m *Manager) UpdateCodeHintsEnabled(channel string, enabled bool) (ChannelS
 
 // UpdateHintsEnabled updates both trivia and code hint usage behavior for a channel.
 func (m *Manager) UpdateHintsEnabled(channel string, enabled bool) (ChannelSettings, error) {
-	settings, err := m.store.GetSettings(channel)
+	settings, err := m.store.GetSettingsForNetwork(m.network, channel)
 	if err != nil {
 		return ChannelSettings{}, err
 	}
 	settings.TriviaHintsEnabled = enabled
 	settings.CodeHintsEnabled = enabled
-	if err := m.store.SaveSettings(channel, settings); err != nil {
+	if err := m.store.SaveSettingsForNetwork(m.network, channel, settings); err != nil {
 		return ChannelSettings{}, err
 	}
 	return settings, nil
@@ -674,14 +686,14 @@ func (m *Manager) UpdatePoints(channel string, base, minimum, hintPenalty int) (
 		return ChannelSettings{}, fmt.Errorf("hint penalty must be non-negative")
 	}
 
-	settings, err := m.store.GetSettings(channel)
+	settings, err := m.store.GetSettingsForNetwork(m.network, channel)
 	if err != nil {
 		return ChannelSettings{}, err
 	}
 	settings.BasePoints = base
 	settings.MinimumPoints = minimum
 	settings.HintPenalty = hintPenalty
-	if err := m.store.SaveSettings(channel, settings); err != nil {
+	if err := m.store.SaveSettingsForNetwork(m.network, channel, settings); err != nil {
 		return ChannelSettings{}, err
 	}
 	return settings, nil
@@ -689,12 +701,12 @@ func (m *Manager) UpdatePoints(channel string, base, minimum, hintPenalty int) (
 
 // UpdateEnabled toggles trivia for a channel.
 func (m *Manager) UpdateEnabled(channel string, enabled bool) (ChannelSettings, error) {
-	settings, err := m.store.GetSettings(channel)
+	settings, err := m.store.GetSettingsForNetwork(m.network, channel)
 	if err != nil {
 		return ChannelSettings{}, err
 	}
 	settings.Enabled = enabled
-	if err := m.store.SaveSettings(channel, settings); err != nil {
+	if err := m.store.SaveSettingsForNetwork(m.network, channel, settings); err != nil {
 		return ChannelSettings{}, err
 	}
 	return settings, nil
@@ -706,12 +718,12 @@ func (m *Manager) UpdateDifficulty(channel, difficulty string) (ChannelSettings,
 		return ChannelSettings{}, fmt.Errorf("difficulty must be easy, medium, or hard")
 	}
 
-	settings, err := m.store.GetSettings(channel)
+	settings, err := m.store.GetSettingsForNetwork(m.network, channel)
 	if err != nil {
 		return ChannelSettings{}, err
 	}
 	settings.Difficulty = NormalizeDifficulty(difficulty)
-	if err := m.store.SaveSettings(channel, settings); err != nil {
+	if err := m.store.SaveSettingsForNetwork(m.network, channel, settings); err != nil {
 		return ChannelSettings{}, err
 	}
 	return settings, nil
@@ -723,12 +735,12 @@ func (m *Manager) UpdateCodeDifficulty(channel, difficulty string) (ChannelSetti
 		return ChannelSettings{}, fmt.Errorf("code difficulty must be easy, medium, or hard")
 	}
 
-	settings, err := m.store.GetSettings(channel)
+	settings, err := m.store.GetSettingsForNetwork(m.network, channel)
 	if err != nil {
 		return ChannelSettings{}, err
 	}
 	settings.CodeDifficulty = NormalizeDifficulty(difficulty)
-	if err := m.store.SaveSettings(channel, settings); err != nil {
+	if err := m.store.SaveSettingsForNetwork(m.network, channel, settings); err != nil {
 		return ChannelSettings{}, err
 	}
 	return settings, nil
@@ -736,27 +748,27 @@ func (m *Manager) UpdateCodeDifficulty(channel, difficulty string) (ChannelSetti
 
 // GetTopScores returns top leaderboard entries.
 func (m *Manager) GetTopScores(channel string, limit int) ([]ScoreEntry, error) {
-	return m.store.GetTopScores(channel, limit)
+	return m.store.GetTopScoresForNetwork(m.network, channel, limit)
 }
 
 // GetScore returns a score for nick in channel.
 func (m *Manager) GetScore(channel, nick string) (int, bool, error) {
-	return m.store.GetScore(channel, nick)
+	return m.store.GetScoreForNetwork(m.network, channel, nick)
 }
 
 // SetScore sets a user's score.
 func (m *Manager) SetScore(channel, nick string, points int) error {
-	return m.store.SetScore(channel, nick, points)
+	return m.store.SetScoreForNetwork(m.network, channel, nick, points)
 }
 
 // AddScore modifies score by delta and returns the new score.
 func (m *Manager) AddScore(channel, nick string, delta int) (int, error) {
-	return m.store.AddScore(channel, nick, delta)
+	return m.store.AddScoreForNetwork(m.network, channel, nick, delta)
 }
 
 // ResetScore removes a user's score row.
 func (m *Manager) ResetScore(channel, nick string) error {
-	return m.store.ResetScore(channel, nick)
+	return m.store.ResetScoreForNetwork(m.network, channel, nick)
 }
 
 func (m *Manager) generateAndPersistQuestion(ctx context.Context, topic, variant, difficulty string) (*StoredQuestion, error) {
@@ -1129,7 +1141,7 @@ type finalizeResult struct {
 
 func (m *Manager) finalizeWinner(round *activeRound, guess GuessLog, reason string) (finalizeResult, error) {
 	points := calculatePoints(round.Settings, guess.Timestamp.Sub(round.StartedAt), round.HintUsed)
-	streak, err := m.store.GetWinnerStreak(round.Channel, guess.Nick, 12)
+	streak, err := m.store.GetWinnerStreakForNetwork(m.network, round.Channel, guess.Nick, 12)
 	if err != nil {
 		return finalizeResult{}, err
 	}
@@ -1138,7 +1150,8 @@ func (m *Manager) finalizeWinner(round *activeRound, guess GuessLog, reason stri
 		points += bonus
 	}
 
-	updatedScore, err := m.store.FinalizeRoundWin(
+	updatedScore, err := m.store.FinalizeRoundWinForNetwork(
+		m.network,
 		round.RoundID,
 		round.Channel,
 		guess.Nick,

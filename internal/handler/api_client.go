@@ -19,10 +19,10 @@ import (
 
 // APIClientInterface defines the interface for API clients (real or mock)
 type APIClientInterface interface {
-	SendCommand(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool, timeout time.Duration) (*APIResponse, error)
-	SendCommandStream(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool, timeout time.Duration) (<-chan *APIResponse, error)
-	SendMention(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (*APIResponse, error)
-	SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (<-chan *APIResponse, error)
+	SendCommand(ctx context.Context, command string, args []string, nick, hostmask, network, channel string, isPM bool, timeout time.Duration) (*APIResponse, error)
+	SendCommandStream(ctx context.Context, command string, args []string, nick, hostmask, network, channel string, isPM bool, timeout time.Duration) (<-chan *APIResponse, error)
+	SendMention(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (*APIResponse, error)
+	SendMentionStream(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (<-chan *APIResponse, error)
 	CheckHealth(ctx context.Context) (*HealthResponse, error)
 	GetCommands(ctx context.Context) (*CommandsResponse, error)
 	WaitForInflightRequests(timeout time.Duration) bool
@@ -96,6 +96,7 @@ type CommandRequest struct {
 	Args      []string `json:"args"`
 	Nick      string   `json:"nick"`
 	Hostmask  string   `json:"hostmask"`
+	Network   string   `json:"network,omitempty"`
 	Channel   string   `json:"channel"`
 	IsPM      bool     `json:"is_pm"`
 }
@@ -113,6 +114,7 @@ type MentionRequest struct {
 	Message         string           `json:"message"`
 	Nick            string           `json:"nick"`
 	Hostmask        string           `json:"hostmask"`
+	Network         string           `json:"network,omitempty"`
 	Channel         string           `json:"channel"`
 	PermissionLevel string           `json:"permission_level"`
 	CommandPrefix   string           `json:"command_prefix"`
@@ -174,7 +176,7 @@ type CommandsResponse struct {
 
 // SendCommand sends a command request to the Python API
 // If timeout is 0, uses the default client timeout
-func (c *APIClient) SendCommand(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool, timeout time.Duration) (*APIResponse, error) {
+func (c *APIClient) SendCommand(ctx context.Context, command string, args []string, nick, hostmask, network, channel string, isPM bool, timeout time.Duration) (*APIResponse, error) {
 	requestID := uuid.New().String()
 
 	req := CommandRequest{
@@ -183,6 +185,7 @@ func (c *APIClient) SendCommand(ctx context.Context, command string, args []stri
 		Args:      args,
 		Nick:      nick,
 		Hostmask:  hostmask,
+		Network:   defaultNetwork(network),
 		Channel:   channel,
 		IsPM:      isPM,
 	}
@@ -207,7 +210,7 @@ func (c *APIClient) SendCommand(ctx context.Context, command string, args []stri
 // SendCommandStream sends a streaming command request to the Python API
 // Returns a channel that receives response chunks as they arrive
 // If timeout is 0, uses the default client timeout
-func (c *APIClient) SendCommandStream(ctx context.Context, command string, args []string, nick, hostmask, channel string, isPM bool, timeout time.Duration) (<-chan *APIResponse, error) {
+func (c *APIClient) SendCommandStream(ctx context.Context, command string, args []string, nick, hostmask, network, channel string, isPM bool, timeout time.Duration) (<-chan *APIResponse, error) {
 	requestID := uuid.New().String()
 
 	req := CommandRequest{
@@ -216,6 +219,7 @@ func (c *APIClient) SendCommandStream(ctx context.Context, command string, args 
 		Args:      args,
 		Nick:      nick,
 		Hostmask:  hostmask,
+		Network:   defaultNetwork(network),
 		Channel:   channel,
 		IsPM:      isPM,
 	}
@@ -239,7 +243,7 @@ func (c *APIClient) SendCommandStream(ctx context.Context, command string, args 
 }
 
 // SendMention sends a mention request to the Python API with conversation history
-func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (*APIResponse, error) {
+func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (*APIResponse, error) {
 	requestID := uuid.New().String()
 
 	// Convert database messages to API format
@@ -257,6 +261,7 @@ func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, ch
 		Message:         message,
 		Nick:            nick,
 		Hostmask:        hostmask,
+		Network:         defaultNetwork(network),
 		Channel:         channel,
 		PermissionLevel: permissionLevel,
 		CommandPrefix:   commandPrefix,
@@ -284,7 +289,7 @@ func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, ch
 
 // SendMentionStream sends a streaming mention request to the Python API with conversation history
 // Returns a channel that receives response chunks as they arrive
-func (c *APIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (<-chan *APIResponse, error) {
+func (c *APIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (<-chan *APIResponse, error) {
 	requestID := uuid.New().String()
 
 	// Convert database messages to API format
@@ -302,6 +307,7 @@ func (c *APIClient) SendMentionStream(ctx context.Context, message, nick, hostma
 		Message:         message,
 		Nick:            nick,
 		Hostmask:        hostmask,
+		Network:         defaultNetwork(network),
 		Channel:         channel,
 		PermissionLevel: permissionLevel,
 		CommandPrefix:   commandPrefix,

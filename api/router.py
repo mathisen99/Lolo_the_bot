@@ -25,6 +25,7 @@ class CommandRequest(BaseModel):
     args: List[str] = Field(default_factory=list, description="Command arguments")
     nick: str = Field(..., description="Sender nickname")
     hostmask: Optional[str] = Field(None, description="Sender hostmask (if registered)")
+    network: str = Field(default="libera", description="IRC network id")
     channel: str = Field(default="", description="Channel name or empty for PM")
     is_pm: bool = Field(default=False, description="Whether this is a private message")
 
@@ -69,6 +70,7 @@ class MentionRequest(BaseModel):
     request_id: str = Field(..., description="Unique request identifier for correlation")
     nick: str = Field(..., description="User who mentioned the bot")
     hostmask: Optional[str] = Field(None, description="User hostmask (if registered)")
+    network: str = Field(default="libera", description="IRC network id")
     channel: str = Field(..., description="Channel where mention occurred")
     message: str = Field(..., description="Full message containing the mention")
     permission_level: str = Field(default="normal", description="User permission level: owner, admin, normal, ignored")
@@ -136,7 +138,7 @@ async def handle_command(request: CommandRequest) -> CommandResponse:
     Validates arguments against the command's schema before execution.
     """
     console.print(f"[cyan]→[/cyan] Command request [dim]{request.request_id}[/dim]: "
-                  f"[bold]{request.command}[/bold] from {request.nick}")
+                  f"[bold]{request.command}[/bold] from {request.nick} on {request.network}")
     
     try:
         # Import here to avoid circular dependency
@@ -208,7 +210,7 @@ async def handle_command_stream(request: CommandRequest):
     import json
     
     console.print(f"[cyan]→[/cyan] Streaming command request [dim]{request.request_id}[/dim]: "
-                  f"[bold]{request.command}[/bold] from {request.nick}")
+                  f"[bold]{request.command}[/bold] from {request.nick} on {request.network}")
     
     async def generate_chunks():
         """Generator that yields command response chunks."""
@@ -341,7 +343,7 @@ async def handle_mention(request: MentionRequest) -> MentionResponse:
     import asyncio
     
     console.print(f"[cyan]→[/cyan] Mention request [dim]{request.request_id}[/dim]: "
-                  f"from {request.nick} in {request.channel}")
+                  f"from {request.nick} in {request.network}/{request.channel}")
     
     try:
         # Import mention handler
@@ -380,7 +382,7 @@ async def handle_mention_stream(request: MentionRequest):
     import queue
     
     console.print(f"[cyan]→[/cyan] Streaming mention request [dim]{request.request_id}[/dim]: "
-                  f"from {request.nick} in {request.channel}" + 
+                  f"from {request.nick} in {request.network}/{request.channel}" + 
                   (" [DEEP MODE]" if request.deep_mode else ""))
     
     async def generate_chunks():
@@ -401,6 +403,7 @@ async def handle_mention_stream(request: MentionRequest):
                 generator = client.generate_response_with_context_stream(
                     user_message=request.message,
                     nick=request.nick,
+                    network=request.network,
                     channel=request.channel,
                     conversation_history=request.history if request.history else [],
                     trivia_context=request.trivia_context.model_dump() if request.trivia_context else None,
@@ -515,6 +518,7 @@ class ReminderCheckRequest(BaseModel):
     """Request model for checking join-based reminders."""
     nick: str = Field(..., description="Nick of the user who joined")
     channel: str = Field(..., description="Channel the user joined")
+    network: str = Field(default="libera", description="IRC network id")
 
 
 class ReminderCheckResponse(BaseModel):
@@ -534,5 +538,5 @@ async def check_join_reminders(request: ReminderCheckRequest) -> ReminderCheckRe
     if tool is None:
         return ReminderCheckResponse(messages=[])
 
-    messages = tool.check_join_reminders(request.nick, request.channel)
+    messages = tool.check_join_reminders(request.nick, request.channel, request.network)
     return ReminderCheckResponse(messages=messages)

@@ -263,7 +263,8 @@ def log_usage(
     tool_calls: int = 0,
     web_search_calls: int = 0,
     code_interpreter_calls: int = 0,
-    cost_override: Optional[float] = None
+    cost_override: Optional[float] = None,
+    network: str = "libera"
 ) -> None:
     """Log usage to database."""
     db_path = Path("data/bot.db")
@@ -285,12 +286,13 @@ def log_usage(
         
         cursor.execute("""
             INSERT INTO usage_tracking 
-            (timestamp, request_id, nick, channel, model, input_tokens, cached_tokens, output_tokens, cost_usd, tool_calls, web_search_calls, code_interpreter_calls)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (timestamp, request_id, nick, network, channel, model, input_tokens, cached_tokens, output_tokens, cost_usd, tool_calls, web_search_calls, code_interpreter_calls)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             request_id,
             nick,
+            network or "libera",
             channel,
             model,
             input_tokens,

@@ -81,6 +81,10 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
                         "type": "string",
                         "description": "The IRC channel to search. Use the EXACT channel name from the current conversation (e.g., '##llm-bots', '#mathizen'). Do NOT use placeholder values."
                     },
+                    "network": {
+                        "type": "string",
+                        "description": "IRC network id. Defaults to the current network."
+                    },
                     "search_term": {
                         "type": ["string", "null"],
                         "description": "Optional keyword or phrase to search for in message content (case-insensitive)"
@@ -168,6 +172,7 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
     
     def _build_where_clause(
         self,
+        network: str,
         channel: str,
         start_time_str: str,
         nick: Optional[str],
@@ -189,10 +194,11 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
             )
 
         conditions = [
+            "COALESCE(network, 'libera') = ?",
             channel_condition,
             "substr(timestamp, 1, 19) >= ?"
         ]
-        params: List[Any] = [channel, start_time_str]
+        params: List[Any] = [network or "libera", channel, start_time_str]
         
         if end_time_str:
             conditions.append("substr(timestamp, 1, 19) <= ?")
@@ -288,6 +294,7 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
     def _get_stats(
         self,
         cursor: sqlite3.Cursor,
+        network: str,
         channel: str,
         start_time_str: str,
         nick: Optional[str],
@@ -301,7 +308,7 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
     ) -> str:
         """Get message count statistics."""
         where_clause, params = self._build_where_clause(
-            channel, start_time_str, nick, search_term, include_bot, end_time_str,
+            network, channel, start_time_str, nick, search_term, include_bot, end_time_str,
             event_type, include_events, include_global_event_fallback
         )
         
@@ -326,7 +333,7 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
         
         if not nick and total_count > 0 and not event_type:
             where_clause_top, params_top = self._build_where_clause(
-                channel, start_time_str, None, search_term, include_bot, end_time_str,
+                network, channel, start_time_str, None, search_term, include_bot, end_time_str,
                 event_type, include_events, include_global_event_fallback
             )
             
@@ -352,6 +359,7 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
     def _query_around_time(
         self,
         cursor: sqlite3.Cursor,
+        network: str,
         channel: str,
         target_time: datetime,
         context_minutes: int,
@@ -371,7 +379,7 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
         end_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
         
         where_clause, params = self._build_where_clause(
-            channel, start_str, nick, search_term, include_bot, end_str,
+            network, channel, start_str, nick, search_term, include_bot, end_str,
             event_type, include_events, include_global_event_fallback
         )
         
@@ -406,8 +414,10 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
         count_only: bool = False,
         include_bot: bool = False,
         semantic: bool = False,
+        network: str = "libera",
         event_type: Optional[str] = None,
         include_events: bool = False,
+        _current_network: str = "libera",
         _current_channel: str = "",
         _permission_level: str = "normal",
         **kwargs
@@ -426,8 +436,10 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
             count_only: If True, return only statistics
             include_bot: If True, include bot messages
             semantic: If True, use semantic search (requires search_term)
+            network: IRC network to search
             event_type: Filter by IRC event type (KICK, BAN, QUIT, NICK, etc.)
             include_events: If True, include events alongside messages
+            _current_network: Injected by system - current IRC network
             _current_channel: Injected by system - the channel the user is currently in
             _permission_level: Injected by system - user's permission level
             
@@ -441,14 +453,27 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
             return "Error: Channel is required."
         
         # Normalize channel for case-insensitive matching
+        network = (network or _current_network or "libera").strip().lower()
+        _current_network = (_current_network or "libera").strip().lower()
         channel = channel.strip()
         
         # Access control: normal users can only query the channel they're currently in
         from api.utils.output import log_info as _log
-        _log(f"[CHAT_HISTORY_ACL] permission_level='{_permission_level}', current_channel='{_current_channel}', requested_channel='{channel}'")
+        _log(f"[CHAT_HISTORY_ACL] permission_level='{_permission_level}', current_network='{_current_network}', current_channel='{_current_channel}', requested_network='{network}', requested_channel='{channel}'")
         if _permission_level not in ("owner", "admin") and _current_channel:
-            if channel.strip().lower() != _current_channel.strip().lower():
-                return f"Error: You can only view chat history for the channel you're currently in ({_current_channel}). Cross-channel history is restricted to admins."
+            if network != _current_network or channel.strip().lower() != _current_channel.strip().lower():
+                return f"Error: You can only view chat history for your current network/channel ({_current_network}/{_current_channel}). Cross-network or cross-channel history is restricted to admins."
+
+        if _permission_level not in ("owner", "admin") and self._is_bulk_user_history_query(
+            nick=nick,
+            event_type=event_type,
+            count_only=count_only,
+            search_term=search_term,
+        ):
+            return (
+                "Error: Bulk nick/history lookups are restricted to bot admins/owner. "
+                "Normal users can ask about one specific nick or ask for aggregate counts."
+            )
         
         # Determine if this is an event query
         is_event_query = bool(event_type)
@@ -483,10 +508,13 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
                 # Build filters - try case-insensitive channel matching
                 # ChromaDB doesn't support LOWER(), so we match common case variants
                 channel_lower = channel.lower()
-                conditions = [{"$or": [
-                    {"channel": channel},
-                    {"channel": channel_lower},
-                ]}]
+                conditions = [
+                    {"network": network},
+                    {"$or": [
+                        {"channel": channel},
+                        {"channel": channel_lower},
+                    ]},
+                ]
                 
                 if nick:
                     conditions.append({"nick": nick})
@@ -598,7 +626,7 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
                         end_time = target_time + timedelta(minutes=context_minutes)
                         time_desc = f"around {target_time.strftime('%H:%M')} (±{context_minutes}min)"
                         return self._get_stats(
-                            cursor, channel,
+                            cursor, network, channel,
                             start_time.strftime("%Y-%m-%d %H:%M:%S"),
                             nick, search_term, include_bot, time_desc,
                             end_time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -606,7 +634,7 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
                         )
                     
                     messages, total_found, target = self._query_around_time(
-                        cursor, channel, target_time, context_minutes,
+                        cursor, network, channel, target_time, context_minutes,
                         nick, search_term, include_bot, limit,
                         event_type, include_events, include_global_event_fallback
                     )
@@ -641,13 +669,13 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
                 if count_only:
                     time_desc = time_range.replace("_", " ")
                     return self._get_stats(
-                        cursor, channel, start_time_str, nick,
+                        cursor, network, channel, start_time_str, nick,
                         search_term, include_bot, time_desc,
                         None, event_type, include_events, include_global_event_fallback
                     )
                 
                 where_clause, params = self._build_where_clause(
-                    channel, start_time_str, nick, search_term, include_bot,
+                    network, channel, start_time_str, nick, search_term, include_bot,
                     None, event_type, include_events, include_global_event_fallback
                 )
                 
@@ -676,3 +704,27 @@ New: Use event_type to filter by IRC events (KICK, BAN, UNBAN, QUIT, NICK, JOIN,
             return f"Error querying database: {e}"
         except Exception as e:
             return f"Error: {e}"
+
+    @staticmethod
+    def _is_bulk_user_history_query(
+        nick: Optional[str],
+        event_type: Optional[str],
+        count_only: bool,
+        search_term: Optional[str],
+    ) -> bool:
+        if nick:
+            return False
+        if count_only:
+            return False
+
+        event = (event_type or "").upper()
+        if event in {"JOIN", "PART", "QUIT", "NICK", "ALL_EVENTS"}:
+            return True
+
+        term = (search_term or "").lower()
+        bulk_terms = (
+            "joined", "join", "left", "parted", "quit", "changed nick",
+            "not here", "not in channel", "came to channel", "users who",
+            "nicks that", "nicknames that", "list nicks", "list users",
+        )
+        return any(t in term for t in bulk_terms)

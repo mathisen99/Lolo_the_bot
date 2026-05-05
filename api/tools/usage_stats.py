@@ -62,6 +62,10 @@ Returns token counts and estimated costs in USD.""",
                         "type": ["string", "null"],
                         "description": "Optional: filter by specific channel"
                     },
+                    "network": {
+                        "type": "string",
+                        "description": "IRC network id. Defaults to the current network."
+                    },
                     "show_top_users": {
                         "type": "boolean",
                         "description": "If true, show top users by cost instead of individual stats. Default: false"
@@ -121,8 +125,10 @@ Returns token counts and estimated costs in USD.""",
         self,
         nick: str,
         time_range: str = "today",
+        network: str = "libera",
         channel: Optional[str] = None,
         show_top_users: bool = False,
+        _current_network: str = "libera",
         **kwargs
     ) -> str:
         """
@@ -131,6 +137,7 @@ Returns token counts and estimated costs in USD.""",
         Args:
             nick: User to get stats for
             time_range: Time range for stats
+            network: IRC network filter
             channel: Optional channel filter
             show_top_users: Show leaderboard instead of individual stats
             
@@ -145,15 +152,16 @@ Returns token counts and estimated costs in USD.""",
         
         start_time = self._get_start_time(time_range)
         start_time_str = start_time.strftime("%Y-%m-%d %H:%M:%S") if start_time else None
+        network = (network or _current_network or "libera").strip().lower()
         
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
                 if show_top_users:
-                    return self._get_top_users(cursor, start_time_str, channel, time_range)
+                    return self._get_top_users(cursor, network, start_time_str, channel, time_range)
                 else:
-                    return self._get_user_stats(cursor, nick, start_time_str, channel, time_range)
+                    return self._get_user_stats(cursor, nick, network, start_time_str, channel, time_range)
                     
         except sqlite3.Error as e:
             return f"Error querying database: {e}"
@@ -164,13 +172,14 @@ Returns token counts and estimated costs in USD.""",
         self,
         cursor: sqlite3.Cursor,
         nick: str,
+        network: str,
         start_time_str: Optional[str],
         channel: Optional[str],
         time_range: str
     ) -> str:
         """Get stats for a specific user."""
-        conditions = ["LOWER(nick) = LOWER(?)"]
-        params: List[Any] = [nick]
+        conditions = ["LOWER(nick) = LOWER(?)", "COALESCE(network, 'libera') = ?"]
+        params: List[Any] = [nick, network]
         
         if start_time_str:
             conditions.append("substr(timestamp, 1, 19) >= ?")
@@ -203,7 +212,7 @@ Returns token counts and estimated costs in USD.""",
             return f"No usage found for {nick} ({time_range.replace('_', ' ')})."
         
         time_desc = time_range.replace("_", " ")
-        result = f"Usage stats for {nick} ({time_desc}):\n"
+        result = f"Usage stats for {nick} on {network} ({time_desc}):\n"
         result += f"  Requests: {row['request_count']}\n"
         result += f"  Input tokens: {self._format_tokens(row['total_input'])}\n"
         if row['total_cached'] > 0:
@@ -222,13 +231,14 @@ Returns token counts and estimated costs in USD.""",
     def _get_top_users(
         self,
         cursor: sqlite3.Cursor,
+        network: str,
         start_time_str: Optional[str],
         channel: Optional[str],
         time_range: str
     ) -> str:
         """Get top users by cost."""
-        conditions = []
-        params: List[Any] = []
+        conditions = ["COALESCE(network, 'libera') = ?"]
+        params: List[Any] = [network]
         
         if start_time_str:
             conditions.append("substr(timestamp, 1, 19) >= ?")
@@ -272,7 +282,7 @@ Returns token counts and estimated costs in USD.""",
         totals = cursor.fetchone()
         
         time_desc = time_range.replace("_", " ")
-        result = f"Top users by cost ({time_desc}):\n"
+        result = f"Top users by cost on {network} ({time_desc}):\n"
         
         for i, row in enumerate(rows, 1):
             result += f"  {i}. {row['nick_lower']}: {self._format_cost(row['total_cost'])} ({row['request_count']} requests)\n"

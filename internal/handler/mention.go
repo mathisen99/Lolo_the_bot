@@ -22,6 +22,12 @@ type MentionHandler struct {
 	testMode                 bool
 	phoneNotificationsActive bool
 	phoneNotificationsURL    string
+	network                  string
+	permissionResolver       PermissionResolver
+}
+
+type PermissionResolver interface {
+	ResolvePermission(nick, hostmask string) (database.PermissionLevel, bool, error)
 }
 
 func SendNotificationToPhone(message string, url string) {
@@ -36,7 +42,7 @@ func SendNotificationToPhone(message string, url string) {
 }
 
 // NewMentionHandler creates a new mention handler
-func NewMentionHandler(apiClient APIClientInterface, userMgr *user.Manager, db *database.DB, botNick string, triviaManager *trivia.Manager, testMode bool, phoneNotificationsActive bool, phoneNotificationsURL string) *MentionHandler {
+func NewMentionHandler(apiClient APIClientInterface, userMgr *user.Manager, db *database.DB, botNick string, triviaManager *trivia.Manager, testMode bool, phoneNotificationsActive bool, phoneNotificationsURL string, network string, permissionResolver PermissionResolver) *MentionHandler {
 	return &MentionHandler{
 		apiClient:                apiClient,
 		userMgr:                  userMgr,
@@ -46,6 +52,8 @@ func NewMentionHandler(apiClient APIClientInterface, userMgr *user.Manager, db *
 		testMode:                 testMode,
 		phoneNotificationsActive: phoneNotificationsActive,
 		phoneNotificationsURL:    phoneNotificationsURL,
+		network:                  defaultNetwork(network),
+		permissionResolver:       permissionResolver,
 	}
 }
 
@@ -85,9 +93,12 @@ func (h *MentionHandler) ContainsMention(message string) bool {
 // HandleMention processes a bot mention
 // Returns the response message and any error
 // If statusCallback is provided, it will be called with intermediate status updates
-func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostmask, channel, commandPrefix string, statusCallback func(string)) (string, error) {
+func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostmask, network, channel, commandPrefix string, statusCallback func(string)) (string, error) {
+	if network == "" {
+		network = h.network
+	}
 	// Check if channel is enabled
-	enabled, err := h.db.GetChannelState(channel)
+	enabled, err := h.db.GetChannelStateForNetwork(network, channel)
 	if err != nil {
 		return "", fmt.Errorf("failed to check channel state: %w", err)
 	}
@@ -108,18 +119,15 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 	}
 
 	// Determine permission level string for API
-	permissionLevel := "normal" // Default for unregistered users
-	if user != nil {
-		switch user.Level {
-		case database.LevelOwner:
-			permissionLevel = "owner"
-		case database.LevelAdmin:
-			permissionLevel = "admin"
-		case database.LevelNormal:
-			permissionLevel = "normal"
-		case database.LevelIgnored:
-			permissionLevel = "ignored"
+	permissionLevel := "normal"
+	if h.permissionResolver != nil {
+		level, _, err := h.permissionResolver.ResolvePermission(nick, hostmask)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve permission: %w", err)
 		}
+		permissionLevel = permissionLevelName(level)
+	} else if user != nil {
+		permissionLevel = permissionLevelName(user.Level)
 	}
 
 	// In test mode, return a mock response
@@ -191,7 +199,7 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 	startTime := time.Now()
 
 	// Use SendMentionStream to get updates
-	respChan, err := h.apiClient.SendMentionStream(ctx, message, nick, hostmask, channel, permissionLevel, commandPrefix, conversationHistory, triviaContext, deepMode)
+	respChan, err := h.apiClient.SendMentionStream(ctx, message, nick, hostmask, network, channel, permissionLevel, commandPrefix, conversationHistory, triviaContext, deepMode)
 	if err != nil {
 		// Record error metric (Requirement 30.3)
 		if errRecordErr := h.db.RecordError("mention_api_failed"); errRecordErr != nil {
@@ -246,6 +254,7 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 // getConversationHistory retrieves recent messages from a channel for context
 func (h *MentionHandler) getConversationHistory(channel string, limit int) ([]*database.Message, error) {
 	filter := &database.MessageFilter{
+		Network: h.network,
 		Channel: channel,
 		Limit:   limit,
 	}
@@ -267,7 +276,7 @@ func (h *MentionHandler) getConversationHistory(channel string, limit int) ([]*d
 // This performs all the filtering checks without actually processing the mention
 func (h *MentionHandler) ShouldProcessMention(nick, channel string) (bool, error) {
 	// Check if channel is enabled
-	enabled, err := h.db.GetChannelState(channel)
+	enabled, err := h.db.GetChannelStateForNetwork(h.network, channel)
 	if err != nil {
 		return false, fmt.Errorf("failed to check channel state: %w", err)
 	}
@@ -287,4 +296,17 @@ func (h *MentionHandler) ShouldProcessMention(nick, channel string) (bool, error
 	}
 
 	return true, nil
+}
+
+func permissionLevelName(level database.PermissionLevel) string {
+	switch level {
+	case database.LevelOwner:
+		return "owner"
+	case database.LevelAdmin:
+		return "admin"
+	case database.LevelIgnored:
+		return "ignored"
+	default:
+		return "normal"
+	}
 }

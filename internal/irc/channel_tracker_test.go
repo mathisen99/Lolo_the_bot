@@ -71,3 +71,39 @@ func TestOnNamesEndReplacesSnapshotAndTracksBotVoice(t *testing.T) {
 		t.Fatal("expected bot user to have voice=true after names snapshot")
 	}
 }
+
+func TestOnChannelMessageTouchesMembershipWithoutClearingModes(t *testing.T) {
+	db, cleanup := database.NewTestDB(t)
+	defer cleanup()
+
+	channel := "#robots"
+	tracker := NewChannelTrackerForNetwork(db, noopLogger{}, "rizon", "Lolo")
+
+	if err := db.SetBotChannelStatusForNetwork("rizon", channel, true, false, false, true); err != nil {
+		t.Fatalf("SetBotChannelStatusForNetwork failed: %v", err)
+	}
+	if err := db.UpsertChannelUserForNetwork("rizon", channel, "alice", true, false, false); err != nil {
+		t.Fatalf("UpsertChannelUserForNetwork failed: %v", err)
+	}
+
+	tracker.OnChannelMessage(channel, "alice")
+
+	status, err := db.GetBotChannelStatusForNetwork("rizon", channel)
+	if err != nil {
+		t.Fatalf("GetBotChannelStatusForNetwork failed: %v", err)
+	}
+	if status == nil || !status.IsJoined {
+		t.Fatal("expected bot status to remain joined after channel traffic")
+	}
+	if !status.IsVoice {
+		t.Fatal("expected bot voice mode to be preserved")
+	}
+
+	alice, err := db.GetChannelUserForNetwork("rizon", channel, "alice")
+	if err != nil {
+		t.Fatalf("GetChannelUserForNetwork failed: %v", err)
+	}
+	if alice == nil || !alice.IsOp {
+		t.Fatal("expected speaker op mode to be preserved")
+	}
+}

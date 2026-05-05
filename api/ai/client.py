@@ -309,7 +309,8 @@ class AIClient:
         permission_level: str,
         command_prefix: str,
         request_id: str,
-        deep_mode: bool = False
+        deep_mode: bool = False,
+        network: str = "libera"
     ):
         """
         Generate AI response with conversation context, streaming updates.
@@ -322,7 +323,7 @@ class AIClient:
             status: "processing" for intermediate updates, "success" or "error" for final
         """
         log_info(f"[{request_id}] Generating AI response with context (permission: {permission_level})" +
-                 (" [DEEP MODE]" if deep_mode else ""))
+                 f" on {network}" + (" [DEEP MODE]" if deep_mode else ""))
         
         # Check deep mode rate limit before proceeding
         if deep_mode:
@@ -344,6 +345,7 @@ class AIClient:
             full_input = self._build_context_prompt(
                 user_message, 
                 nick, 
+                network,
                 channel, 
                 conversation_history,
                 trivia_context,
@@ -374,7 +376,7 @@ class AIClient:
             
             # Handle function calls with streaming support
             response_generator = self._handle_function_calls_stream(
-                response, full_input, request_id, permission_level, nick, channel, deep_mode
+                response, full_input, request_id, permission_level, nick, network, channel, deep_mode
             )
             
             final_response = None
@@ -399,6 +401,7 @@ class AIClient:
             log_usage(
                 request_id=request_id,
                 nick=nick,
+                network=network,
                 channel=channel,
                 model=self.config.model_name,
                 input_tokens=total_usage.get("input_tokens", 0),
@@ -476,14 +479,15 @@ class AIClient:
         permission_level: str,
         command_prefix: str,
         request_id: str,
-        deep_mode: bool = False
+        deep_mode: bool = False,
+        network: str = "libera"
     ) -> str:
         """
         Legacy blocking method for backward compatibility.
         Wraps the streaming method and just returns the final result.
         """
         generator = self.generate_response_with_context_stream(
-            user_message, nick, channel, conversation_history, trivia_context, permission_level, command_prefix, request_id, deep_mode
+            user_message, nick, channel, conversation_history, trivia_context, permission_level, command_prefix, request_id, deep_mode, network
         )
         
         final_message = "I couldn't generate a proper response."
@@ -512,7 +516,7 @@ class AIClient:
         
         return final_response, null_triggered, total_usage
 
-    def _handle_function_calls_stream(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal", nick: str = "", channel: str = "", deep_mode: bool = False):
+    def _handle_function_calls_stream(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal", nick: str = "", network: str = "libera", channel: str = "", deep_mode: bool = False):
         """
         Handle function calls in the response using multi-turn tool calling.
         Yields status events during execution.
@@ -659,17 +663,25 @@ class AIClient:
                             continue
                     
                     # Inject permission_level/context for specific tools
-                    if func_name in ('manage_user_rules', 'execute_shell', 'bug_report', 'irc_command', 'reminder', 'log_analyzer'):
+                    if func_name in ('manage_user_rules', 'execute_shell', 'bug_report', 'irc_command', 'reminder', 'log_analyzer', 'usage_stats'):
                         func_args['permission_level'] = permission_level
                         if func_name == 'bug_report':
                             func_args['requesting_user'] = nick
                             func_args['channel'] = channel
+                        if func_name == 'irc_command':
+                            func_args.setdefault('network', network)
+                            func_args['_current_network'] = network
+                            func_args['_current_channel'] = channel
                         if func_name == 'reminder':
                             func_args['requesting_user'] = nick
+                            func_args['network'] = network
                             func_args['channel'] = channel
+                        if func_name == 'usage_stats':
+                            func_args['_current_network'] = network
                     
                     # Inject current channel and permission for chat history access control
                     if func_name == 'query_chat_history':
+                        func_args['_current_network'] = network
                         func_args['_current_channel'] = channel
                         func_args['_permission_level'] = permission_level
 
@@ -677,6 +689,7 @@ class AIClient:
                     if func_name == 'gpt_image':
                         func_args['_request_id'] = request_id
                         func_args['_nick'] = nick
+                        func_args['_network'] = network
                         func_args['_channel'] = channel
                     
                     # Execute the tool
@@ -820,6 +833,7 @@ class AIClient:
         self, 
         user_message: str, 
         nick: str, 
+        network: str,
         channel: str,
         conversation_history: list,
         trivia_context: Optional[Dict[str, Any]],
@@ -909,6 +923,7 @@ Remember: Quality over speed. The user specifically requested deep research with
         
         prompt_parts.append("=== CURRENT QUESTION ===")
         prompt_parts.append(f"Timestamp: {current_time}")
+        prompt_parts.append(f"Network: {network}")
         prompt_parts.append(f"Channel: {channel}")
         prompt_parts.append(f"User: {nick}")
         prompt_parts.append(f"Command prefix: {command_prefix}")
@@ -933,7 +948,7 @@ Remember: Quality over speed. The user specifically requested deep research with
         # Changes to history won't invalidate the cached system prompt prefix
         if conversation_history and len(conversation_history) > 0:
             prompt_parts.append("=== RECENT CONVERSATION CONTEXT ===")
-            prompt_parts.append(f"(Last {len(conversation_history)} messages from {channel} for context)")
+            prompt_parts.append(f"(Last {len(conversation_history)} messages from {network}/{channel} for context)")
             prompt_parts.append("")
             
             for msg in conversation_history:

@@ -38,12 +38,16 @@ type Generator struct {
 }
 
 const (
+	defaultTriviaOpenAIModel = "gpt-5.4-nano"
+	defaultOpenAIBaseURL     = "https://api.openai.com/v1"
+
 	defaultMaxOutputTokens    = 420
 	maxOutputTokensRetryStep  = 80
 	maxOutputTokensCeiling    = 1400
 	triviaGenerationMinTokens = 420
 	codeGenerationMinTokens   = 1100
 	judgeGenerationMinTokens  = 300
+	antiCheatMinTokens        = 520
 	maxAnswerLength           = 160
 	maxAliasLength            = 160
 	maxCodeQuestionLen        = 220
@@ -70,6 +74,20 @@ func NewGenerator(config GeneratorConfig, logger output.Logger) *Generator {
 	}
 }
 
+func resolveResponsesEndpoint(baseURL string) string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		baseURL = defaultOpenAIBaseURL
+	}
+	if strings.HasSuffix(baseURL, "/responses") {
+		return baseURL
+	}
+	if baseURL == "https://api.openai.com" {
+		return baseURL + "/v1/responses"
+	}
+	return baseURL + "/responses"
+}
+
 // GenerateQuestion creates a single trivia question for a topic, variant, and difficulty.
 // avoidKeys contains recently rejected normalized dedup keys for this generation cycle.
 // avoidQuestions contains recent historical question texts to avoid repeating/paraphrasing.
@@ -88,14 +106,9 @@ func (g *Generator) GenerateQuestion(ctx context.Context, topic, variant, diffic
 		return nil, errMissingAPIKey
 	}
 
-	baseURL := strings.TrimSuffix(strings.TrimSpace(g.config.BaseURL), "/")
-	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
-	}
-
 	model := strings.TrimSpace(g.config.Model)
 	if model == "" {
-		model = "gpt-5.2"
+		model = defaultTriviaOpenAIModel
 	}
 
 	maxOutputTokens := resolveMaxOutputTokens(g.config.MaxOutputTokens, attempt, triviaGenerationMinTokens)
@@ -120,7 +133,7 @@ func (g *Generator) GenerateQuestion(ctx context.Context, topic, variant, diffic
 		return nil, fmt.Errorf("failed to marshal trivia generation request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/responses", bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, resolveResponsesEndpoint(g.config.BaseURL), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create trivia generation request: %w", err)
 	}
@@ -184,14 +197,9 @@ func (g *Generator) GenerateCodeQuestion(ctx context.Context, language, difficul
 		return nil, errMissingAPIKey
 	}
 
-	baseURL := strings.TrimSuffix(strings.TrimSpace(g.config.BaseURL), "/")
-	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
-	}
-
 	model := strings.TrimSpace(g.config.Model)
 	if model == "" {
-		model = "gpt-5.2"
+		model = defaultTriviaOpenAIModel
 	}
 
 	maxOutputTokens := resolveMaxOutputTokens(g.config.MaxOutputTokens, attempt, codeGenerationMinTokens)
@@ -216,7 +224,7 @@ func (g *Generator) GenerateCodeQuestion(ctx context.Context, language, difficul
 		return nil, fmt.Errorf("failed to marshal code generation request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/responses", bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, resolveResponsesEndpoint(g.config.BaseURL), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create code generation request: %w", err)
 	}
@@ -281,14 +289,9 @@ func (g *Generator) JudgeClosestGuess(ctx context.Context, req JudgeRequest) (*J
 		return nil, errMissingAPIKey
 	}
 
-	baseURL := strings.TrimSuffix(strings.TrimSpace(g.config.BaseURL), "/")
-	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
-	}
-
 	model := strings.TrimSpace(g.config.Model)
 	if model == "" {
-		model = "gpt-5.2"
+		model = defaultTriviaOpenAIModel
 	}
 
 	prompt, err := buildJudgePrompt(req)
@@ -313,7 +316,7 @@ func (g *Generator) JudgeClosestGuess(ctx context.Context, req JudgeRequest) (*J
 		return nil, fmt.Errorf("failed to marshal trivia judge request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/responses", bytes.NewReader(bodyBytes))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, resolveResponsesEndpoint(g.config.BaseURL), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create trivia judge request: %w", err)
 	}
@@ -349,6 +352,100 @@ func (g *Generator) JudgeClosestGuess(ctx context.Context, req JudgeRequest) (*J
 		return nil, fmt.Errorf("failed to parse trivia judge JSON payload: %w", err)
 	}
 	if err := validateJudgeDecision(&decision, req.Candidates); err != nil {
+		return nil, err
+	}
+
+	return &decision, nil
+}
+
+// JudgeAntiCheat checks whether a would-be winner received outside help during the active round.
+func (g *Generator) JudgeAntiCheat(ctx context.Context, req AntiCheatRequest) (*AntiCheatDecision, error) {
+	if !g.config.Enabled {
+		return nil, ErrGeneratorDisabled
+	}
+	if strings.TrimSpace(req.Answer) == "" {
+		return nil, fmt.Errorf("anti-cheat request missing canonical answer")
+	}
+	if strings.TrimSpace(req.WinnerNick) == "" || strings.TrimSpace(req.WinningAnswer) == "" {
+		return nil, fmt.Errorf("anti-cheat request missing winner")
+	}
+	if len(req.Observations) == 0 {
+		return nil, nil
+	}
+
+	apiKeyEnv := strings.TrimSpace(g.config.APIKeyEnv)
+	if apiKeyEnv == "" {
+		apiKeyEnv = "OPENAI_API_KEY"
+	}
+
+	apiKey := strings.TrimSpace(os.Getenv(apiKeyEnv))
+	if apiKey == "" {
+		return nil, errMissingAPIKey
+	}
+
+	model := strings.TrimSpace(g.config.Model)
+	if model == "" {
+		model = defaultTriviaOpenAIModel
+	}
+
+	prompt, err := buildAntiCheatPrompt(req)
+	if err != nil {
+		return nil, err
+	}
+
+	requestBody := map[string]any{
+		"model":             model,
+		"input":             prompt,
+		"max_output_tokens": resolveMaxOutputTokens(g.config.MaxOutputTokens, 1, antiCheatMinTokens),
+		"reasoning": map[string]any{
+			"effort": normalizeReasoningEffort(g.config.ReasoningEffort),
+		},
+		"text": map[string]any{
+			"verbosity": "low",
+		},
+	}
+
+	bodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal trivia anti-cheat request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, resolveResponsesEndpoint(g.config.BaseURL), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create trivia anti-cheat request: %w", err)
+	}
+
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("trivia anti-cheat request failed: %w", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read trivia anti-cheat response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		g.logger.Warning("OpenAI trivia anti-cheat failed with status %d", resp.StatusCode)
+		return nil, fmt.Errorf("openai trivia anti-cheat status %d", resp.StatusCode)
+	}
+
+	jsonPayload, err := extractTriviaJSON(respBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var decision AntiCheatDecision
+	if err := json.Unmarshal([]byte(jsonPayload), &decision); err != nil {
+		return nil, fmt.Errorf("failed to parse trivia anti-cheat JSON payload: %w", err)
+	}
+	if err := validateAntiCheatDecision(&decision, req.Observations); err != nil {
 		return nil, err
 	}
 
@@ -601,6 +698,61 @@ Return ONLY JSON with this exact shape:
 	return prompt.String(), nil
 }
 
+func buildAntiCheatPrompt(req AntiCheatRequest) (string, error) {
+	aliasesJSON, err := json.Marshal(req.Aliases)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal anti-cheat aliases: %w", err)
+	}
+	metadataJSON, err := json.Marshal(req.Metadata)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal anti-cheat metadata: %w", err)
+	}
+	observationsJSON, err := json.Marshal(req.Observations)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal anti-cheat observations: %w", err)
+	}
+
+	var prompt strings.Builder
+	_, _ = fmt.Fprintf(&prompt, `You are a strict IRC trivia anti-cheat judge.
+Only evaluate public same-channel messages from the active round transcript below.
+
+Mode: %s
+Variant: %s
+Topic: %s
+Language: %s
+Question: %s
+Official answer: %s
+Accepted aliases (JSON): %s
+Variant metadata (JSON): %s
+Would-be winner: %s
+Would-be winning answer: %s
+
+Active-round same-channel transcript (chronological, JSON):
+%s
+
+Decide whether the would-be winner likely cheated during this active round.
+Cheating means the winner asked a bot or another user for the answer, received the answer/help/confirmation from another participant, copied an answer supplied by an ignored user, or used the channel transcript to get outside help during the round.
+Strict rules:
+- Only evidence inside this active-round transcript matters.
+- Messages before/after the round, private messages, and other channels are out of scope.
+- The would-be winning answer by itself is not cheating.
+- Official hints, rules/help text, and normal unrelated conversation are not cheating.
+- Ignored users are marked with "ignored": true; help or answer leaks from them should count if the winner appears to use it.
+- Require clear evidence tied to the would-be winner. When in doubt, set cheated=false.
+
+Return ONLY JSON with this exact shape:
+{
+  "cheated": true or false,
+  "confidence": number between 0 and 1,
+  "reason": "short explanation",
+  "helper_nicks": ["nick"],
+  "evidence_ids": [integer]
+}
+`, NormalizeMode(req.Mode), NormalizeTriviaVariant(req.Variant), strings.TrimSpace(req.Topic), strings.TrimSpace(req.Language), strings.TrimSpace(req.Question), strings.TrimSpace(req.Answer), string(aliasesJSON), string(metadataJSON), strings.TrimSpace(req.WinnerNick), strings.TrimSpace(req.WinningAnswer), string(observationsJSON))
+
+	return prompt.String(), nil
+}
+
 func difficultyPromptGuidance(difficulty string) string {
 	switch NormalizeDifficulty(difficulty) {
 	case DifficultyEasy:
@@ -679,6 +831,57 @@ func validateJudgeDecision(decision *JudgeDecision, candidates []JudgeGuessCandi
 	}
 
 	return fmt.Errorf("invalid trivia judge payload: guess_id %d not in candidate set", decision.GuessID)
+}
+
+func validateAntiCheatDecision(decision *AntiCheatDecision, observations []AntiCheatObservation) error {
+	if decision == nil {
+		return fmt.Errorf("invalid trivia anti-cheat payload: empty decision")
+	}
+	if decision.Confidence < 0 {
+		decision.Confidence = 0
+	}
+	if decision.Confidence > 1 {
+		decision.Confidence = 1
+	}
+	decision.Reason = strings.TrimSpace(decision.Reason)
+
+	validIDs := make(map[int]struct{}, len(observations))
+	for _, observation := range observations {
+		validIDs[observation.ID] = struct{}{}
+	}
+	filteredEvidence := make([]int, 0, len(decision.EvidenceIDs))
+	for _, id := range decision.EvidenceIDs {
+		if _, ok := validIDs[id]; ok {
+			filteredEvidence = append(filteredEvidence, id)
+		}
+	}
+	decision.EvidenceIDs = filteredEvidence
+
+	filteredHelpers := make([]string, 0, len(decision.HelperNicks))
+	seenHelpers := make(map[string]struct{}, len(decision.HelperNicks))
+	for _, nick := range decision.HelperNicks {
+		nick = strings.TrimSpace(nick)
+		if nick == "" {
+			continue
+		}
+		key := strings.ToLower(nick)
+		if _, ok := seenHelpers[key]; ok {
+			continue
+		}
+		seenHelpers[key] = struct{}{}
+		filteredHelpers = append(filteredHelpers, nick)
+	}
+	decision.HelperNicks = filteredHelpers
+
+	if !decision.Cheated {
+		decision.EvidenceIDs = nil
+		decision.HelperNicks = nil
+		return nil
+	}
+	if len(decision.EvidenceIDs) == 0 {
+		return fmt.Errorf("invalid trivia anti-cheat payload: cheated=true without valid evidence_ids")
+	}
+	return nil
 }
 
 func extractTriviaJSON(rawResponse []byte) (string, error) {

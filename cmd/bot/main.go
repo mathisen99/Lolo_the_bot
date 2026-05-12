@@ -84,6 +84,7 @@ func main() {
 			CodeAnswerTimeSeconds: cfg.Trivia.DefaultCodeAnswerTime,
 			TriviaHintsEnabled:    cfg.Trivia.DefaultHintsEnabled,
 			CodeHintsEnabled:      cfg.Trivia.DefaultHintsEnabled,
+			AntiCheatEnabled:      true,
 			BasePoints:            cfg.Trivia.DefaultBasePoints,
 			MinimumPoints:         cfg.Trivia.DefaultMinimumPoints,
 			HintPenalty:           cfg.Trivia.DefaultHintPenalty,

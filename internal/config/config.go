@@ -167,7 +167,7 @@ func DefaultConfig() *Config {
 		Trivia: TriviaConfig{
 			Enabled:                  true,
 			DatabasePath:             "data/trivia.db",
-			OpenAIModel:              "gpt-5.2",
+			OpenAIModel:              "gpt-5.4-nano",
 			OpenAIReasoningEffort:    "medium",
 			OpenAIAPIKeyEnv:          "OPENAI_API_KEY",
 			OpenAIBaseURL:            "https://api.openai.com/v1",
@@ -460,7 +460,7 @@ func applyTriviaDefaults(cfg *Config) {
 		cfg.Trivia.DatabasePath = "data/trivia.db"
 	}
 	if cfg.Trivia.OpenAIModel == "" {
-		cfg.Trivia.OpenAIModel = "gpt-5.2"
+		cfg.Trivia.OpenAIModel = "gpt-5.4-nano"
 	}
 	if cfg.Trivia.OpenAIReasoningEffort == "" {
 		cfg.Trivia.OpenAIReasoningEffort = "medium"

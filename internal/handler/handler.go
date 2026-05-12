@@ -156,6 +156,20 @@ func (h *MessageHandler) HandleMessage(ctx context.Context, nick, hostmask, chan
 		}
 	}
 
+	ignoredUser := false
+	if !isPM {
+		user, err := h.userManager.GetUser(nick)
+		if err != nil {
+			h.logger.Warning("Failed to check ignored status for %s: %v", nick, err)
+		} else if user != nil && user.Level == database.LevelIgnored {
+			ignoredUser = true
+		}
+
+		if h.triviaManager != nil {
+			h.triviaManager.ObserveMessage(channel, nick, message, ignoredUser)
+		}
+	}
+
 	// Check if this is a command
 	if h.dispatcher.IsCommand(channel, message, isPM) {
 		return h.handleCommand(ctx, nick, hostmask, channel, message, isPM)
@@ -163,7 +177,7 @@ func (h *MessageHandler) HandleMessage(ctx context.Context, nick, hostmask, chan
 
 	// Check if this is a trivia answer in an active channel round.
 	// This must run before mention handling because trivia answers use plain channel text.
-	if !isPM && h.triviaManager != nil {
+	if !isPM && h.triviaManager != nil && !ignoredUser {
 		triviaResponse, handled, err := h.triviaManager.TryAnswer(channel, nick, message)
 		if err != nil {
 			h.logger.Warning("Failed to process trivia answer in %s: %v", channel, err)

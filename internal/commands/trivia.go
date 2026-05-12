@@ -683,8 +683,22 @@ func (c *TriviaSettingsCommand) Execute(ctx *Context) (*Response, error) {
 		}
 		c.logAudit(ctx, "trivia_settings_enabled", fmt.Sprintf("channel=%s enabled=%t", ctx.Channel, enabled))
 		return NewResponse(formatSettingsMessage(ctx.Channel, settings)), nil
+	case "anticheat":
+		if len(ctx.Args) != 2 {
+			return nil, boterrors.NewInvalidSyntaxError("triviasettings", "!triviasettings anticheat on|off")
+		}
+		enabled, err := parseOnOff(ctx.Args[1])
+		if err != nil {
+			return NewErrorResponse(err.Error()), nil
+		}
+		settings, err := c.manager.UpdateAntiCheatEnabled(ctx.Channel, enabled)
+		if err != nil {
+			return NewErrorResponse(err.Error()), nil
+		}
+		c.logAudit(ctx, "trivia_settings_anticheat", fmt.Sprintf("channel=%s anti_cheat_enabled=%t", ctx.Channel, enabled))
+		return NewResponse(formatSettingsMessage(ctx.Channel, settings)), nil
 	default:
-		return nil, boterrors.NewInvalidSyntaxError("triviasettings", "!triviasettings show|time|codetime|hint <trivia|code|both> on|off|difficulty|codedifficulty|points|enabled ...")
+		return nil, boterrors.NewInvalidSyntaxError("triviasettings", "!triviasettings show|time|codetime|hint <trivia|code|both> on|off|difficulty|codedifficulty|points|enabled|anticheat ...")
 	}
 }
 
@@ -702,7 +716,7 @@ func (c *TriviaSettingsCommand) RequiredPermission() database.PermissionLevel {
 }
 
 func (c *TriviaSettingsCommand) Help() string {
-	return "!triviasettings show|time|codetime|difficulty|codedifficulty|points|enabled ... | !triviasettings hint <trivia|code|both> on|off - Manage trivia/code channel settings (admin/owner)"
+	return "!triviasettings show|time|codetime|difficulty|codedifficulty|points|enabled|anticheat ... | !triviasettings hint <trivia|code|both> on|off - Manage trivia/code channel settings (admin/owner)"
 }
 
 func (c *TriviaSettingsCommand) CooldownDuration() time.Duration {
@@ -711,7 +725,7 @@ func (c *TriviaSettingsCommand) CooldownDuration() time.Duration {
 
 func formatSettingsMessage(channel string, settings trivia.ChannelSettings) string {
 	return fmt.Sprintf(
-		"Trivia settings for %s: enabled=%t, trivia_time=%ds, code_time=%ds, trivia_difficulty=%s, code_difficulty=%s, trivia_hints=%t, code_hints=%t, base_points=%d, minimum_points=%d, hint_penalty=%d",
+		"Trivia settings for %s: enabled=%t, trivia_time=%ds, code_time=%ds, trivia_difficulty=%s, code_difficulty=%s, trivia_hints=%t, code_hints=%t, anti_cheat=%t, base_points=%d, minimum_points=%d, hint_penalty=%d",
 		channel,
 		settings.Enabled,
 		settings.AnswerTimeSeconds,
@@ -720,6 +734,7 @@ func formatSettingsMessage(channel string, settings trivia.ChannelSettings) stri
 		settings.CodeDifficulty,
 		settings.TriviaHintsEnabled,
 		settings.CodeHintsEnabled,
+		settings.AntiCheatEnabled,
 		settings.BasePoints,
 		settings.MinimumPoints,
 		settings.HintPenalty,

@@ -28,6 +28,39 @@ func TestExtractTriviaJSONFromOutputText(t *testing.T) {
 	}
 }
 
+func TestResolveResponsesEndpoint(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		base string
+		want string
+	}{
+		{name: "default", base: "", want: "https://api.openai.com/v1/responses"},
+		{name: "base url", base: "https://api.openai.com/v1", want: "https://api.openai.com/v1/responses"},
+		{name: "api root", base: "https://api.openai.com", want: "https://api.openai.com/v1/responses"},
+		{name: "trailing slash", base: "https://api.openai.com/v1/", want: "https://api.openai.com/v1/responses"},
+		{name: "full responses endpoint", base: "https://api.openai.com/v1/responses", want: "https://api.openai.com/v1/responses"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := resolveResponsesEndpoint(tc.base); got != tc.want {
+				t.Fatalf("resolveResponsesEndpoint(%q) = %q, want %q", tc.base, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDefaultTriviaOpenAIModel(t *testing.T) {
+	t.Parallel()
+
+	if defaultTriviaOpenAIModel != "gpt-5.4-nano" {
+		t.Fatalf("unexpected default trivia model: %s", defaultTriviaOpenAIModel)
+	}
+}
+
 func TestExtractTriviaJSONFromFunctionCallArguments(t *testing.T) {
 	t.Parallel()
 
@@ -113,5 +146,38 @@ func TestBuildJudgePromptTriviaAllowsUnambiguousShorthand(t *testing.T) {
 
 	if !strings.Contains(prompt, "concise shorthand when meaning is unambiguous") {
 		t.Fatalf("expected prompt to include shorthand acceptance guidance")
+	}
+}
+
+func TestBuildAntiCheatPromptScopesActiveRoundAndIgnoredUsers(t *testing.T) {
+	t.Parallel()
+
+	req := AntiCheatRequest{
+		Mode:          ModeTrivia,
+		Variant:       VariantClassic,
+		Topic:         "geography",
+		Question:      "What is the capital of France?",
+		Answer:        "Paris",
+		WinnerNick:    "alice",
+		WinningAnswer: "Paris",
+		Observations: []AntiCheatObservation{
+			{ID: 1, Nick: "ignored", Message: "the answer is Paris", ElapsedMS: 1200, Ignored: true},
+			{ID: 2, Nick: "alice", Message: "Paris", ElapsedMS: 2000, Ignored: false},
+		},
+	}
+
+	prompt, err := buildAntiCheatPrompt(req)
+	if err != nil {
+		t.Fatalf("buildAntiCheatPrompt returned error: %v", err)
+	}
+	for _, want := range []string{
+		"Only evaluate public same-channel messages from the active round",
+		"Messages before/after the round, private messages, and other channels are out of scope",
+		`"ignored":true`,
+		"help or answer leaks from them should count",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected prompt to contain %q", want)
+		}
 	}
 }

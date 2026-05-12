@@ -88,6 +88,7 @@ type ChannelSettings struct {
 	CodeAnswerTimeSeconds int
 	TriviaHintsEnabled    bool
 	CodeHintsEnabled      bool
+	AntiCheatEnabled      bool
 	BasePoints            int
 	MinimumPoints         int
 	HintPenalty           int
@@ -177,6 +178,15 @@ type GuessLog struct {
 	Timestamp time.Time
 }
 
+// RoundObservation is one public same-channel message seen during an active round.
+type RoundObservation struct {
+	ID        int
+	Nick      string
+	Message   string
+	Timestamp time.Time
+	Ignored   bool
+}
+
 // JudgeGuessCandidate is an LLM judging input candidate.
 type JudgeGuessCandidate struct {
 	ID        int    `json:"id"`
@@ -204,6 +214,39 @@ type JudgeDecision struct {
 	GuessID    int     `json:"guess_id"`
 	Confidence float64 `json:"confidence"`
 	Reason     string  `json:"reason"`
+}
+
+// AntiCheatObservation is an LLM judging input event for anti-cheat checks.
+type AntiCheatObservation struct {
+	ID        int    `json:"id"`
+	Nick      string `json:"nick"`
+	Message   string `json:"message"`
+	ElapsedMS int64  `json:"elapsed_ms"`
+	Ignored   bool   `json:"ignored"`
+}
+
+// AntiCheatRequest contains an active-round transcript and a would-be winner.
+type AntiCheatRequest struct {
+	Mode          string
+	Variant       string
+	Topic         string
+	Language      string
+	Question      string
+	Answer        string
+	Aliases       []string
+	Metadata      TriviaQuestionMetadata
+	WinnerNick    string
+	WinningAnswer string
+	Observations  []AntiCheatObservation
+}
+
+// AntiCheatDecision is a structured LLM anti-cheat output.
+type AntiCheatDecision struct {
+	Cheated     bool     `json:"cheated"`
+	Confidence  float64  `json:"confidence"`
+	Reason      string   `json:"reason"`
+	HelperNicks []string `json:"helper_nicks"`
+	EvidenceIDs []int    `json:"evidence_ids"`
 }
 
 // IsValidDifficulty reports whether difficulty is one of easy, medium, or hard.

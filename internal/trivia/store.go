@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -355,6 +356,66 @@ func (s *Store) FinalizeRoundNoWinner(roundID int64, hintUsed bool, status strin
 	return nil
 }
 
+// FinalizeRoundDisqualifiedForNetwork persists a cheating disqualification and applies a 20% channel-score penalty.
+func (s *Store) FinalizeRoundDisqualifiedForNetwork(network string, roundID int64, channel, nick, disqualifiedAnswer string, hintUsed bool, endedAt time.Time) (int, int, error) {
+	network = normalizeNetwork(network)
+
+	tx, err := s.conn.Begin()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to begin trivia disqualification transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	var current int
+	found := true
+	err = tx.QueryRow(`
+		SELECT score
+		FROM trivia_scores
+		WHERE network = ? AND channel = ? AND nick = ?
+	`, network, channel, nick).Scan(&current)
+	if err == sql.ErrNoRows {
+		current = 0
+		found = false
+	} else if err != nil {
+		return 0, 0, fmt.Errorf("failed to read trivia score for penalty: %w", err)
+	}
+
+	penalty := int(math.Ceil(float64(current) * 0.20))
+	next := current - penalty
+	if next < 0 {
+		next = 0
+	}
+
+	if found || penalty > 0 {
+		if _, err := tx.Exec(`
+			INSERT INTO trivia_scores (network, channel, nick, score, updated_at)
+			VALUES (?, ?, ?, ?, ?)
+			ON CONFLICT(network, channel, nick) DO UPDATE SET
+				nick = excluded.nick,
+				score = excluded.score,
+				updated_at = excluded.updated_at
+		`, network, channel, nick, next, time.Now()); err != nil {
+			return 0, 0, fmt.Errorf("failed to apply trivia anti-cheat penalty: %w", err)
+		}
+	}
+
+	if _, err := tx.Exec(`
+		UPDATE trivia_rounds
+		SET ended_at = ?, winning_answer = ?, points_awarded = 0, hint_used = ?, status = ?
+		WHERE id = ?
+	`, endedAt, disqualifiedAnswer, boolToInt(hintUsed), "cheat_disqualified", roundID); err != nil {
+		return 0, 0, fmt.Errorf("failed to finalize disqualified trivia round: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, 0, fmt.Errorf("failed to commit trivia disqualification transaction: %w", err)
+	}
+
+	return penalty, next, nil
+}
+
 // GetRecentRoundVariants returns the most recent trivia round variants for a channel.
 func (s *Store) GetRecentRoundVariants(channel string, limit int) ([]string, error) {
 	return s.GetRecentRoundVariantsForNetwork(defaultNetwork, channel, limit)
@@ -616,12 +677,13 @@ func (s *Store) GetSettingsForNetwork(network, channel string) (ChannelSettings,
 	var legacyHintsEnabled int
 	var triviaHintsEnabled int
 	var codeHintsEnabled int
+	var antiCheatEnabled int
 	var enabled int
 	var difficulty string
 	var codeDifficulty string
 
 	err := s.conn.QueryRow(`
-		SELECT answer_time_seconds, code_answer_time_seconds, hints_enabled, trivia_hints_enabled, code_hints_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty, code_difficulty
+		SELECT answer_time_seconds, code_answer_time_seconds, hints_enabled, trivia_hints_enabled, code_hints_enabled, anti_cheat_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty, code_difficulty
 		FROM trivia_settings
 		WHERE network = ? AND channel = ?
 	`, normalizeNetwork(network), channel).Scan(
@@ -630,6 +692,7 @@ func (s *Store) GetSettingsForNetwork(network, channel string) (ChannelSettings,
 		&legacyHintsEnabled,
 		&triviaHintsEnabled,
 		&codeHintsEnabled,
+		&antiCheatEnabled,
 		&settings.BasePoints,
 		&settings.MinimumPoints,
 		&settings.HintPenalty,
@@ -649,6 +712,7 @@ func (s *Store) GetSettingsForNetwork(network, channel string) (ChannelSettings,
 	settings.CodeHintsEnabled = legacyHintsEnabled == 1
 	settings.TriviaHintsEnabled = triviaHintsEnabled == 1
 	settings.CodeHintsEnabled = codeHintsEnabled == 1
+	settings.AntiCheatEnabled = antiCheatEnabled == 1
 	settings.Enabled = enabled == 1
 	settings.Difficulty = NormalizeDifficulty(difficulty)
 	if settings.CodeAnswerTimeSeconds <= 0 {
@@ -679,14 +743,15 @@ func (s *Store) SaveSettingsForNetwork(network, channel string, settings Channel
 
 	_, err := s.conn.Exec(`
 		INSERT INTO trivia_settings (
-			network, channel, answer_time_seconds, code_answer_time_seconds, hints_enabled, trivia_hints_enabled, code_hints_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty, code_difficulty, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			network, channel, answer_time_seconds, code_answer_time_seconds, hints_enabled, trivia_hints_enabled, code_hints_enabled, anti_cheat_enabled, base_points, minimum_points, hint_penalty, enabled, difficulty, code_difficulty, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(network, channel) DO UPDATE SET
 			answer_time_seconds = excluded.answer_time_seconds,
 			code_answer_time_seconds = excluded.code_answer_time_seconds,
 			hints_enabled = excluded.hints_enabled,
 			trivia_hints_enabled = excluded.trivia_hints_enabled,
 			code_hints_enabled = excluded.code_hints_enabled,
+			anti_cheat_enabled = excluded.anti_cheat_enabled,
 			base_points = excluded.base_points,
 			minimum_points = excluded.minimum_points,
 			hint_penalty = excluded.hint_penalty,
@@ -702,6 +767,7 @@ func (s *Store) SaveSettingsForNetwork(network, channel string, settings Channel
 		boolToInt(settings.TriviaHintsEnabled),
 		boolToInt(settings.TriviaHintsEnabled),
 		boolToInt(settings.CodeHintsEnabled),
+		boolToInt(settings.AntiCheatEnabled),
 		settings.BasePoints,
 		settings.MinimumPoints,
 		settings.HintPenalty,

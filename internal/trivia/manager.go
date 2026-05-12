@@ -73,7 +73,9 @@ var codeGenerationStartMessages = []string{
 const (
 	judgeConfidenceThreshold          = 0.70
 	immediateJudgeConfidenceThreshold = 0.85
+	antiCheatConfidenceThreshold      = 0.80
 	maxJudgeCandidates                = 120
+	maxAntiCheatObservations          = 180
 )
 
 const immediateJudgeDebounce = 1200 * time.Millisecond
@@ -100,7 +102,9 @@ type activeRound struct {
 	HintUsed          bool
 	RevealedClues     int
 	Guesses           []GuessLog
+	Observations      []RoundObservation
 	NextGuessID       int
+	NextObservationID int
 	closed            bool
 	timeoutTimer      *time.Timer
 	clueTimers        []*time.Timer
@@ -134,6 +138,7 @@ type Manager struct {
 	lastTriviaTopic  map[string]string
 	lastCodeLanguage map[string]string
 	sendMessage      func(target, message string) error
+	antiCheatJudge   func(context.Context, AntiCheatRequest) (*AntiCheatDecision, error)
 }
 
 // NewManager creates a trivia manager.
@@ -153,6 +158,7 @@ func NewManager(config ManagerConfig) *Manager {
 		startingRound:     make(map[string]bool),
 		lastTriviaTopic:   make(map[string]string),
 		lastCodeLanguage:  make(map[string]string),
+		antiCheatJudge:    nil,
 	}
 }
 
@@ -168,6 +174,31 @@ func (m *Manager) SetSendMessageFunc(fn func(target, message string) error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sendMessage = fn
+}
+
+// ObserveMessage records a same-channel public message for active-round anti-cheat context.
+func (m *Manager) ObserveMessage(channel, nick, message string, ignored bool) {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	round := m.activeRounds[channel]
+	if round == nil || round.closed {
+		return
+	}
+
+	round.Observations = append(round.Observations, RoundObservation{
+		ID:        round.NextObservationID,
+		Nick:      nick,
+		Message:   message,
+		Timestamp: time.Now(),
+		Ignored:   ignored,
+	})
+	round.NextObservationID++
 }
 
 func randomGenerationStartMessage(templates []string, descriptor string) string {
@@ -387,7 +418,9 @@ func (m *Manager) startRoundFromStoredQuestion(channel string, settings ChannelS
 		HintUsed:          false,
 		RevealedClues:     revealedClues,
 		Guesses:           make([]GuessLog, 0, 24),
+		Observations:      make([]RoundObservation, 0, 64),
 		NextGuessID:       1,
+		NextObservationID: 1,
 		closed:            false,
 		NormalizedAnswer:  normalizedAnswer,
 		NormalizedAliases: normalizedAliases,
@@ -481,11 +514,21 @@ func (m *Manager) TryAnswer(channel, nick, message string) (string, bool, error)
 	round.closed = true
 	delete(m.activeRounds, channel)
 	stopRoundTimers(round)
+	sendMessage := m.sendMessage
 	m.mu.Unlock()
 
-	result, err := m.finalizeWinner(round, guess, "exact")
+	if round.Settings.AntiCheatEnabled && sendMessage != nil {
+		if err := sendMessage(channel, fmt.Sprintf("%s gave a correct answer. Checking anti-cheat...", guess.Nick)); err != nil {
+			m.logger.Warning("Failed to send trivia anti-cheat-start message to %s: %v", channel, err)
+		}
+	}
+
+	result, err := m.finalizeWinnerChecked(round, guess, "exact")
 	if err != nil {
 		return "", false, err
+	}
+	if result.Disqualified {
+		return m.formatDisqualifiedMessage(round, guess, result), true, nil
 	}
 
 	responsePrefix := "Answer"
@@ -665,6 +708,19 @@ func (m *Manager) UpdateHintsEnabled(channel string, enabled bool) (ChannelSetti
 	}
 	settings.TriviaHintsEnabled = enabled
 	settings.CodeHintsEnabled = enabled
+	if err := m.store.SaveSettingsForNetwork(m.network, channel, settings); err != nil {
+		return ChannelSettings{}, err
+	}
+	return settings, nil
+}
+
+// UpdateAntiCheatEnabled toggles active-round anti-cheat judging for a channel.
+func (m *Manager) UpdateAntiCheatEnabled(channel string, enabled bool) (ChannelSettings, error) {
+	settings, err := m.store.GetSettingsForNetwork(m.network, channel)
+	if err != nil {
+		return ChannelSettings{}, err
+	}
+	settings.AntiCheatEnabled = enabled
 	if err := m.store.SaveSettingsForNetwork(m.network, channel, settings); err != nil {
 		return ChannelSettings{}, err
 	}
@@ -1040,11 +1096,16 @@ func (m *Manager) handleTimeout(channel string, roundID int64) {
 			m.logger.Warning("Variant timeout resolution failed (channel=%s, round_id=%d): %v", channel, roundID, err)
 		} else if handled {
 			if winner != nil {
-				result, finalizeErr := m.finalizeWinner(round, winner.GuessLog, round.Variant+"_timeout")
+				result, finalizeErr := m.finalizeWinnerChecked(round, winner.GuessLog, round.Variant+"_timeout")
 				if finalizeErr != nil {
 					m.logger.Warning("Failed to persist variant timeout winner (channel=%s, round_id=%d): %v", channel, roundID, finalizeErr)
 				} else if sendMessage != nil {
-					msg := fmt.Sprintf("%s (+%d points, total: %d).", message, result.Points, result.UpdatedScore)
+					msg := ""
+					if result.Disqualified {
+						msg = m.formatDisqualifiedMessage(round, winner.GuessLog, result)
+					} else {
+						msg = fmt.Sprintf("%s (+%d points, total: %d).", message, result.Points, result.UpdatedScore)
+					}
 					if err := sendMessage(channel, msg); err != nil {
 						m.logger.Warning("Failed to send variant timeout winner message to %s: %v", channel, err)
 					}
@@ -1069,7 +1130,7 @@ func (m *Manager) handleTimeout(channel string, roundID int64) {
 		if err != nil {
 			m.logger.Warning("Trivia timeout judge failed (channel=%s, round_id=%d): %v", channel, roundID, err)
 		} else if judged != nil {
-			result, finalizeErr := m.finalizeWinner(round, judged.GuessLog, "timeout_judge")
+			result, finalizeErr := m.finalizeWinnerChecked(round, judged.GuessLog, "timeout_judge")
 			if finalizeErr != nil {
 				m.logger.Warning("Failed to persist judged trivia winner (channel=%s, round_id=%d): %v", channel, roundID, finalizeErr)
 			} else {
@@ -1086,7 +1147,9 @@ func (m *Manager) handleTimeout(channel string, roundID int64) {
 
 				if sendMessage != nil {
 					msg := ""
-					if round.Mode == ModeCode {
+					if result.Disqualified {
+						msg = m.formatDisqualifiedMessage(round, judged.GuessLog, result)
+					} else if round.Mode == ModeCode {
 						msg = fmt.Sprintf(
 							"Judge accepted %s's close code answer (%q). Official code: %s (+%d points, total: %d).",
 							judged.Nick,
@@ -1134,9 +1197,66 @@ func (m *Manager) handleTimeout(channel string, roundID int64) {
 }
 
 type finalizeResult struct {
-	Points       int
-	UpdatedScore int
-	Bonus        int
+	Points        int
+	UpdatedScore  int
+	Bonus         int
+	Disqualified  bool
+	Penalty       int
+	PenaltyScore  int
+	CheatReason   string
+	CheatEvidence []int
+}
+
+func (m *Manager) finalizeWinnerChecked(round *activeRound, guess GuessLog, reason string) (finalizeResult, error) {
+	decision, err := m.runAntiCheatJudge(round, guess)
+	if err != nil {
+		m.logger.Warning("Trivia anti-cheat judge failed open (channel=%s round_id=%d winner=%s): %v", round.Channel, round.RoundID, guess.Nick, err)
+		return m.finalizeWinner(round, guess, reason)
+	}
+	if decision != nil && decision.Cheated && decision.Confidence >= antiCheatConfidenceThreshold {
+		penalty, newScore, err := m.store.FinalizeRoundDisqualifiedForNetwork(
+			m.network,
+			round.RoundID,
+			round.Channel,
+			guess.Nick,
+			guess.Message,
+			round.HintUsed,
+			time.Now(),
+		)
+		if err != nil {
+			return finalizeResult{}, err
+		}
+
+		m.logger.Info(
+			"Trivia anti-cheat disqualified winner: mode=%s variant=%s channel=%s round_id=%d nick=%s penalty=%d confidence=%.2f reason=%s",
+			round.Mode,
+			round.Variant,
+			round.Channel,
+			round.RoundID,
+			guess.Nick,
+			penalty,
+			decision.Confidence,
+			decision.Reason,
+		)
+		return finalizeResult{
+			Disqualified:  true,
+			Penalty:       penalty,
+			PenaltyScore:  newScore,
+			CheatReason:   strings.TrimSpace(decision.Reason),
+			CheatEvidence: append([]int(nil), decision.EvidenceIDs...),
+		}, nil
+	}
+	if decision != nil && decision.Cheated {
+		m.logger.Info(
+			"Trivia anti-cheat ignored low-confidence decision (channel=%s round_id=%d nick=%s confidence=%.2f threshold=%.2f)",
+			round.Channel,
+			round.RoundID,
+			guess.Nick,
+			decision.Confidence,
+			antiCheatConfidenceThreshold,
+		)
+	}
+	return m.finalizeWinner(round, guess, reason)
 }
 
 func (m *Manager) finalizeWinner(round *activeRound, guess GuessLog, reason string) (finalizeResult, error) {
@@ -1180,6 +1300,22 @@ func (m *Manager) finalizeWinner(round *activeRound, guess GuessLog, reason stri
 		UpdatedScore: updatedScore,
 		Bonus:        bonus,
 	}, nil
+}
+
+func (m *Manager) formatDisqualifiedMessage(round *activeRound, guess GuessLog, result finalizeResult) string {
+	reason := strings.TrimSpace(result.CheatReason)
+	if reason != "" {
+		reason = " Reason: " + reason
+	}
+	return fmt.Sprintf(
+		"Anti-cheat disqualified %s's answer (%q). Official answer: %s. No points awarded. Penalty: -%d points (total: %d).%s",
+		guess.Nick,
+		guess.Message,
+		round.Answer,
+		result.Penalty,
+		result.PenaltyScore,
+		reason,
+	)
 }
 
 func formatModifierSuffix(modifiers []string) string {
@@ -1335,7 +1471,7 @@ func (m *Manager) handleImmediateJudge(channel string, roundID int64) {
 		sendMessage := m.sendMessage
 		m.mu.Unlock()
 
-		result, finalizeErr := m.finalizeWinner(current, judged.GuessLog, "immediate_judge")
+		result, finalizeErr := m.finalizeWinnerChecked(current, judged.GuessLog, "immediate_judge")
 		if finalizeErr != nil {
 			m.logger.Warning("Failed to persist immediate judged winner (channel=%s, round_id=%d): %v", channel, roundID, finalizeErr)
 			return
@@ -1345,15 +1481,20 @@ func (m *Manager) handleImmediateJudge(channel string, roundID int64) {
 			if current.Mode == ModeCode {
 				label = "code answer"
 			}
-			msg := fmt.Sprintf(
-				"Judge accepted %s's close %s (%q). Official answer: %s (+%d points, total: %d).",
-				judged.Nick,
-				label,
-				judged.Message,
-				current.Answer,
-				result.Points,
-				result.UpdatedScore,
-			)
+			msg := ""
+			if result.Disqualified {
+				msg = m.formatDisqualifiedMessage(current, judged.GuessLog, result)
+			} else {
+				msg = fmt.Sprintf(
+					"Judge accepted %s's close %s (%q). Official answer: %s (+%d points, total: %d).",
+					judged.Nick,
+					label,
+					judged.Message,
+					current.Answer,
+					result.Points,
+					result.UpdatedScore,
+				)
+			}
 			if err := sendMessage(channel, msg); err != nil {
 				m.logger.Warning("Failed to send immediate judge winner to %s: %v", channel, err)
 			}
@@ -1527,6 +1668,77 @@ func (m *Manager) judgeTimeoutWinner(round *activeRound, guesses []GuessLog) (*j
 	}
 
 	return nil, fmt.Errorf("judge returned unknown guess_id=%d", decision.GuessID)
+}
+
+func (m *Manager) runAntiCheatJudge(round *activeRound, guess GuessLog) (*AntiCheatDecision, error) {
+	if round == nil || !round.Settings.AntiCheatEnabled {
+		return nil, nil
+	}
+
+	judgeFunc := m.antiCheatJudge
+	if judgeFunc == nil {
+		if m.generator == nil || !m.generator.config.Enabled {
+			return nil, nil
+		}
+		judgeFunc = m.generator.JudgeAntiCheat
+	}
+	if judgeFunc == nil || len(round.Observations) == 0 {
+		return nil, nil
+	}
+
+	observations := make([]AntiCheatObservation, 0, len(round.Observations))
+	for _, observation := range round.Observations {
+		text := strings.TrimSpace(observation.Message)
+		if text == "" {
+			continue
+		}
+		if len(text) > 220 {
+			text = text[:220] + "..."
+		}
+
+		elapsed := observation.Timestamp.Sub(round.StartedAt)
+		if elapsed < 0 {
+			elapsed = 0
+		}
+
+		observations = append(observations, AntiCheatObservation{
+			ID:        observation.ID,
+			Nick:      observation.Nick,
+			Message:   text,
+			ElapsedMS: elapsed.Milliseconds(),
+			Ignored:   observation.Ignored,
+		})
+		if len(observations) >= maxAntiCheatObservations {
+			break
+		}
+	}
+	if len(observations) == 0 {
+		return nil, nil
+	}
+
+	req := AntiCheatRequest{
+		Mode:          round.Mode,
+		Variant:       round.Variant,
+		Topic:         round.Topic,
+		Language:      round.Language,
+		Question:      round.Question,
+		Answer:        round.Answer,
+		Aliases:       append([]string(nil), round.Aliases...),
+		Metadata:      cloneTriviaMetadata(round.Metadata),
+		WinnerNick:    guess.Nick,
+		WinningAnswer: guess.Message,
+		Observations:  observations,
+	}
+
+	timeout := 20 * time.Second
+	if m.generator != nil && m.generator.config.RequestTimeout > 0 {
+		timeout = m.generator.config.RequestTimeout
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	return judgeFunc(ctx, req)
 }
 
 func buildAcceptedAnswerSet(mode, answer string, aliases []string) (map[string]struct{}, string, []string) {

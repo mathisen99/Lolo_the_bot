@@ -407,7 +407,7 @@ The VM runs persistently and uses vsock for host-guest communication. No network
 | `!user add/remove/list` | Manage users | Admin+ |
 | `!score set/add/remove/reset ...` | Manual trivia score management | Admin+ |
 | `!prefix show` / `!prefix <symbol>` | Show or change the command prefix for the current channel | Admin+ |
-| `!triviasettings show/time/codetime/hint <trivia\|code\|both> on\|off/difficulty/codedifficulty/points/enabled` | Trivia/code channel settings | Admin+ |
+| `!triviasettings show/time/codetime/hint <trivia\|code\|both> on\|off/difficulty/codedifficulty/points/enabled/anticheat on\|off` | Trivia/code channel settings | Admin+ |
 | `!kick/ban/mute` | Moderation | Admin+ |
 | `!join/part` | Channel management | Owner |
 | `!quit` | Shutdown bot | Owner |
@@ -416,7 +416,7 @@ Use `!help <command>` for detailed help.
 
 Command prefix overrides are channel-specific. `!` remains the default prefix everywhere unless a channel admin changes it. Example: `!prefix -` changes the current channel to `-`, and `-prefix !` resets that channel back to the default.
 
-Trivia/code note: `!trivia` / `!quiz` now rotate a broader built-in catalog without adding new commands, including classic, pyramid, connection, real/fake, chronology, higher/lower, odd-one-out, xword, sequence, quote-source, acronym, title-completion, category-lock, definition-duel, and closest year/number rounds. If no exact match is found, the bot can use strict close-answer judging for equivalent trivia/code answers.
+Trivia/code note: `!trivia` / `!quiz` now rotate a broader built-in catalog without adding new commands, including classic, pyramid, connection, real/fake, chronology, higher/lower, odd-one-out, xword, sequence, quote-source, acronym, title-completion, category-lock, definition-duel, and closest year/number rounds. If no exact match is found, the bot can use strict close-answer judging for equivalent trivia/code answers. Active rounds also keep same-channel context for anti-cheat judging before points are awarded; admins can toggle this with `!triviasettings anticheat on|off`.
 Code quiz note: `!code` accepts free-form language names. Answers must still be a single line of valid code for that language, but imports/helpers/runtime setup are assumed to already be available.
 
 ## Configuration
@@ -498,7 +498,7 @@ max_retries = 3                # Max API retry attempts
 [trivia]
 enabled = true
 database_path = "data/trivia.db"
-openai_model = "gpt-5.2"
+openai_model = "gpt-5.4-nano"
 openai_api_key_env = "OPENAI_API_KEY"
 default_answer_time_seconds = 30
 default_code_answer_time_seconds = 30

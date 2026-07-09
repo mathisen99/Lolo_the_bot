@@ -6,7 +6,7 @@ from api.ai.usage_tracker import calculate_cost, calculate_multimodal_cost, extr
 class UsageTrackerTests(unittest.TestCase):
     def test_calculate_cost_for_gpt_5_5(self):
         cost = calculate_cost(
-            "gpt-5.5",
+            "gpt-5.6-sol",
             input_tokens=10_000,
             cached_tokens=2_000,
             output_tokens=1_000,
@@ -21,7 +21,7 @@ class UsageTrackerTests(unittest.TestCase):
 
     def test_calculate_cost_for_gpt_5_5_long_context_tier(self):
         cost = calculate_cost(
-            "gpt-5.5",
+            "gpt-5.6-sol",
             input_tokens=300_000,
             cached_tokens=50_000,
             output_tokens=20_000,

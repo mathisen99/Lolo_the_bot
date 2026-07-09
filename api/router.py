@@ -385,6 +385,32 @@ async def handle_mention_stream(request: MentionRequest):
                   f"from {request.nick} in {request.network}/{request.channel}" + 
                   (" [DEEP MODE]" if request.deep_mode else ""))
     
+    # Check channel question rate limit before processing
+    from api.tools.channel_rate_limit import check_channel_question_limit
+    allowed, limit_message = check_channel_question_limit(
+        nick=request.nick,
+        channel=request.channel,
+        permission_level=request.permission_level,
+        hostmask=request.hostmask
+    )
+    if not allowed:
+        import json as _json
+        from fastapi.responses import StreamingResponse as _SR
+        
+        async def _limit_response():
+            yield _json.dumps({
+                "request_id": request.request_id,
+                "status": "success",
+                "message": limit_message,
+                "streaming": False
+            }) + "\n"
+        
+        return _SR(
+            _limit_response(),
+            media_type="application/x-ndjson",
+            headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+        )
+    
     async def generate_chunks():
         """Async generator that yields mention response chunks."""
         from api.ai.client import AIClient

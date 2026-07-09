@@ -13,7 +13,7 @@ from api.utils.output import log_info, log_warning, log_error
 
 # Pricing per 1M tokens
 PRICING = {
-    "gpt-5.5": {
+    "gpt-5.6-sol": {
         "input": 5.00,      # $5.00 per 1M input tokens
         "cached": 0.50,     # $0.50 per 1M cached tokens
         "output": 30.00,    # $30.00 per 1M output tokens
@@ -62,9 +62,9 @@ MULTIMODAL_PRICING = {
 WEB_SEARCH_COST = 0.01       # $10/1k calls = $0.01 each
 # Note: code_interpreter removed - now using self-hosted Firecracker (free)
 
-# GPT-5.4/GPT-5.5 long-context pricing tier:
+# GPT-5.4/gpt-5.6-sol long-context pricing tier:
 # If input exceeds 272K tokens, apply higher rates for the full session.
-HIGH_CONTEXT_TIER_MODELS = {"gpt-5.4", "gpt-5.4-pro", "gpt-5.5"}
+HIGH_CONTEXT_TIER_MODELS = {"gpt-5.4", "gpt-5.4-pro", "gpt-5.6-sol"}
 HIGH_CONTEXT_INPUT_THRESHOLD = 272_000
 HIGH_CONTEXT_INPUT_MULTIPLIER = 2.0
 HIGH_CONTEXT_OUTPUT_MULTIPLIER = 1.5

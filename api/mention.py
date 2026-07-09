@@ -9,6 +9,7 @@ from api.router import MentionRequest, MentionResponse
 from api.utils.output import log_info, log_success, log_error, log_warning
 from api.ai import AIClient, AIConfig
 from api.tools import NULL_RESPONSE_MARKER
+from api.tools.channel_rate_limit import check_channel_question_limit
 
 # Global AI client instance (initialized on first use)
 _ai_client = None
@@ -52,6 +53,21 @@ def handle_mention(request: MentionRequest) -> MentionResponse:
     """
     log_info(f"[{request.request_id}] Processing mention from {request.nick} in {request.network}/{request.channel}" +
              (" [DEEP MODE]" if request.deep_mode else ""))
+    
+    # Check channel question rate limit before processing
+    allowed, limit_message = check_channel_question_limit(
+        nick=request.nick,
+        channel=request.channel,
+        permission_level=request.permission_level,
+        hostmask=request.hostmask
+    )
+    if not allowed:
+        log_warning(f"[{request.request_id}] Channel rate limit reached for {request.nick} in {request.channel}")
+        return MentionResponse(
+            request_id=request.request_id,
+            status="success",
+            message=limit_message
+        )
     
     # Log conversation history if provided
     if request.history:

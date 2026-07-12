@@ -21,8 +21,8 @@ import (
 type APIClientInterface interface {
 	SendCommand(ctx context.Context, command string, args []string, nick, hostmask, network, channel string, isPM bool, timeout time.Duration) (*APIResponse, error)
 	SendCommandStream(ctx context.Context, command string, args []string, nick, hostmask, network, channel string, isPM bool, timeout time.Duration) (<-chan *APIResponse, error)
-	SendMention(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (*APIResponse, error)
-	SendMentionStream(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (<-chan *APIResponse, error)
+	SendMention(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message) (*APIResponse, error)
+	SendMentionStream(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message) (<-chan *APIResponse, error)
 	CheckHealth(ctx context.Context) (*HealthResponse, error)
 	GetCommands(ctx context.Context) (*CommandsResponse, error)
 	WaitForInflightRequests(timeout time.Duration) bool
@@ -37,8 +37,68 @@ type APIClient struct {
 	circuitBreaker *circuitbreaker.CircuitBreaker
 }
 
-// NewAPIClient creates a new API client with the specified endpoint and timeout
-func NewAPIClient(endpoint string, timeout time.Duration) *APIClient {
+// HTTPTransportConfig holds the tunable HTTP transport settings for the API
+// client. Zero values are replaced with the defaults that preserve the client's
+// prior behavior (see DefaultHTTPTransportConfig).
+type HTTPTransportConfig struct {
+	DialTimeout           time.Duration // Time to establish a TCP connection
+	KeepAlive             time.Duration // Keep-alive probe interval
+	TLSHandshakeTimeout   time.Duration // Time allowed for the TLS handshake
+	MaxIdleConns          int           // Max idle connections across all hosts
+	MaxIdleConnsPerHost   int           // Max idle connections per host
+	IdleConnTimeout       time.Duration // How long idle connections stay in the pool
+	ResponseHeaderTimeout time.Duration // Time to receive response headers after the request
+}
+
+// DefaultHTTPTransportConfig returns the transport settings that match the
+// values historically hardcoded in the API client.
+func DefaultHTTPTransportConfig() HTTPTransportConfig {
+	return HTTPTransportConfig{
+		DialTimeout:           10 * time.Second,
+		KeepAlive:             30 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+	}
+}
+
+// withDefaults returns a copy of the config with any zero-valued field replaced
+// by the corresponding default, keeping behavior safe for partially-populated
+// configs and direct callers.
+func (t HTTPTransportConfig) withDefaults() HTTPTransportConfig {
+	def := DefaultHTTPTransportConfig()
+	if t.DialTimeout <= 0 {
+		t.DialTimeout = def.DialTimeout
+	}
+	if t.KeepAlive <= 0 {
+		t.KeepAlive = def.KeepAlive
+	}
+	if t.TLSHandshakeTimeout <= 0 {
+		t.TLSHandshakeTimeout = def.TLSHandshakeTimeout
+	}
+	if t.MaxIdleConns <= 0 {
+		t.MaxIdleConns = def.MaxIdleConns
+	}
+	if t.MaxIdleConnsPerHost <= 0 {
+		t.MaxIdleConnsPerHost = def.MaxIdleConnsPerHost
+	}
+	if t.IdleConnTimeout <= 0 {
+		t.IdleConnTimeout = def.IdleConnTimeout
+	}
+	if t.ResponseHeaderTimeout <= 0 {
+		t.ResponseHeaderTimeout = def.ResponseHeaderTimeout
+	}
+	return t
+}
+
+// NewAPIClient creates a new API client with the specified endpoint, timeout,
+// and HTTP transport tunables. Zero-valued transport fields fall back to the
+// defaults returned by DefaultHTTPTransportConfig.
+func NewAPIClient(endpoint string, timeout time.Duration, transportCfg HTTPTransportConfig) *APIClient {
+	transportCfg = transportCfg.withDefaults()
+
 	// Create HTTP client WITHOUT a global timeout.
 	// Global http.Client.Timeout applies to the entire request/response cycle,
 	// which is problematic for streaming responses that can legitimately take longer.
@@ -48,19 +108,19 @@ func NewAPIClient(endpoint string, timeout time.Duration) *APIClient {
 	transport := &http.Transport{
 		// Connection establishment timeouts
 		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second, // Time to establish TCP connection
-			KeepAlive: 30 * time.Second, // Keep-alive probe interval
+			Timeout:   transportCfg.DialTimeout, // Time to establish TCP connection
+			KeepAlive: transportCfg.KeepAlive,   // Keep-alive probe interval
 		}).DialContext,
-		TLSHandshakeTimeout: 10 * time.Second, // Time for TLS handshake
+		TLSHandshakeTimeout: transportCfg.TLSHandshakeTimeout, // Time for TLS handshake
 
 		// Connection pool settings for concurrent requests
-		MaxIdleConns:        100,              // Max idle connections across all hosts
-		MaxIdleConnsPerHost: 10,               // Max idle connections per host
-		IdleConnTimeout:     90 * time.Second, // How long idle connections stay in pool
+		MaxIdleConns:        transportCfg.MaxIdleConns,        // Max idle connections across all hosts
+		MaxIdleConnsPerHost: transportCfg.MaxIdleConnsPerHost, // Max idle connections per host
+		IdleConnTimeout:     transportCfg.IdleConnTimeout,     // How long idle connections stay in pool
 
 		// Response header timeout (time to receive response headers after sending request)
 		// This does NOT affect streaming body reads
-		ResponseHeaderTimeout: 30 * time.Second,
+		ResponseHeaderTimeout: transportCfg.ResponseHeaderTimeout,
 
 		// Disable compression for streaming to avoid buffering issues
 		DisableCompression: false,
@@ -119,19 +179,6 @@ type MentionRequest struct {
 	PermissionLevel string           `json:"permission_level"`
 	CommandPrefix   string           `json:"command_prefix"`
 	History         []HistoryMessage `json:"history,omitempty"`
-	TriviaContext   *TriviaContext   `json:"trivia_context,omitempty"`
-	DeepMode        bool             `json:"deep_mode,omitempty"`
-}
-
-// TriviaContext is a safe snapshot of an active trivia/code round for anti-cheat prompting.
-type TriviaContext struct {
-	Active   bool   `json:"active"`
-	Mode     string `json:"mode"`
-	Variant  string `json:"variant"`
-	Topic    string `json:"topic"`
-	Language string `json:"language"`
-	Question string `json:"question"`
-	HintUsed bool   `json:"hint_used"`
 }
 
 // APIResponse represents a response from the Python API
@@ -243,7 +290,7 @@ func (c *APIClient) SendCommandStream(ctx context.Context, command string, args 
 }
 
 // SendMention sends a mention request to the Python API with conversation history
-func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (*APIResponse, error) {
+func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message) (*APIResponse, error) {
 	requestID := uuid.New().String()
 
 	// Convert database messages to API format
@@ -266,8 +313,6 @@ func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, ne
 		PermissionLevel: permissionLevel,
 		CommandPrefix:   commandPrefix,
 		History:         historyMessages,
-		TriviaContext:   triviaContext,
-		DeepMode:        deepMode,
 	}
 
 	var response *APIResponse
@@ -289,7 +334,7 @@ func (c *APIClient) SendMention(ctx context.Context, message, nick, hostmask, ne
 
 // SendMentionStream sends a streaming mention request to the Python API with conversation history
 // Returns a channel that receives response chunks as they arrive
-func (c *APIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (<-chan *APIResponse, error) {
+func (c *APIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message) (<-chan *APIResponse, error) {
 	requestID := uuid.New().String()
 
 	// Convert database messages to API format
@@ -312,8 +357,6 @@ func (c *APIClient) SendMentionStream(ctx context.Context, message, nick, hostma
 		PermissionLevel: permissionLevel,
 		CommandPrefix:   commandPrefix,
 		History:         historyMessages,
-		TriviaContext:   triviaContext,
-		DeepMode:        deepMode,
 	}
 
 	// Create channel for responses

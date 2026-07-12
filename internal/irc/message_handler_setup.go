@@ -30,8 +30,8 @@ func (cm *ConnectionManager) SetupBotMessageHandler(messageHandler *handler.Mess
 			}
 
 			// Process the message with timeout
-			// Use 8 minutes to accommodate --deep mode which does thorough research
-			// Normal requests complete much faster, deep mode is rate-limited (3/day)
+			// Use 8 minutes to accommodate long-running tool use (e.g. thorough
+			// web research or code execution); normal requests complete much faster.
 			ctx, cancel := context.WithTimeout(context.Background(), 480*time.Second)
 			defer cancel()
 

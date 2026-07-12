@@ -5,7 +5,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 ## Features
 
 ### AI-Powered Tools
-- **AI Conversations** - GPT-5.4 powered responses when mentioned
+- **AI Conversations** - OpenAI-powered responses when mentioned
 - **YouTube Search** - Search videos, channels, and read comments
 - **Usage Tracking** - Track token usage and costs
 - **Web Search** - Real-time information lookup via Brave Search
@@ -18,7 +18,6 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **Text Pasting** - Create pastes for long code/text (botbin.net integration)
 - **Chat History** - Access conversation context and history
 - **Shell Execution** - Run system commands (owner only)
-- **Voice Cloning** - Clone voices from audio samples or YouTube clips (CosyVoice2)
 - **IRC Commands** - Execute IRC commands via AI (whois, NickServ, ChanServ, channel queries)
 - **Source Code Introspection** - AI can read and explain its own source code
 - **Agentic Status Reporting** - Real-time status updates for complex tasks
@@ -36,12 +35,9 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.25+
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) (Python package manager)
-- ffmpeg (for audio/video processing)
-- yt-dlp (optional, for voice cloning from YouTube)
-- NVIDIA GPU with CUDA (optional, for voice cloning)
 - KVM access (optional, for Python sandbox - `/dev/kvm`)
 - Docker (optional, for building Python sandbox rootfs)
 
@@ -64,30 +60,6 @@ go mod download
 go build -o lolo cmd/bot/main.go
 
 # Set up Python environment
-uv venv
-source .venv/bin/activate
-uv pip install -r requirements.txt
-```
-
-### Voice Cloning Setup (Optional)
-
-Voice cloning requires additional setup for CosyVoice2 and vocal isolation.
-
-**CosyVoice2 Setup:**
-```bash
-cd CosyVoice
-uv venv
-source .venv/bin/activate
-uv pip install -r requirements.txt
-
-# Download pretrained models (required, ~2GB)
-# Models are downloaded automatically on first use, or manually:
-python -c "from modelscope import snapshot_download; snapshot_download('iic/CosyVoice2-0.5B', local_dir='pretrained_models/CosyVoice2-0.5B')"
-```
-
-**IsolateVoice Setup (for YouTube vocal extraction):**
-```bash
-cd IsolateVoice
 uv venv
 source .venv/bin/activate
 uv pip install -r requirements.txt
@@ -166,6 +138,38 @@ export GEMINI_API_KEY="your-gemini-api-key-here"
 export GOOGLE_API_KEY="your-google-api-key-here"
 ```
 
+### IRC Authentication Secrets
+
+IRC NickServ/SASL passwords are **not** stored in `config/bot.toml`. Leave the
+`nickserv_password` / `sasl_password` fields empty and provide the secrets via
+`.env` (or the process environment) instead. The bot resolves them at startup:
+
+```bash
+# Global fallback (used by any network that leaves the secret empty)
+LOLO_NICKSERV_PASSWORD=your-nickserv-password
+LOLO_SASL_PASSWORD=your-sasl-password
+
+# Per-network overrides use the uppercased network id (e.g. libera, rizon)
+LOLO_LIBERA_NICKSERV_PASSWORD=your-libera-nickserv-password
+LOLO_LIBERA_SASL_PASSWORD=your-libera-sasl-password
+```
+
+Resolution order per secret: the value in `config/bot.toml` (if non-empty) wins,
+otherwise the per-network env var, otherwise the global fallback var. IRC auth is
+optional — networks with no password simply connect without authenticating. To
+require a secret and fail fast at startup if it is missing, set
+`nickserv_required = true` / `sasl_required = true` on the network. Missing
+required secrets produce a clear startup error that names the expected env vars
+without printing any value.
+
+> **Security notice — rotate the old NickServ password.** Earlier versions of
+> this repository committed a plaintext NickServ password (the value
+> `caintheman`) to `config/bot.toml`. That value now lives in the git history
+> and removing it from the current file does **not** purge it from history.
+> Anyone with the NickServ account must rotate that password with NickServ
+> (e.g. `/msg NickServ SET PASSWORD <new-password>`, or the network's password
+> reset flow) and set the new value only via `.env` as described above.
+
 ### Running
 
 **Terminal 1 - Python API:**
@@ -224,7 +228,6 @@ The bot has access to these tools when mentioned:
 | **Text Pasting** | Create pastes for long content | "paste this code snippet" |
 | **User Memories** | Store personal facts and preferences | "remember I like cats" |
 | **Shell Execution** | Run system commands (owner only) | "check disk space" |
-| **Voice Cloning** | Clone voices and generate speech | "clone this voice and say hello" |
 | **YouTube Search** | Search videos and comments | "search youtube for funny cats" |
 | **GPT Image 2** | High-quality image generation and editing with strong text rendering | "generate with GPT: a sign saying HELLO" |
 | **Nano Banana Pro** | Google's advanced image generation | "generate with gemini: an infographic about AI" |
@@ -315,24 +318,6 @@ The bot owner can run system commands:
 
 Non-owners attempting shell commands will be denied.
 
-### Voice Cloning
-
-Clone voices from audio samples or YouTube videos:
-```
-<you>  lolo: clone this voice https://example.com/voice.mp3 and say "Hello world"
-<lolo> https://botbin.net/abc123.mp3
-
-<you>  lolo: use this youtube video https://youtube.com/watch?v=xxx from 1:00 to 1:15 to clone the voice and say "Testing voice clone"
-<lolo> https://botbin.net/def456.mp3
-```
-
-For YouTube clips, the bot automatically:
-1. Downloads the specified time range
-2. Isolates vocals (removes music/background using Demucs)
-3. Uses the clean voice for cloning
-
-Best results with 5-15 seconds of clear speech. Max YouTube clip: 30 seconds.
-
 ### IRC Commands
 
 The bot can execute IRC commands and query channel information:
@@ -398,16 +383,8 @@ The VM runs persistently and uses vsock for host-guest communication. No network
 | `!ping` | Pong | All |
 | `!version` | Bot version | All |
 | `!uptime` | Bot uptime | All |
-| `!trivia <topic>` / `!quiz <topic>` | Start a trivia round | All |
-| `!code <language>` | Start a one-line coding quiz round | All |
-| `!hint` | Reveal a hint for active trivia/code round | All |
-| `!triviarules` / `!quizrules` | Show trivia rules and scoring | All |
-| `!top10` | Top 10 trivia leaderboard for current channel | All |
-| `!score [nick]` | Show trivia score in current channel | All |
 | `!user add/remove/list` | Manage users | Admin+ |
-| `!score set/add/remove/reset ...` | Manual trivia score management | Admin+ |
 | `!prefix show` / `!prefix <symbol>` | Show or change the command prefix for the current channel | Admin+ |
-| `!triviasettings show/time/codetime/hint <trivia\|code\|both> on\|off/difficulty/codedifficulty/points/enabled/anticheat on\|off` | Trivia/code channel settings | Admin+ |
 | `!kick/ban/mute` | Moderation | Admin+ |
 | `!join/part` | Channel management | Owner |
 | `!quit` | Shutdown bot | Owner |
@@ -415,9 +392,6 @@ The VM runs persistently and uses vsock for host-guest communication. No network
 Use `!help <command>` for detailed help.
 
 Command prefix overrides are channel-specific. `!` remains the default prefix everywhere unless a channel admin changes it. Example: `!prefix -` changes the current channel to `-`, and `-prefix !` resets that channel back to the default.
-
-Trivia/code note: `!trivia` / `!quiz` now rotate a broader built-in catalog without adding new commands, including classic, pyramid, connection, real/fake, chronology, higher/lower, odd-one-out, xword, sequence, quote-source, acronym, title-completion, category-lock, definition-duel, and closest year/number rounds. If no exact match is found, the bot can use strict close-answer judging for equivalent trivia/code answers. Active rounds also keep same-channel context for anti-cheat judging before points are awarded; admins can toggle this with `!triviasettings anticheat on|off`.
-Code quiz note: `!code` accepts free-form language names. Answers must still be a single line of valid code for that language, but imports/helpers/runtime setup are assumed to already be available.
 
 ## Configuration
 
@@ -445,30 +419,25 @@ GOOGLE_API_KEY=your-actual-google-key-here
 
 ### Step 3: Configure IRC Settings (config/bot.toml)
 
-Edit `config/bot.toml` to customize your bot's IRC connection:
+Edit `config/bot.toml` to customize your bot's IRC connection. Each `[[networks]]`
+block is the single source of truth for one network's connection and auth. Leave
+`sasl_password` / `nickserv_password` empty here and provide the secrets via `.env`
+(see [IRC Authentication Secrets](#irc-authentication-secrets)).
 
 ```toml
-[server]
-address = "irc.libera.chat"    # IRC server
-port = 6697                     # Port (6697 for TLS)
-nickname = "YourBotName"        # Bot's nickname
-username = "yourbot"            # Bot's username
-realname = "Your IRC Bot"       # Bot's real name
-
-[auth]
-sasl_username = "YourBotName"   # For registered nicks (optional)
-sasl_password = ""              # SASL password (optional)
-nickserv_password = ""          # NickServ password (optional)
-
 [[networks]]
 id = "libera"
 address = "irc.libera.chat"
 port = 6697
 tls = true
 nickname = "YourBotName"
+alt_nicknames = ["YourBotName_", "YourBotName__"]
 username = "yourbot"
 realname = "Your IRC Bot"
 max_message_length = 400
+sasl_username = "YourBotName"
+sasl_password = ""              # Resolved from LOLO_LIBERA_SASL_PASSWORD / LOLO_SASL_PASSWORD in .env
+nickserv_password = ""          # Resolved from LOLO_LIBERA_NICKSERV_PASSWORD / LOLO_NICKSERV_PASSWORD in .env
 channels = ["#yourchannel"]
 required = true
 
@@ -481,12 +450,18 @@ nickname = "YourBotName"
 username = "yourbot"
 realname = "Your IRC Bot"
 max_message_length = 400
+sasl_username = "YourBotName"
+sasl_password = ""              # Resolved from LOLO_RIZON_SASL_PASSWORD / LOLO_SASL_PASSWORD in .env
+nickserv_password = ""          # Resolved from LOLO_RIZON_NICKSERV_PASSWORD / LOLO_NICKSERV_PASSWORD in .env
 channels = ["#mathizen"]
 required = false
 
 [bot]
 command_prefix = "!"            # Command prefix (e.g., !help)
 channels = ["#yourchannel"]     # Channels to join on startup
+
+[limits]
+mention_history_depth = 20      # Recent channel messages sent as mention context (default: 20)
 
 [images]
 download_channels = ["#yourchannel"]  # Channels to auto-download images from
@@ -495,21 +470,20 @@ download_channels = ["#yourchannel"]  # Channels to auto-download images from
 circuit_breaker_threshold = 5  # Failures before circuit opens
 max_retries = 3                # Max API retry attempts
 
-[trivia]
-enabled = true
-database_path = "data/trivia.db"
-openai_model = "gpt-5.4-nano"
-openai_api_key_env = "OPENAI_API_KEY"
-default_answer_time_seconds = 30
-default_code_answer_time_seconds = 30
-default_base_points = 100
-default_minimum_points = 20
-default_hint_penalty = 20
-default_difficulty = "medium"   # easy/medium/hard
-default_code_difficulty = "medium"   # easy/medium/hard
+  # HTTP transport tunables for the Python API client (all optional; defaults shown)
+  [api.http]
+    dial_timeout = 10            # TCP connect timeout (seconds)
+    keep_alive = 30              # Keep-alive probe interval (seconds)
+    tls_handshake_timeout = 10   # TLS handshake timeout (seconds)
+    max_idle_conns = 100         # Max idle connections across all hosts
+    max_idle_conns_per_host = 10 # Max idle connections per host
+    idle_conn_timeout = 90       # Idle connection lifetime (seconds)
+    response_header_timeout = 30 # Response-header timeout (seconds)
 ```
 
-The legacy `[server]`, `[auth]`, and `[bot].channels` fields still load as a single `libera` network when `[[networks]]` is absent.
+A legacy top-level `[server]`/`[auth]` form is still supported as a fallback and
+loads as a single `libera` network when `[[networks]]` is absent, but new configs
+should use the `[[networks]]` form shown above.
 
 Rizon owner authentication is intentionally stricter than Libera. On Rizon the bot must ignore hostmask, vHost, ident, and nickname-only identity for elevated permissions. Owner is granted only when the sender nick is exactly `Mathisen` and a fresh `NickServ STATUS Mathisen` reply is exactly `Mathisen 3`; statuses `0`, `1`, `2`, malformed replies, timeouts, and service failures are denied.
 
@@ -559,7 +533,6 @@ paste_enabled = true           # Text pasting to botbin.net
 user_rules_enabled = true      # Per-user memories and rules
 chat_history_enabled = true    # Conversation history access
 shell_exec_enabled = true      # Shell command execution (owner only)
-voice_speak_enabled = true     # Voice cloning/speaking (CosyVoice2)
 youtube_search_enabled = true  # YouTube search and stats
 usage_stats_enabled = true     # Token usage and cost tracking
 report_status_enabled = true   # Agentic status reporting
@@ -603,13 +576,6 @@ source_code_enabled = true     # Source code introspection
 - Check user permission level with `!user list`
 - Only owners can add/remove admins
 
-**Voice cloning not working**
-- Ensure CosyVoice and IsolateVoice venvs are set up (see Voice Cloning Setup)
-- Check `ffmpeg` is installed: `sudo apt install ffmpeg`
-- Check `yt-dlp` is installed for YouTube: `sudo apt install yt-dlp`
-- Verify CUDA is available for GPU acceleration (CPU works but is slow)
-- Check CosyVoice pretrained models are downloaded
-
 ## Project Structure
 
 ```
@@ -626,8 +592,6 @@ lolo/
 │   ├── bot.toml.example         # IRC config template (copy to bot.toml)
 │   └── bot.toml                 # Your IRC configuration (create this)
 ├── data/                        # Database & logs (auto-created)
-├── CosyVoice/                   # Voice cloning engine (CosyVoice2)
-├── IsolateVoice/                # Vocal isolation (Demucs)
 ├── .env.example                 # API keys template
 ├── .env                         # Your API keys (create this)
 └── requirements.txt             # Python dependencies

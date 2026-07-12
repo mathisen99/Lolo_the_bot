@@ -35,10 +35,14 @@ class AIConfig:
         self.model_name: str = config["model"]["name"]
         self.reasoning_effort: str = config["model"]["reasoning_effort"]
         self.verbosity: str = config["model"]["verbosity"]
+        # How long the OpenAI API retains the prompt cache (default "24h")
+        self.prompt_cache_retention: str = config["model"].get("prompt_cache_retention", "24h")
         
         # Limits
         self.max_output_tokens: int = config["limits"]["max_output_tokens"]
         self.timeout: int = config["limits"]["timeout"]
+        # Maximum multi-turn tool-calling iterations per response (default 30)
+        self.max_tool_iterations: int = config["limits"].get("max_tool_iterations", 30)
         
         # System prompt
         self.system_prompt: str = config["system_prompt"]["text"]
@@ -55,7 +59,6 @@ class AIConfig:
         self.chat_history_enabled: bool = config["tools"].get("chat_history_enabled", True)
         self.paste_enabled: bool = config["tools"].get("paste_enabled", True)
         self.shell_exec_enabled: bool = config["tools"].get("shell_exec_enabled", True)
-        self.voice_speak_enabled: bool = config["tools"].get("voice_speak_enabled", True)
         self.null_response_enabled: bool = config["tools"].get("null_response_enabled", True)
         self.bug_report_enabled: bool = config["tools"].get("bug_report_enabled", True)
         self.gpt_image_enabled: bool = config["tools"].get("gpt_image_enabled", True)
@@ -119,8 +122,6 @@ class AIConfig:
             tools.append("create_paste")
         if self.shell_exec_enabled:
             tools.append("execute_shell")
-        if self.voice_speak_enabled:
-            tools.append("voice_speak")
         if self.null_response_enabled:
             tools.append("null_response")
         if self.bug_report_enabled:

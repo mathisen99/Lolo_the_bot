@@ -9,8 +9,18 @@ import json
 from openai import OpenAI
 from .config import AIConfig
 from .usage_tracker import log_usage, extract_usage_from_response
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, VoiceSpeakTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, ClaudeTechTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation, KnowledgeBaseLearnTool, KnowledgeBaseSearchTool, KnowledgeBaseListTool, KnowledgeBaseForgetTool, ReminderTool, LogAnalyzerTool
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, ClaudeTechTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation, KnowledgeBaseLearnTool, KnowledgeBaseSearchTool, KnowledgeBaseListTool, KnowledgeBaseForgetTool, ReminderTool, LogAnalyzerTool
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
+
+
+# Tools that are restricted to the bot owner at execution time. These tools ARE
+# still exposed to every user so the model knows they exist and can explain to a
+# non-owner that only the owner may run them (and to ask the owner if needed).
+# Each of these tools enforces the owner check at execution time.
+OWNER_ONLY_TOOLS = frozenset({
+    "execute_shell",  # shell/bash execution
+    "source_code",    # source code introspection
+})
 
 
 class AIClient:
@@ -71,8 +81,6 @@ class AIClient:
                         tools_used.append('PASTE')
                     elif func_name == 'execute_shell':
                         tools_used.append('SHELL_EXEC')
-                    elif func_name == 'voice_speak':
-                        tools_used.append('VOICE_SPEAK')
                     elif func_name == 'null_response':
                         tools_used.append('NULL_RESPONSE')
                     elif func_name == 'bug_report':
@@ -152,11 +160,6 @@ class AIClient:
             shell_exec = ShellExecTool(timeout=self.config.shell_exec_timeout)
             self.tools[shell_exec.name] = shell_exec
             log_info("Shell execution tool enabled (OWNER ONLY)")
-        
-        if self.config.voice_speak_enabled:
-            voice_speak = VoiceSpeakTool()
-            self.tools[voice_speak.name] = voice_speak
-            log_info("Voice speak tool enabled")
         
         if self.config.null_response_enabled:
             null_response = NullResponseTool()
@@ -243,6 +246,17 @@ class AIClient:
             self.tools[log_analyzer.name] = log_analyzer
             log_info("Log analyzer tool enabled")
     
+    def _get_tool_definitions(self) -> List[Dict[str, Any]]:
+        """
+        Build the list of tool definitions to expose to the model.
+
+        All tools (including owner-only ones like execute_shell and source_code)
+        are exposed to every user. Owner-only tools enforce their restriction at
+        execution time and their descriptions instruct the model to explain to
+        non-owners that only the owner may run them.
+        """
+        return [tool.get_definition() for tool in self.tools.values()]
+
     def generate_response(self, user_message: str, request_id: str) -> str:
         """
         Generate AI response to user message.
@@ -258,7 +272,7 @@ class AIClient:
         
         try:
             # Build tool definitions
-            tool_defs = [tool.get_definition() for tool in self.tools.values()]
+            tool_defs = self._get_tool_definitions()
             
             # Prepare the input with system prompt
             full_input = f"{self.config.system_prompt}\n\nUser: {user_message}"
@@ -272,7 +286,7 @@ class AIClient:
                 max_output_tokens=self.config.max_output_tokens,
                 tools=tool_defs if tool_defs else None,
                 timeout=self.config.timeout,
-                prompt_cache_retention="24h"
+                prompt_cache_retention=self.config.prompt_cache_retention
             )
             
             # Check which tools were used
@@ -305,41 +319,24 @@ class AIClient:
         nick: str, 
         channel: str,
         conversation_history: list,
-        trivia_context: Optional[Dict[str, Any]],
         permission_level: str,
         command_prefix: str,
         request_id: str,
-        deep_mode: bool = False,
         network: str = "libera"
     ):
         """
         Generate AI response with conversation context, streaming updates.
-        
-        Args:
-            deep_mode: If True, uses high reasoning effort and deep research instructions
         
         Yields:
             Dict containing 'status' and 'message' keys.
             status: "processing" for intermediate updates, "success" or "error" for final
         """
         log_info(f"[{request_id}] Generating AI response with context (permission: {permission_level})" +
-                 f" on {network}" + (" [DEEP MODE]" if deep_mode else ""))
-        
-        # Check deep mode rate limit before proceeding
-        if deep_mode:
-            from api.tools.deep_mode_limit import check_deep_mode_limit, record_deep_mode_usage
-            allowed, limit_msg = check_deep_mode_limit(nick, permission_level)
-            if not allowed:
-                log_warning(f"[{request_id}] Deep mode rate limit reached for {nick}")
-                yield {
-                    "status": "error",
-                    "message": limit_msg
-                }
-                return
+                 f" on {network}")
         
         try:
             # Build tool definitions
-            tool_defs = [tool.get_definition() for tool in self.tools.values()]
+            tool_defs = self._get_tool_definitions()
             
             # Build the context-aware prompt
             full_input = self._build_context_prompt(
@@ -348,16 +345,13 @@ class AIClient:
                 network,
                 channel, 
                 conversation_history,
-                trivia_context,
                 command_prefix,
-                deep_mode=deep_mode
+                permission_level
             )
             
-            # Override settings for deep mode
-            reasoning_effort = "high" if deep_mode else self.config.reasoning_effort
-            max_tokens = 16000 if deep_mode else self.config.max_output_tokens
-            # Deep mode gets 8 minute timeout (vs 4 min normal) for thorough research
-            request_timeout = 480 if deep_mode else self.config.timeout
+            reasoning_effort = self.config.reasoning_effort
+            max_tokens = self.config.max_output_tokens
+            request_timeout = self.config.timeout
             
             # Make API request with extended cache retention for better prefix caching
             response = self.client.responses.create(
@@ -368,7 +362,7 @@ class AIClient:
                 max_output_tokens=max_tokens,
                 tools=tool_defs if tool_defs else None,
                 timeout=request_timeout,
-                prompt_cache_retention="24h"
+                prompt_cache_retention=self.config.prompt_cache_retention
             )
             
             # Check which tools were used
@@ -376,7 +370,7 @@ class AIClient:
             
             # Handle function calls with streaming support
             response_generator = self._handle_function_calls_stream(
-                response, full_input, request_id, permission_level, nick, network, channel, deep_mode
+                response, full_input, request_id, permission_level, nick, network, channel
             )
             
             final_response = None
@@ -449,12 +443,6 @@ class AIClient:
             
             log_info(f"[{request_id}] AI response generated successfully")
             
-            # Record deep mode usage after successful completion
-            if deep_mode:
-                from api.tools.deep_mode_limit import record_deep_mode_usage
-                record_deep_mode_usage(nick, permission_level)
-                log_info(f"[{request_id}] Deep mode usage recorded for {nick}")
-            
             yield {
                 "status": "success",
                 "message": cleaned_text
@@ -475,11 +463,9 @@ class AIClient:
         nick: str, 
         channel: str,
         conversation_history: list,
-        trivia_context: Optional[Dict[str, Any]],
         permission_level: str,
         command_prefix: str,
         request_id: str,
-        deep_mode: bool = False,
         network: str = "libera"
     ) -> str:
         """
@@ -487,7 +473,7 @@ class AIClient:
         Wraps the streaming method and just returns the final result.
         """
         generator = self.generate_response_with_context_stream(
-            user_message, nick, channel, conversation_history, trivia_context, permission_level, command_prefix, request_id, deep_mode, network
+            user_message, nick, channel, conversation_history, permission_level, command_prefix, request_id, network
         )
         
         final_message = "I couldn't generate a proper response."
@@ -516,15 +502,14 @@ class AIClient:
         
         return final_response, null_triggered, total_usage
 
-    def _handle_function_calls_stream(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal", nick: str = "", network: str = "libera", channel: str = "", deep_mode: bool = False):
+    def _handle_function_calls_stream(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal", nick: str = "", network: str = "libera", channel: str = ""):
         """
         Handle function calls in the response using multi-turn tool calling.
         Yields status events during execution.
         """
         import json
         
-        # Deep mode gets more iterations for thorough research (30 vs 18)
-        MAX_TOOL_ITERATIONS = 40 if deep_mode else 30
+        MAX_TOOL_ITERATIONS = self.config.max_tool_iterations
         iteration = 0
         null_response_triggered = False
         
@@ -663,7 +648,7 @@ class AIClient:
                             continue
                     
                     # Inject permission_level/context for specific tools
-                    if func_name in ('manage_user_rules', 'execute_shell', 'bug_report', 'irc_command', 'reminder', 'log_analyzer', 'usage_stats'):
+                    if func_name in ('manage_user_rules', 'execute_shell', 'source_code', 'bug_report', 'irc_command', 'reminder', 'log_analyzer', 'usage_stats'):
                         func_args['permission_level'] = permission_level
                         if func_name == 'bug_report':
                             func_args['requesting_user'] = nick
@@ -780,7 +765,7 @@ class AIClient:
             
             # If we have function outputs, make the next API call
             if function_outputs:
-                tool_defs = [t.get_definition() for t in self.tools.values()]
+                tool_defs = self._get_tool_definitions()
                 
                 # Use previous_response_id for multi-turn - this enables CoT passing
                 # and better caching as documented in GPT-5.x Responses guidance
@@ -793,7 +778,7 @@ class AIClient:
                     text={"verbosity": self.config.verbosity},
                     max_output_tokens=self.config.max_output_tokens,
                     timeout=self.config.timeout,
-                    prompt_cache_retention="24h"
+                    prompt_cache_retention=self.config.prompt_cache_retention
                 )
                 
                 # Track usage
@@ -836,9 +821,8 @@ class AIClient:
         network: str,
         channel: str,
         conversation_history: list,
-        trivia_context: Optional[Dict[str, Any]],
         command_prefix: str,
-        deep_mode: bool = False
+        permission_level: str = "normal"
     ) -> str:
         """
         Build a prompt with conversation context.
@@ -853,57 +837,12 @@ class AIClient:
             nick: User who mentioned the bot
             channel: Channel where mention occurred
             conversation_history: List of recent messages
-            deep_mode: If True, inject deep research instructions
             
         Returns:
             Formatted prompt with context
         """
         # System prompt is static (no datetime injection) for better caching
         prompt_parts = [self.config.system_prompt, ""]
-        
-        # Inject deep research instructions if deep_mode is enabled
-        if deep_mode:
-            deep_instructions = """=== DEEP RESEARCH MODE ACTIVATED ===
-You are in DEEP RESEARCH MODE. This means the user wants a thorough, well-researched answer.
-
-**PROGRESS UPDATES (REQUIRED):**
-Use the report_status tool to announce what you're doing at each major step:
-- "Searching for information on [topic]..."
-- "Found relevant sources, analyzing..."
-- "Researching [specific aspect]..."
-- "Compiling findings into comprehensive answer..."
-This keeps the user informed during the longer research process.
-
-**THOROUGH RESEARCH:**
-Perform AT LEAST 2-3 web searches on different aspects of the topic:
-- Search for the main topic/question
-- Search for related concepts, alternatives, or comparisons  
-- Search for recent developments or expert opinions
-- Use fetch_url to read full articles when snippets aren't enough
-
-**USE ALL AVAILABLE TOOLS:**
-You have access to ALL tools in deep mode - use them as needed:
-- Web search for current information
-- Python execution for calculations, data analysis, code examples
-- Image analysis if images are involved
-- fetch_url to read full web pages
-- Any other tool that helps answer the question thoroughly
-
-**HIGH QUALITY OUTPUT:**
-- Include multiple perspectives where relevant
-- Cite sources and provide links
-- Structure with headers and sections
-- Include examples, explanations, and context
-
-**USE PASTE TOOL FOR FINAL ANSWER:**
-Your response will likely be long. Use the paste tool to create a formatted document 
-with your full answer. Return only the paste URL to IRC with a brief summary.
-
-Remember: Quality over speed. The user specifically requested deep research with --deep flag.
-=== END DEEP RESEARCH MODE ===
-"""
-            prompt_parts.append(deep_instructions)
-            prompt_parts.append("")
         
         # Inject user-specific rules if they exist and are enabled
         # Note: User rules are semi-stable (change rarely) so they're part of the prefix
@@ -926,23 +865,10 @@ Remember: Quality over speed. The user specifically requested deep research with
         prompt_parts.append(f"Network: {network}")
         prompt_parts.append(f"Channel: {channel}")
         prompt_parts.append(f"User: {nick}")
+        prompt_parts.append(f"User permission level: {permission_level}")
         prompt_parts.append(f"Command prefix: {command_prefix}")
         prompt_parts.append(f"Message: {user_message}")
         prompt_parts.append("")
-
-        if trivia_context and trivia_context.get("active"):
-            prompt_parts.append("=== ACTIVE TRIVIA/CODE ROUND ===")
-            prompt_parts.append("There is an active built-in game round in this same channel.")
-            prompt_parts.append(f"Mode: {trivia_context.get('mode', '')}")
-            prompt_parts.append(f"Variant: {trivia_context.get('variant', '')}")
-            prompt_parts.append(f"Topic: {trivia_context.get('topic', '')}")
-            prompt_parts.append(f"Language: {trivia_context.get('language', '')}")
-            prompt_parts.append(f"Visible prompt: {trivia_context.get('question', '')}")
-            prompt_parts.append(f"Hint already used: {trivia_context.get('hint_used', False)}")
-            prompt_parts.append("")
-            prompt_parts.append("Do NOT reveal, confirm, narrow down, evaluate guesses for, or help solve this active round.")
-            prompt_parts.append("You may explain the official commands/rules and point users to !hint, but do not provide unofficial hints or cheating help.")
-            prompt_parts.append("")
         
         # Add conversation history AFTER the question (at the end)
         # Changes to history won't invalidate the cached system prompt prefix

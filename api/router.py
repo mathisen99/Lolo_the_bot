@@ -50,19 +50,6 @@ class HistoryMessage(BaseModel):
     content: str = Field(..., description="Message content")
 
 
-class TriviaContext(BaseModel):
-    """
-    Safe runtime snapshot of an active trivia/code round for anti-cheat prompting.
-    """
-    active: bool = Field(default=False, description="Whether a round is active in this channel")
-    mode: str = Field(default="", description="Round mode: trivia or code")
-    variant: str = Field(default="", description="Trivia variant, if applicable")
-    topic: str = Field(default="", description="Trivia topic")
-    language: str = Field(default="", description="Code language for code rounds")
-    question: str = Field(default="", description="Visible round prompt text")
-    hint_used: bool = Field(default=False, description="Whether !hint has already been used")
-
-
 class MentionRequest(BaseModel):
     """
     Request model for bot mention handling.
@@ -76,8 +63,6 @@ class MentionRequest(BaseModel):
     permission_level: str = Field(default="normal", description="User permission level: owner, admin, normal, ignored")
     command_prefix: str = Field(default="!", description="Effective command prefix for this channel")
     history: Optional[List[HistoryMessage]] = Field(default=None, description="Recent conversation history")
-    trivia_context: Optional[TriviaContext] = Field(default=None, description="Active trivia/code round context for anti-cheat prompting")
-    deep_mode: bool = Field(default=False, description="Enable deep research mode with high reasoning")
 
 
 class MentionResponse(BaseModel):
@@ -382,8 +367,7 @@ async def handle_mention_stream(request: MentionRequest):
     import queue
     
     console.print(f"[cyan]→[/cyan] Streaming mention request [dim]{request.request_id}[/dim]: "
-                  f"from {request.nick} in {request.network}/{request.channel}" + 
-                  (" [DEEP MODE]" if request.deep_mode else ""))
+                  f"from {request.nick} in {request.network}/{request.channel}")
     
     # Check channel question rate limit before processing
     from api.tools.channel_rate_limit import check_channel_question_limit
@@ -432,11 +416,9 @@ async def handle_mention_stream(request: MentionRequest):
                     network=request.network,
                     channel=request.channel,
                     conversation_history=request.history if request.history else [],
-                    trivia_context=request.trivia_context.model_dump() if request.trivia_context else None,
                     permission_level=request.permission_level,
                     command_prefix=request.command_prefix,
-                    request_id=request.request_id,
-                    deep_mode=request.deep_mode
+                    request_id=request.request_id
                 )
                 
                 for event in generator:

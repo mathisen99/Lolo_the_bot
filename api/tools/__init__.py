@@ -1,7 +1,7 @@
 """
 Tools module for AI assistant.
 
-Provides web search, Python execution, image generation/editing, image analysis, URL fetching, user rules, chat history, paste, shell execution, voice cloning, null response, bug reporting, GPT image, Gemini image, usage statistics, source code introspection, IRC command, Claude coding, reminders, and log analysis capabilities.
+Provides web search, Python execution, image generation/editing, image analysis, URL fetching, user rules, chat history, paste, shell execution, null response, bug reporting, GPT image, Gemini image, usage statistics, source code introspection, IRC command, Claude coding, reminders, and log analysis capabilities.
 """
 
 from .web_search import WebSearchTool
@@ -14,7 +14,6 @@ from .user_rules import UserRulesTool
 from .chat_history import ChatHistoryTool
 from .paste import PasteTool
 from .shell_exec import ShellExecTool
-from .voice_speak import VoiceSpeakTool
 from .null_response import NullResponseTool, NULL_RESPONSE_MARKER
 from .bug_report import BugReportTool
 from .gpt_image import GPTImageTool
@@ -30,4 +29,4 @@ from .knowledge_base import KnowledgeBaseLearnTool, KnowledgeBaseSearchTool, Kno
 from .reminder import ReminderTool
 from .log_analyzer import LogAnalyzerTool
 
-__all__ = ["WebSearchTool", "PythonExecTool", "FluxCreateTool", "FluxEditTool", "ImageAnalysisTool", "FetchUrlTool", "UserRulesTool", "ChatHistoryTool", "PasteTool", "ShellExecTool", "VoiceSpeakTool", "NullResponseTool", "NULL_RESPONSE_MARKER", "BugReportTool", "GPTImageTool", "GeminiImageTool", "UsageStatsTool", "ReportStatusTool", "YouTubeSearchTool", "SourceCodeTool", "IRCCommandTool", "ClaudeTechTool", "STATUS_UPDATE_MARKER", "Tool", "is_image_tool", "check_image_rate_limit", "record_image_generation", "KnowledgeBaseLearnTool", "KnowledgeBaseSearchTool", "KnowledgeBaseListTool", "KnowledgeBaseForgetTool", "ReminderTool", "LogAnalyzerTool"]
+__all__ = ["WebSearchTool", "PythonExecTool", "FluxCreateTool", "FluxEditTool", "ImageAnalysisTool", "FetchUrlTool", "UserRulesTool", "ChatHistoryTool", "PasteTool", "ShellExecTool", "NullResponseTool", "NULL_RESPONSE_MARKER", "BugReportTool", "GPTImageTool", "GeminiImageTool", "UsageStatsTool", "ReportStatusTool", "YouTubeSearchTool", "SourceCodeTool", "IRCCommandTool", "ClaudeTechTool", "STATUS_UPDATE_MARKER", "Tool", "is_image_tool", "check_image_rate_limit", "record_image_generation", "KnowledgeBaseLearnTool", "KnowledgeBaseSearchTool", "KnowledgeBaseListTool", "KnowledgeBaseForgetTool", "ReminderTool", "LogAnalyzerTool"]

@@ -2,39 +2,39 @@
 # Copy this file to config/bot.toml and customize for your setup
 # The bot will create a default config if this file doesn't exist
 
-[server]
-  address = "irc.libera.chat"
-  port = 6697
-  tls = true
-  nickname = "YourBotName"
-  alt_nicknames = ["YourBotName_", "YourBotName__"]
-  username = "yourbot"
-  realname = "Your IRC Bot"
-  max_message_length = 400
-
-[auth]
-  # SASL authentication (recommended for registered nicks)
-  sasl_username = "YourBotName"
-  sasl_password = ""  # Leave empty if not using SASL
-  
-  # NickServ authentication (alternative to SASL)
-  nickserv_password = ""  # Leave empty if not using NickServ
+# Each [[networks]] block defines one IRC network to connect to. The bot is
+# multi-network aware: entities (users, reminders, stats, chat history) are
+# scoped per network id. Define one block per network you want to join.
+#
+# [[networks]] is the single source of truth for connection/auth settings.
+# A legacy top-level [server]/[auth] form is still supported as a fallback for
+# older configs, but new configs should use the [[networks]] form shown here.
 
 [[networks]]
-  id = "libera"
-  address = "irc.libera.chat"
-  port = 6697
-  tls = true
-  nickname = "YourBotName"
-  alt_nicknames = ["YourBotName_", "YourBotName__"]
-  username = "yourbot"
-  realname = "Your IRC Bot"
-  max_message_length = 400
+  id = "libera"                                    # Unique network id (lowercased); scopes per-network data
+  address = "irc.libera.chat"                      # IRC server hostname
+  port = 6697                                      # Server port (6697 for TLS)
+  tls = true                                       # Use TLS/SSL for the connection
+  nickname = "YourBotName"                         # Primary nickname
+  alt_nicknames = ["YourBotName_", "YourBotName__"] # Fallbacks if the primary nick is taken
+  username = "yourbot"                             # IRC username (ident)
+  realname = "Your IRC Bot"                        # IRC realname (gecos)
+  max_message_length = 400                         # Byte limit per message (400 for Libera/Rizon safety)
+  # SASL authentication (recommended for registered nicks).
+  # Secrets are resolved from .env when left empty here. Do not commit real
+  # secrets. Per-network env vars use the (uppercased) network id, with a global
+  # fallback:
+  #   SASL:     LOLO_LIBERA_SASL_PASSWORD     -> LOLO_SASL_PASSWORD
+  #   NickServ: LOLO_LIBERA_NICKSERV_PASSWORD -> LOLO_NICKSERV_PASSWORD
   sasl_username = "YourBotName"
-  sasl_password = ""
-  nickserv_password = ""
-  channels = ["#yourchannel"]
-  required = true
+  sasl_password = ""                               # Leave empty if not using SASL; else set LOLO_<ID>_SASL_PASSWORD in .env
+  # NickServ authentication (alternative to SASL)
+  nickserv_password = ""                           # Leave empty if not using NickServ; else set LOLO_<ID>_NICKSERV_PASSWORD in .env
+  # Optionally enforce that a secret is present (fail fast at startup if missing):
+  # sasl_required = false
+  # nickserv_required = false
+  channels = ["#yourchannel"]                      # Channels to join on this network
+  required = true                                  # If true, failure to connect is fatal at startup
 
 [[networks]]
   id = "rizon"
@@ -46,6 +46,8 @@
   username = "yourbot"
   realname = "Your IRC Bot"
   max_message_length = 400
+  # Secrets resolved from .env when empty: LOLO_RIZON_SASL_PASSWORD / LOLO_RIZON_NICKSERV_PASSWORD
+  # (global fallback: LOLO_SASL_PASSWORD / LOLO_NICKSERV_PASSWORD). Do not commit real secrets.
   sasl_username = "YourBotName"
   sasl_password = ""
   nickserv_password = ""
@@ -71,8 +73,10 @@
   reconnect_delay_min = 5      # Min reconnect delay (seconds)
   reconnect_delay_max = 300    # Max reconnect delay (seconds)
   command_cooldown = 3         # Cooldown between commands (seconds)
+  mention_history_depth = 20   # Recent channel messages sent as mention context (default: 20)
 
 [database]
+  path = "data/bot.db"         # SQLite database file path (default: data/bot.db)
   wal_mode = true              # Use WAL mode for better concurrency
   vacuum_interval = 86400      # Auto-vacuum interval (seconds)
   message_retention_days = 90  # How long to keep messages
@@ -87,29 +91,18 @@
   max_retries = 3                # Max API retry attempts
   retry_backoff_ms = 100         # Retry backoff (milliseconds)
 
+  # HTTP transport tunables for the Python API client.
+  # Defaults preserve the previous hardcoded behavior; all are optional.
+  [api.http]
+    dial_timeout = 10            # Time to establish a TCP connection (seconds)
+    keep_alive = 30              # Keep-alive probe interval (seconds)
+    tls_handshake_timeout = 10   # Time allowed for the TLS handshake (seconds)
+    max_idle_conns = 100         # Max idle connections across all hosts
+    max_idle_conns_per_host = 10 # Max idle connections per host
+    idle_conn_timeout = 90       # How long idle connections stay in the pool (seconds)
+    response_header_timeout = 30 # Time to receive response headers after the request (seconds)
+
 [images]
   # Channels to auto-download images from (user-posted images)
   # Bot-generated images (flux create/edit) are always saved to img/
   download_channels = ["#yourchannel"]
-
-[trivia]
-  enabled = true
-  database_path = "data/trivia.db"       # Dedicated trivia SQLite database
-  openai_model = "gpt-5.4-nano"
-  openai_reasoning_effort = "medium"     # none|low|medium|high|xhigh
-  openai_api_key_env = "OPENAI_API_KEY"  # Environment variable for API key
-  openai_base_url = "https://api.openai.com/v1"
-  request_timeout_seconds = 20
-  max_output_tokens = 420
-  generation_retry_limit = 5             # Dedup regeneration attempts
-
-  # Defaults for channels without explicit trivia settings rows
-  default_answer_time_seconds = 30
-  default_code_answer_time_seconds = 30
-  default_hints_enabled = true
-  default_base_points = 100
-  default_minimum_points = 20
-  default_hint_penalty = 20
-  default_difficulty = "medium"          # easy|medium|hard
-  default_code_difficulty = "medium"     # easy|medium|hard
-  default_enabled = true

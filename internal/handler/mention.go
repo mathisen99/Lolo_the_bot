@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/yourusername/lolo/internal/database"
-	"github.com/yourusername/lolo/internal/trivia"
 	"github.com/yourusername/lolo/internal/user"
 )
 
@@ -18,13 +17,17 @@ type MentionHandler struct {
 	userMgr                  *user.Manager
 	db                       *database.DB
 	botNick                  string
-	triviaManager            *trivia.Manager
 	testMode                 bool
 	phoneNotificationsActive bool
 	phoneNotificationsURL    string
 	network                  string
 	permissionResolver       PermissionResolver
+	historyDepth             int
 }
+
+// defaultMentionHistoryDepth is the number of recent channel messages used for
+// mention context when no depth is configured.
+const defaultMentionHistoryDepth = 20
 
 type PermissionResolver interface {
 	ResolvePermission(nick, hostmask string) (database.PermissionLevel, bool, error)
@@ -41,19 +44,24 @@ func SendNotificationToPhone(message string, url string) {
 	fmt.Printf("Notification sent: %s\n", output)
 }
 
-// NewMentionHandler creates a new mention handler
-func NewMentionHandler(apiClient APIClientInterface, userMgr *user.Manager, db *database.DB, botNick string, triviaManager *trivia.Manager, testMode bool, phoneNotificationsActive bool, phoneNotificationsURL string, network string, permissionResolver PermissionResolver) *MentionHandler {
+// NewMentionHandler creates a new mention handler.
+// historyDepth controls how many recent channel messages are sent as
+// conversation context; values <= 0 fall back to defaultMentionHistoryDepth.
+func NewMentionHandler(apiClient APIClientInterface, userMgr *user.Manager, db *database.DB, botNick string, testMode bool, phoneNotificationsActive bool, phoneNotificationsURL string, network string, permissionResolver PermissionResolver, historyDepth int) *MentionHandler {
+	if historyDepth <= 0 {
+		historyDepth = defaultMentionHistoryDepth
+	}
 	return &MentionHandler{
 		apiClient:                apiClient,
 		userMgr:                  userMgr,
 		db:                       db,
 		botNick:                  botNick,
-		triviaManager:            triviaManager,
 		testMode:                 testMode,
 		phoneNotificationsActive: phoneNotificationsActive,
 		phoneNotificationsURL:    phoneNotificationsURL,
 		network:                  defaultNetwork(network),
 		permissionResolver:       permissionResolver,
+		historyDepth:             historyDepth,
 	}
 }
 
@@ -151,15 +159,6 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 		message = strings.TrimSpace(message)
 	}
 
-	// Check for --deep flag (deep research mode)
-	deepMode := false
-	if strings.Contains(message, "--deep") {
-		deepMode = true
-		// Strip the flag from the message
-		message = strings.ReplaceAll(message, "--deep", "")
-		message = strings.TrimSpace(message)
-	}
-
 	// Clean up any double spaces left behind from flag removal
 	for strings.Contains(message, "  ") {
 		message = strings.ReplaceAll(message, "  ", " ")
@@ -171,7 +170,7 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 		conversationHistory = nil
 	} else {
 		var err error
-		conversationHistory, err = h.getConversationHistory(channel, 20)
+		conversationHistory, err = h.getConversationHistory(channel, h.historyDepth)
 		if err != nil {
 			// Log error but continue without history
 			fmt.Printf("Warning: Failed to retrieve conversation history: %v\n", err)
@@ -179,27 +178,11 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 		}
 	}
 
-	var triviaContext *TriviaContext
-	if h.triviaManager != nil {
-		round := h.triviaManager.GetActiveRoundContext(channel)
-		if round.Active {
-			triviaContext = &TriviaContext{
-				Active:   true,
-				Mode:     round.Mode,
-				Variant:  round.Variant,
-				Topic:    round.Topic,
-				Language: round.Language,
-				Question: round.Question,
-				HintUsed: round.HintUsed,
-			}
-		}
-	}
-
 	// Send streaming mention to Python API
 	startTime := time.Now()
 
 	// Use SendMentionStream to get updates
-	respChan, err := h.apiClient.SendMentionStream(ctx, message, nick, hostmask, network, channel, permissionLevel, commandPrefix, conversationHistory, triviaContext, deepMode)
+	respChan, err := h.apiClient.SendMentionStream(ctx, message, nick, hostmask, network, channel, permissionLevel, commandPrefix, conversationHistory)
 	if err != nil {
 		// Record error metric (Requirement 30.3)
 		if errRecordErr := h.db.RecordError("mention_api_failed"); errRecordErr != nil {

@@ -22,7 +22,6 @@ import (
 	"github.com/yourusername/lolo/internal/reminder"
 	"github.com/yourusername/lolo/internal/shutdown"
 	"github.com/yourusername/lolo/internal/splitter"
-	"github.com/yourusername/lolo/internal/trivia"
 	"github.com/yourusername/lolo/internal/user"
 )
 
@@ -44,7 +43,7 @@ func main() {
 	logger := output.NewColorLogger()
 	logger.Info("Lolo IRC Bot - Starting...")
 
-	// Load .env file for Go-side environment variables (e.g., OPENAI_API_KEY for trivia).
+	// Load .env file for Go-side environment variables.
 	// Missing .env is not fatal; existing process environment always takes precedence.
 	loadDotEnvFile(".env", logger)
 
@@ -64,7 +63,7 @@ func main() {
 		logger.Info("Test mode enabled - using in-memory test database")
 		db, err = database.NewTest()
 	} else {
-		db, err = database.New("data/bot.db")
+		db, err = database.New(cfg.Database.GetPath())
 	}
 	if err != nil {
 		logger.Error("Failed to initialize database: %v", err)
@@ -72,57 +71,15 @@ func main() {
 	}
 	logger.Success("Database initialized")
 
-	// Initialize dedicated trivia database and manager
-	triviaDBPath := cfg.Trivia.DatabasePath
-	if cfg.Bot.TestMode {
-		triviaDBPath = ":memory:"
-	}
-
-	triviaDefaults := trivia.StoreDefaults{
-		Settings: trivia.ChannelSettings{
-			AnswerTimeSeconds:     cfg.Trivia.DefaultAnswerTimeSeconds,
-			CodeAnswerTimeSeconds: cfg.Trivia.DefaultCodeAnswerTime,
-			TriviaHintsEnabled:    cfg.Trivia.DefaultHintsEnabled,
-			CodeHintsEnabled:      cfg.Trivia.DefaultHintsEnabled,
-			AntiCheatEnabled:      true,
-			BasePoints:            cfg.Trivia.DefaultBasePoints,
-			MinimumPoints:         cfg.Trivia.DefaultMinimumPoints,
-			HintPenalty:           cfg.Trivia.DefaultHintPenalty,
-			Enabled:               cfg.Trivia.DefaultEnabled,
-			Difficulty:            cfg.Trivia.DefaultDifficulty,
-			CodeDifficulty:        cfg.Trivia.DefaultCodeDifficulty,
-		},
-	}
-
-	triviaStore, err := trivia.NewStore(triviaDBPath, triviaDefaults)
-	if err != nil {
-		logger.Error("Failed to initialize trivia database: %v", err)
-		_ = db.Close()
-		os.Exit(1)
-	}
-	logger.Success("Trivia database initialized")
-
-	triviaGenerator := trivia.NewGenerator(trivia.GeneratorConfig{
-		Enabled:         cfg.Trivia.Enabled,
-		APIKeyEnv:       cfg.Trivia.OpenAIAPIKeyEnv,
-		BaseURL:         cfg.Trivia.OpenAIBaseURL,
-		Model:           cfg.Trivia.OpenAIModel,
-		ReasoningEffort: cfg.Trivia.OpenAIReasoningEffort,
-		RequestTimeout:  cfg.Trivia.GetRequestTimeoutDuration(),
-		MaxOutputTokens: cfg.Trivia.MaxOutputTokens,
-	}, logger)
-
 	// Handle rollback if requested
 	if *rollbackFlag {
 		logger.Info("Rolling back last migration...")
 		if err := db.Rollback(); err != nil {
 			logger.Error("Rollback failed: %v", err)
-			_ = triviaStore.Close()
 			_ = db.Close()
 			os.Exit(1)
 		}
 		logger.Success("Migration rolled back successfully")
-		_ = triviaStore.Close()
 		_ = db.Close()
 		os.Exit(0)
 	}
@@ -131,7 +88,6 @@ func main() {
 	out, err := output.NewOutput("data/error.log")
 	if err != nil {
 		logger.Error("Failed to initialize output: %v", err)
-		_ = triviaStore.Close()
 		_ = db.Close()
 		os.Exit(1)
 	}
@@ -146,7 +102,6 @@ func main() {
 	)
 	if err := maintenanceScheduler.Start(); err != nil {
 		logger.Error("Failed to start maintenance scheduler: %v", err)
-		_ = triviaStore.Close()
 		_ = db.Close()
 		os.Exit(1)
 	}
@@ -159,7 +114,6 @@ func main() {
 	hasPassword, err := userMgr.HasOwnerPassword()
 	if err != nil {
 		logger.Error("Failed to check owner password: %v", err)
-		_ = triviaStore.Close()
 		_ = db.Close()
 		os.Exit(1)
 	}
@@ -173,7 +127,6 @@ func main() {
 		_, err := fmt.Scanln(&password)
 		if err != nil || password == "" {
 			logger.Error("Failed to read password or password is empty")
-			_ = triviaStore.Close()
 			_ = db.Close()
 			os.Exit(1)
 		}
@@ -181,7 +134,6 @@ func main() {
 		// Set the owner password (hashed with bcrypt)
 		if err := userMgr.SetOwnerPassword(password); err != nil {
 			logger.Error("Failed to set owner password: %v", err)
-			_ = triviaStore.Close()
 			_ = db.Close()
 			os.Exit(1)
 		}
@@ -207,6 +159,15 @@ func main() {
 		apiClient = handler.NewAPIClient(
 			cfg.Bot.APIEndpoint,
 			time.Duration(cfg.Bot.APITimeout)*time.Second,
+			handler.HTTPTransportConfig{
+				DialTimeout:           cfg.API.HTTP.GetDialTimeoutDuration(),
+				KeepAlive:             cfg.API.HTTP.GetKeepAliveDuration(),
+				TLSHandshakeTimeout:   cfg.API.HTTP.GetTLSHandshakeTimeoutDuration(),
+				MaxIdleConns:          cfg.API.HTTP.MaxIdleConns,
+				MaxIdleConnsPerHost:   cfg.API.HTTP.MaxIdleConnsPerHost,
+				IdleConnTimeout:       cfg.API.HTTP.GetIdleConnTimeoutDuration(),
+				ResponseHeaderTimeout: cfg.API.HTTP.GetResponseHeaderTimeoutDuration(),
+			},
 		)
 	}
 
@@ -249,7 +210,6 @@ func main() {
 		channelPrefixes, err := db.ListChannelCommandPrefixesForNetwork(networkID)
 		if err != nil {
 			logger.Error("Failed to load channel command prefixes for %s: %v", networkID, err)
-			_ = triviaStore.Close()
 			_ = db.Close()
 			os.Exit(1)
 		}
@@ -257,15 +217,7 @@ func main() {
 			dispatcher.SetChannelPrefix(channel, prefix)
 		}
 
-		triviaManager := trivia.NewManager(trivia.ManagerConfig{
-			Network:           networkID,
-			Store:             triviaStore,
-			Generator:         triviaGenerator,
-			Logger:            logger,
-			GenerationRetries: cfg.Trivia.GenerationRetryLimit,
-		})
-
-		registerCoreCommands(registry, dispatcher, db, userMgr, logger, startTime, cfg.Bot.APIEndpoint, apiHealthChecker, connManager.GetClient(), triviaManager)
+		registerCoreCommands(registry, dispatcher, db, userMgr, logger, startTime, cfg.Bot.APIEndpoint, apiHealthChecker, connManager.GetClient())
 
 		msgSplitter := splitter.New(netCfg.MaxMessageLength)
 		messageHandler := handler.NewMessageHandler(&handler.MessageHandlerConfig{
@@ -283,7 +235,7 @@ func main() {
 			PhoneNotificationsActive: cfg.PhoneNotifications.Active,
 			PhoneNotificationsURL:    cfg.PhoneNotifications.URL,
 			MentionAggregateDelay:    cfg.Limits.GetMentionAggregateDelayDuration(),
-			TriviaManager:            triviaManager,
+			MentionHistoryDepth:      cfg.Limits.GetMentionHistoryDepth(),
 		})
 
 		channelTracker := irc.NewChannelTrackerForNetwork(db, logger, networkID, netCfg.Nickname)
@@ -406,16 +358,6 @@ func main() {
 		for _, rt := range runtimes {
 			rt.messageHandle.Shutdown()
 		}
-		return nil
-	})
-
-	// 3.7. Close trivia database
-	shutdownHandler.RegisterShutdownFunc(func() error {
-		logger.Info("Closing trivia database...")
-		if err := triviaStore.Close(); err != nil {
-			return fmt.Errorf("failed to close trivia database: %w", err)
-		}
-		logger.Success("Trivia database connection closed")
 		return nil
 	})
 
@@ -570,7 +512,7 @@ func (a *apiHealthCheckerAdapter) GetCircuitBreakerStats() commands.CircuitBreak
 }
 
 // registerCoreCommands registers all core commands with the registry
-func registerCoreCommands(registry *commands.Registry, dispatcher *commands.Dispatcher, db *database.DB, userMgr *user.Manager, logger output.Logger, startTime time.Time, apiEndpoint string, apiHealthChecker commands.APIHealthChecker, ircClient commands.IRCClient, triviaManager *trivia.Manager) {
+func registerCoreCommands(registry *commands.Registry, dispatcher *commands.Dispatcher, db *database.DB, userMgr *user.Manager, logger output.Logger, startTime time.Time, apiEndpoint string, apiHealthChecker commands.APIHealthChecker, ircClient commands.IRCClient) {
 	// Owner verification command (Requirement 11.4, 11.6)
 	_ = registry.Register(commands.NewVerifyCommand(userMgr, db))
 
@@ -622,17 +564,6 @@ func registerCoreCommands(registry *commands.Registry, dispatcher *commands.Disp
 	_ = registry.Register(commands.NewKickBanCommand(ircClient))
 	_ = registry.Register(commands.NewMuteCommand(ircClient))
 	_ = registry.Register(commands.NewUnmuteCommand(ircClient))
-
-	// Trivia commands
-	_ = registry.Register(commands.NewTriviaCommand(triviaManager))
-	_ = registry.Register(commands.NewQuizCommand(triviaManager))
-	_ = registry.Register(commands.NewCodeCommand(triviaManager))
-	_ = registry.Register(commands.NewHintCommand(triviaManager))
-	_ = registry.Register(commands.NewTriviaRulesCommand(triviaManager))
-	_ = registry.Register(commands.NewQuizRulesCommand(triviaManager))
-	_ = registry.Register(commands.NewTop10Command(triviaManager))
-	_ = registry.Register(commands.NewScoreCommand(triviaManager, db))
-	_ = registry.Register(commands.NewTriviaSettingsCommand(triviaManager, db))
 
 	logger.Info("Core commands registered")
 }

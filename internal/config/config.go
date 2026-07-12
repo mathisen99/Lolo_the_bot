@@ -31,6 +31,8 @@ func Load(path string) (*Config, error) {
 	}
 
 	normalizeNetworks(&cfg)
+	applyDefaults(&cfg)
+	resolveSecrets(&cfg)
 
 	// Validate the configuration
 	if err := validate(&cfg); err != nil {
@@ -142,14 +144,16 @@ func DefaultConfig() *Config {
 			TestMode:      false,
 		},
 		Limits: LimitsConfig{
-			RateLimitMessages: 1,
-			RateLimitWindow:   1,
-			MaxMessageQueue:   100,
-			ReconnectDelayMin: 5,
-			ReconnectDelayMax: 300,
-			CommandCooldown:   3, // 3 seconds per user per command
+			RateLimitMessages:   1,
+			RateLimitWindow:     1,
+			MaxMessageQueue:     100,
+			ReconnectDelayMin:   5,
+			ReconnectDelayMax:   300,
+			CommandCooldown:     3,  // 3 seconds per user per command
+			MentionHistoryDepth: 20, // recent channel messages sent as mention context
 		},
 		Database: DatabaseConfig{
+			Path:                 DefaultDatabasePath,
 			WALMode:              true,
 			VacuumInterval:       86400, // 24 hours in seconds
 			MessageRetentionDays: 90,
@@ -163,26 +167,15 @@ func DefaultConfig() *Config {
 			CircuitBreakerTimeout:   30, // seconds before retry
 			MaxRetries:              3,
 			RetryBackoffMS:          100, // initial backoff, doubles each retry
-		},
-		Trivia: TriviaConfig{
-			Enabled:                  true,
-			DatabasePath:             "data/trivia.db",
-			OpenAIModel:              "gpt-5.4-nano",
-			OpenAIReasoningEffort:    "medium",
-			OpenAIAPIKeyEnv:          "OPENAI_API_KEY",
-			OpenAIBaseURL:            "https://api.openai.com/v1",
-			RequestTimeoutSeconds:    20,
-			MaxOutputTokens:          420,
-			GenerationRetryLimit:     5,
-			DefaultAnswerTimeSeconds: 30,
-			DefaultCodeAnswerTime:    30,
-			DefaultHintsEnabled:      true,
-			DefaultBasePoints:        100,
-			DefaultMinimumPoints:     20,
-			DefaultHintPenalty:       20,
-			DefaultEnabled:           true,
-			DefaultDifficulty:        "medium",
-			DefaultCodeDifficulty:    "medium",
+			HTTP: HTTPConfig{
+				DialTimeout:           10,  // seconds
+				KeepAlive:             30,  // seconds
+				TLSHandshakeTimeout:   10,  // seconds
+				MaxIdleConns:          100, // across all hosts
+				MaxIdleConnsPerHost:   10,  // per host
+				IdleConnTimeout:       90,  // seconds
+				ResponseHeaderTimeout: 30,  // seconds
+			},
 		},
 		PhoneNotifications: PhoneNotificationsConfig{
 			Active: false,
@@ -228,6 +221,91 @@ func normalizeNetworks(cfg *Config) {
 	}
 }
 
+// applyDefaults fills in documented defaults for optional fields that are
+// absent (left as zero values) from the loaded config file. This lets existing
+// config files continue to work while new operator-tunable fields fall back to
+// the values that preserve prior behavior (Requirement 4.2).
+func applyDefaults(cfg *Config) {
+	// Conversation-history depth used for mention context.
+	if cfg.Limits.MentionHistoryDepth == 0 {
+		cfg.Limits.MentionHistoryDepth = 20
+	}
+
+	// Database file path falls back to the documented default so existing
+	// configs without a [database].path key keep using data/bot.db.
+	if cfg.Database.Path == "" {
+		cfg.Database.Path = DefaultDatabasePath
+	}
+
+	// HTTP transport tunables for the Python API client. Defaults equal the
+	// values that were previously hardcoded in the API client.
+	http := &cfg.API.HTTP
+	if http.DialTimeout == 0 {
+		http.DialTimeout = 10
+	}
+	if http.KeepAlive == 0 {
+		http.KeepAlive = 30
+	}
+	if http.TLSHandshakeTimeout == 0 {
+		http.TLSHandshakeTimeout = 10
+	}
+	if http.MaxIdleConns == 0 {
+		http.MaxIdleConns = 100
+	}
+	if http.MaxIdleConnsPerHost == 0 {
+		http.MaxIdleConnsPerHost = 10
+	}
+	if http.IdleConnTimeout == 0 {
+		http.IdleConnTimeout = 90
+	}
+	if http.ResponseHeaderTimeout == 0 {
+		http.ResponseHeaderTimeout = 30
+	}
+}
+
+// resolveSecrets fills empty per-network auth secrets from environment
+// variables so that plaintext credentials stay out of committed configuration
+// (Requirement 5). The .env file is loaded into the process environment before
+// config.Load runs (see cmd/bot/main.go loadDotEnvFile), so os.LookupEnv sees
+// those values here.
+//
+// Resolution order for each secret (first non-empty wins):
+//  1. the value already present in the TOML config (config wins if set)
+//  2. a per-network env var: LOLO_<ID>_NICKSERV_PASSWORD / LOLO_<ID>_SASL_PASSWORD
+//  3. a global fallback env var: LOLO_NICKSERV_PASSWORD / LOLO_SASL_PASSWORD
+//
+// The network id is uppercased for the env-var name (ids are lowercase alnum
+// such as "libera" or "rizon"). Secret values are never logged.
+func resolveSecrets(cfg *Config) {
+	for i := range cfg.Networks {
+		n := &cfg.Networks[i]
+		envKey := strings.ToUpper(n.ID)
+		if n.NickServPassword == "" {
+			n.NickServPassword = firstEnv(
+				"LOLO_"+envKey+"_NICKSERV_PASSWORD",
+				"LOLO_NICKSERV_PASSWORD",
+			)
+		}
+		if n.SASLPassword == "" {
+			n.SASLPassword = firstEnv(
+				"LOLO_"+envKey+"_SASL_PASSWORD",
+				"LOLO_SASL_PASSWORD",
+			)
+		}
+	}
+}
+
+// firstEnv returns the value of the first environment variable that is set and
+// non-empty, or "" if none of the given keys are set.
+func firstEnv(keys ...string) string {
+	for _, k := range keys {
+		if v, ok := os.LookupEnv(k); ok && v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func legacyNetworkFromConfig(cfg *Config) NetworkConfig {
 	return NetworkConfig{
 		ID:               DefaultNetworkID,
@@ -253,9 +331,10 @@ func normalizeNetworkID(id string) string {
 
 // validate checks that all required configuration fields are present and valid
 func validate(cfg *Config) error {
-	applyTriviaDefaults(cfg)
-
 	if err := validateNetworks(cfg.Networks); err != nil {
+		return err
+	}
+	if err := validateSecrets(cfg.Networks); err != nil {
 		return err
 	}
 
@@ -293,6 +372,9 @@ func validate(cfg *Config) error {
 	if cfg.Limits.CommandCooldown < 0 {
 		return fmt.Errorf("limits.command_cooldown must be non-negative, got %d", cfg.Limits.CommandCooldown)
 	}
+	if cfg.Limits.MentionHistoryDepth < 0 {
+		return fmt.Errorf("limits.mention_history_depth must be non-negative, got %d", cfg.Limits.MentionHistoryDepth)
+	}
 
 	// Validate database settings
 	if cfg.Database.VacuumInterval <= 0 {
@@ -324,66 +406,60 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("api.retry_backoff_ms must be positive, got %d", cfg.API.RetryBackoffMS)
 	}
 
-	// Validate trivia settings
-	if cfg.Trivia.DatabasePath == "" {
-		return fmt.Errorf("trivia.database_path is required")
+	// Validate HTTP transport tunables
+	if cfg.API.HTTP.DialTimeout <= 0 {
+		return fmt.Errorf("api.http.dial_timeout must be positive, got %d", cfg.API.HTTP.DialTimeout)
 	}
-	if cfg.Trivia.OpenAIModel == "" {
-		return fmt.Errorf("trivia.openai_model is required")
+	if cfg.API.HTTP.KeepAlive <= 0 {
+		return fmt.Errorf("api.http.keep_alive must be positive, got %d", cfg.API.HTTP.KeepAlive)
 	}
-	if cfg.Trivia.OpenAIReasoningEffort != "" {
-		switch cfg.Trivia.OpenAIReasoningEffort {
-		case "none", "low", "medium", "high", "xhigh":
-		default:
-			return fmt.Errorf("trivia.openai_reasoning_effort must be one of none, low, medium, high, xhigh, got %s", cfg.Trivia.OpenAIReasoningEffort)
-		}
+	if cfg.API.HTTP.TLSHandshakeTimeout <= 0 {
+		return fmt.Errorf("api.http.tls_handshake_timeout must be positive, got %d", cfg.API.HTTP.TLSHandshakeTimeout)
 	}
-	if cfg.Trivia.OpenAIBaseURL == "" {
-		return fmt.Errorf("trivia.openai_base_url is required")
+	if cfg.API.HTTP.MaxIdleConns <= 0 {
+		return fmt.Errorf("api.http.max_idle_conns must be positive, got %d", cfg.API.HTTP.MaxIdleConns)
 	}
-	if cfg.Trivia.RequestTimeoutSeconds <= 0 {
-		return fmt.Errorf("trivia.request_timeout_seconds must be positive, got %d", cfg.Trivia.RequestTimeoutSeconds)
+	if cfg.API.HTTP.MaxIdleConnsPerHost <= 0 {
+		return fmt.Errorf("api.http.max_idle_conns_per_host must be positive, got %d", cfg.API.HTTP.MaxIdleConnsPerHost)
 	}
-	if cfg.Trivia.MaxOutputTokens <= 0 {
-		return fmt.Errorf("trivia.max_output_tokens must be positive, got %d", cfg.Trivia.MaxOutputTokens)
+	if cfg.API.HTTP.IdleConnTimeout <= 0 {
+		return fmt.Errorf("api.http.idle_conn_timeout must be positive, got %d", cfg.API.HTTP.IdleConnTimeout)
 	}
-	if cfg.Trivia.GenerationRetryLimit <= 0 {
-		return fmt.Errorf("trivia.generation_retry_limit must be positive, got %d", cfg.Trivia.GenerationRetryLimit)
-	}
-	if cfg.Trivia.DefaultAnswerTimeSeconds <= 0 {
-		return fmt.Errorf("trivia.default_answer_time_seconds must be positive, got %d", cfg.Trivia.DefaultAnswerTimeSeconds)
-	}
-	if cfg.Trivia.DefaultCodeAnswerTime <= 0 {
-		return fmt.Errorf("trivia.default_code_answer_time_seconds must be positive, got %d", cfg.Trivia.DefaultCodeAnswerTime)
-	}
-	if cfg.Trivia.DefaultBasePoints <= 0 {
-		return fmt.Errorf("trivia.default_base_points must be positive, got %d", cfg.Trivia.DefaultBasePoints)
-	}
-	if cfg.Trivia.DefaultMinimumPoints < 0 {
-		return fmt.Errorf("trivia.default_minimum_points must be non-negative, got %d", cfg.Trivia.DefaultMinimumPoints)
-	}
-	if cfg.Trivia.DefaultMinimumPoints > cfg.Trivia.DefaultBasePoints {
-		return fmt.Errorf("trivia.default_minimum_points (%d) cannot exceed default_base_points (%d)",
-			cfg.Trivia.DefaultMinimumPoints, cfg.Trivia.DefaultBasePoints)
-	}
-	if cfg.Trivia.DefaultHintPenalty < 0 {
-		return fmt.Errorf("trivia.default_hint_penalty must be non-negative, got %d", cfg.Trivia.DefaultHintPenalty)
-	}
-	if cfg.Trivia.DefaultDifficulty != "" {
-		switch cfg.Trivia.DefaultDifficulty {
-		case "easy", "medium", "hard":
-		default:
-			return fmt.Errorf("trivia.default_difficulty must be one of easy, medium, hard, got %s", cfg.Trivia.DefaultDifficulty)
-		}
-	}
-	if cfg.Trivia.DefaultCodeDifficulty != "" {
-		switch cfg.Trivia.DefaultCodeDifficulty {
-		case "easy", "medium", "hard":
-		default:
-			return fmt.Errorf("trivia.default_code_difficulty must be one of easy, medium, hard, got %s", cfg.Trivia.DefaultCodeDifficulty)
-		}
+	if cfg.API.HTTP.ResponseHeaderTimeout <= 0 {
+		return fmt.Errorf("api.http.response_header_timeout must be positive, got %d", cfg.API.HTTP.ResponseHeaderTimeout)
 	}
 
+	return nil
+}
+
+// validateSecrets enforces that auth secrets are present when the operator has
+// explicitly opted in to an auth mechanism.
+//
+// Behavioral-parity note (Requirement 7): IRC auth is OPTIONAL by default. The
+// IRC layer (internal/irc/auth.go) attempts SASL only when both sasl_username
+// and sasl_password are non-empty, and NickServ only when nickserv_password is
+// non-empty; otherwise auth is silently skipped. Configs that connect without
+// auth — or that set a sasl_username but no sasl_password — work today, so we
+// must NOT turn them into a startup failure.
+//
+// Therefore a secret is treated as *required* only when the operator sets the
+// explicit opt-in flag for that mechanism (sasl_required / nickserv_required).
+// Default, example, and legacy configs do not set these flags, so they continue
+// to start unchanged. Error messages name the expected env vars but never print
+// any secret value.
+func validateSecrets(networks []NetworkConfig) error {
+	for i, n := range networks {
+		label := fmt.Sprintf("networks[%d] (id %q)", i, n.ID)
+		envKey := strings.ToUpper(n.ID)
+		if n.SASLRequired && n.SASLPassword == "" {
+			return fmt.Errorf("%s: SASL password is required (sasl_required = true) but none was found; set LOLO_%s_SASL_PASSWORD or LOLO_SASL_PASSWORD in your .env",
+				label, envKey)
+		}
+		if n.NickServRequired && n.NickServPassword == "" {
+			return fmt.Errorf("%s: NickServ password is required (nickserv_required = true) but none was found; set LOLO_%s_NICKSERV_PASSWORD or LOLO_NICKSERV_PASSWORD in your .env",
+				label, envKey)
+		}
+	}
 	return nil
 }
 
@@ -422,83 +498,4 @@ func validateNetworks(networks []NetworkConfig) error {
 		}
 	}
 	return nil
-}
-
-func applyTriviaDefaults(cfg *Config) {
-	triviaSectionMissing := cfg.Trivia.DatabasePath == "" &&
-		cfg.Trivia.OpenAIModel == "" &&
-		cfg.Trivia.OpenAIAPIKeyEnv == "" &&
-		cfg.Trivia.OpenAIBaseURL == "" &&
-		cfg.Trivia.RequestTimeoutSeconds == 0 &&
-		cfg.Trivia.MaxOutputTokens == 0 &&
-		cfg.Trivia.GenerationRetryLimit == 0 &&
-		cfg.Trivia.DefaultAnswerTimeSeconds == 0 &&
-		cfg.Trivia.DefaultCodeAnswerTime == 0 &&
-		cfg.Trivia.DefaultBasePoints == 0 &&
-		cfg.Trivia.DefaultMinimumPoints == 0 &&
-		cfg.Trivia.DefaultHintPenalty == 0 &&
-		cfg.Trivia.DefaultDifficulty == "" &&
-		cfg.Trivia.DefaultCodeDifficulty == "" &&
-		!cfg.Trivia.DefaultHintsEnabled &&
-		!cfg.Trivia.DefaultEnabled &&
-		!cfg.Trivia.Enabled
-
-	if triviaSectionMissing {
-		cfg.Trivia.Enabled = true
-		cfg.Trivia.DefaultHintsEnabled = true
-		cfg.Trivia.DefaultEnabled = true
-		cfg.Trivia.DefaultAnswerTimeSeconds = 30
-		cfg.Trivia.DefaultCodeAnswerTime = 30
-		cfg.Trivia.DefaultBasePoints = 100
-		cfg.Trivia.DefaultMinimumPoints = 20
-		cfg.Trivia.DefaultHintPenalty = 20
-		cfg.Trivia.DefaultDifficulty = "medium"
-		cfg.Trivia.DefaultCodeDifficulty = "medium"
-	}
-
-	if cfg.Trivia.DatabasePath == "" {
-		cfg.Trivia.DatabasePath = "data/trivia.db"
-	}
-	if cfg.Trivia.OpenAIModel == "" {
-		cfg.Trivia.OpenAIModel = "gpt-5.4-nano"
-	}
-	if cfg.Trivia.OpenAIReasoningEffort == "" {
-		cfg.Trivia.OpenAIReasoningEffort = "medium"
-	}
-	if cfg.Trivia.OpenAIAPIKeyEnv == "" {
-		cfg.Trivia.OpenAIAPIKeyEnv = "OPENAI_API_KEY"
-	}
-	if cfg.Trivia.OpenAIBaseURL == "" {
-		cfg.Trivia.OpenAIBaseURL = "https://api.openai.com/v1"
-	}
-	if cfg.Trivia.RequestTimeoutSeconds <= 0 {
-		cfg.Trivia.RequestTimeoutSeconds = 20
-	}
-	if cfg.Trivia.MaxOutputTokens <= 0 {
-		cfg.Trivia.MaxOutputTokens = 420
-	}
-	if cfg.Trivia.GenerationRetryLimit <= 0 {
-		cfg.Trivia.GenerationRetryLimit = 5
-	}
-	if cfg.Trivia.DefaultAnswerTimeSeconds <= 0 {
-		cfg.Trivia.DefaultAnswerTimeSeconds = 30
-	}
-	if cfg.Trivia.DefaultCodeAnswerTime <= 0 {
-		cfg.Trivia.DefaultCodeAnswerTime = cfg.Trivia.DefaultAnswerTimeSeconds
-	}
-	if cfg.Trivia.DefaultBasePoints <= 0 {
-		cfg.Trivia.DefaultBasePoints = 100
-	}
-	if cfg.Trivia.DefaultMinimumPoints < 0 {
-		cfg.Trivia.DefaultMinimumPoints = 20
-	}
-	if cfg.Trivia.DefaultHintPenalty < 0 {
-		cfg.Trivia.DefaultHintPenalty = 20
-	}
-	if cfg.Trivia.DefaultDifficulty == "" {
-		cfg.Trivia.DefaultDifficulty = "medium"
-	}
-	if cfg.Trivia.DefaultCodeDifficulty == "" {
-		cfg.Trivia.DefaultCodeDifficulty = cfg.Trivia.DefaultDifficulty
-	}
 }

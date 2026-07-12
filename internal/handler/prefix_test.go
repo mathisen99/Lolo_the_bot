@@ -25,12 +25,11 @@ func (noopLogger) ChannelMessage(string, string, string) {}
 func (noopLogger) PrivateMessage(string, string)         {}
 
 type testAPIClient struct {
-	commandResponses     map[string]string
-	streamingResponses   map[string][]*APIResponse
-	mentionResponse      string
-	mentionPrefix        string
-	mentionTriviaContext *TriviaContext
-	commandsResponse     *CommandsResponse
+	commandResponses   map[string]string
+	streamingResponses map[string][]*APIResponse
+	mentionResponse    string
+	mentionPrefix      string
+	commandsResponse   *CommandsResponse
 }
 
 func (c *testAPIClient) SendCommand(ctx context.Context, command string, args []string, nick, hostmask, network, channel string, isPM bool, timeout time.Duration) (*APIResponse, error) {
@@ -60,15 +59,13 @@ func (c *testAPIClient) SendCommandStream(ctx context.Context, command string, a
 	return ch, nil
 }
 
-func (c *testAPIClient) SendMention(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (*APIResponse, error) {
+func (c *testAPIClient) SendMention(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message) (*APIResponse, error) {
 	c.mentionPrefix = commandPrefix
-	c.mentionTriviaContext = triviaContext
 	return &APIResponse{RequestID: "mention", Status: "success", Message: c.mentionResponse}, nil
 }
 
-func (c *testAPIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message, triviaContext *TriviaContext, deepMode bool) (<-chan *APIResponse, error) {
+func (c *testAPIClient) SendMentionStream(ctx context.Context, message, nick, hostmask, network, channel, permissionLevel, commandPrefix string, history []*database.Message) (<-chan *APIResponse, error) {
 	c.mentionPrefix = commandPrefix
-	c.mentionTriviaContext = triviaContext
 	ch := make(chan *APIResponse, 1)
 	go func() {
 		defer close(ch)
@@ -141,35 +138,35 @@ func newHandlerTestEnv(t *testing.T) (*handlerTestEnv, func()) {
 		t.Fatalf("Register prefix failed: %v", err)
 	}
 	if err := registry.Register(&handlerTestCommand{
-		name:  "code",
-		help:  "!code <lang> - Start code quiz",
+		name:  "topic",
+		help:  "!topic <text> - Set channel topic",
 		level: database.LevelNormal,
 		execute: func(ctx *commands.Context) (*commands.Response, error) {
 			if len(ctx.Args) != 1 {
-				return nil, boterrors.NewInvalidSyntaxError("code", "!code <lang>")
+				return nil, boterrors.NewInvalidSyntaxError("topic", "!topic <text>")
 			}
-			return commands.NewResponse("code:" + ctx.Args[0]), nil
+			return commands.NewResponse("topic:" + ctx.Args[0]), nil
 		},
 	}); err != nil {
 		cleanupDB()
-		t.Fatalf("Register code failed: %v", err)
+		t.Fatalf("Register topic failed: %v", err)
 	}
 	if err := registry.Register(&handlerTestCommand{
-		name:  "trivia",
-		help:  "!trivia <topic> - Start trivia",
+		name:  "topicappend",
+		help:  "!topicappend <text> - Append to channel topic",
 		level: database.LevelNormal,
 		execute: func(ctx *commands.Context) (*commands.Response, error) {
 			if len(ctx.Args) != 1 {
-				return nil, boterrors.NewInvalidSyntaxError("trivia", "!trivia <topic>")
+				return nil, boterrors.NewInvalidSyntaxError("topicappend", "!topicappend <text>")
 			}
-			return commands.NewResponse("trivia:" + ctx.Args[0]), nil
+			return commands.NewResponse("topicappend:" + ctx.Args[0]), nil
 		},
 	}); err != nil {
 		cleanupDB()
-		t.Fatalf("Register trivia failed: %v", err)
+		t.Fatalf("Register topicappend failed: %v", err)
 	}
 
-	for _, name := range []string{"topic", "topicappend", "channel enable", "user add"} {
+	for _, name := range []string{"channel enable", "user add"} {
 		if err := registry.Register(&handlerTestCommand{
 			name:  name,
 			help:  "!" + name + " - test",
@@ -262,20 +259,20 @@ func TestHandleMessageChannelScopedPrefixOverrides(t *testing.T) {
 		t.Fatalf("expected default help response in #chan2, got %v", responses)
 	}
 
-	responses, err = env.handler.HandleMessage(ctx, "alice", "", "#chan1", "-code go", false, nil)
+	responses, err = env.handler.HandleMessage(ctx, "alice", "", "#chan1", "-topic go", false, nil)
 	if err != nil {
-		t.Fatalf("HandleMessage -code failed: %v", err)
+		t.Fatalf("HandleMessage -topic failed: %v", err)
 	}
-	if len(responses) != 1 || responses[0] != "code:go" {
-		t.Fatalf("expected code command response, got %v", responses)
+	if len(responses) != 1 || responses[0] != "topic:go" {
+		t.Fatalf("expected topic command response, got %v", responses)
 	}
 
-	responses, err = env.handler.HandleMessage(ctx, "alice", "", "#chan1", "-trivia math", false, nil)
+	responses, err = env.handler.HandleMessage(ctx, "alice", "", "#chan1", "-topicappend math", false, nil)
 	if err != nil {
-		t.Fatalf("HandleMessage -trivia failed: %v", err)
+		t.Fatalf("HandleMessage -topicappend failed: %v", err)
 	}
-	if len(responses) != 1 || responses[0] != "trivia:math" {
-		t.Fatalf("expected trivia command response, got %v", responses)
+	if len(responses) != 1 || responses[0] != "topicappend:math" {
+		t.Fatalf("expected topicappend command response, got %v", responses)
 	}
 
 	responses, err = env.handler.HandleMessage(ctx, "admin", "admin@host", "#chan1", "-prefix !", false, nil)
@@ -301,8 +298,8 @@ func TestRewriteCommandPrefixesHandlesOverlapsAndMultiWordCommands(t *testing.T)
 
 	env.dispatcher.SetChannelPrefix("#chan", "-")
 
-	got := env.handler.rewriteCommandPrefixes("Use !topicappend x, !topic y, !channel enable #x, !user add bob, !trivia math.", "#chan", false)
-	want := "Use -topicappend x, -topic y, -channel enable #x, -user add bob, -trivia math."
+	got := env.handler.rewriteCommandPrefixes("Use !topicappend x, !topic y, !channel enable #x, !user add bob, !help me.", "#chan", false)
+	want := "Use -topicappend x, -topic y, -channel enable #x, -user add bob, -help me."
 	if got != want {
 		t.Fatalf("rewriteCommandPrefixes() = %q, want %q", got, want)
 	}
@@ -313,13 +310,13 @@ func TestHandleAPICommandRewritesKnownCommandExamples(t *testing.T) {
 	defer cleanup()
 
 	env.dispatcher.SetChannelPrefix("#chan", "-")
-	env.apiClient.commandResponses["weather"] = "Try !trivia math or !topicappend more."
+	env.apiClient.commandResponses["weather"] = "Try !topic math or !topicappend more."
 
 	responses, err := env.handler.HandleMessage(context.Background(), "alice", "", "#chan", "-weather stockholm", false, nil)
 	if err != nil {
 		t.Fatalf("HandleMessage -weather failed: %v", err)
 	}
-	if len(responses) != 1 || responses[0] != "Try -trivia math or -topicappend more." {
+	if len(responses) != 1 || responses[0] != "Try -topic math or -topicappend more." {
 		t.Fatalf("expected rewritten API response, got %v", responses)
 	}
 }
@@ -329,16 +326,47 @@ func TestHandleMentionRewritesKnownCommandExamplesAndPassesPrefixToAPI(t *testin
 	defer cleanup()
 
 	env.dispatcher.SetChannelPrefix("#chan", "-")
-	env.apiClient.mentionResponse = "Try !trivia math and !help."
+	env.apiClient.mentionResponse = "Try !topic math and !help."
 
 	responses, err := env.handler.handleMention(context.Background(), "alice", "", "#chan", "Lolo help me", nil)
 	if err != nil {
 		t.Fatalf("handleMention failed: %v", err)
 	}
-	if len(responses) != 1 || responses[0] != "Try -trivia math and -help." {
+	if len(responses) != 1 || responses[0] != "Try -topic math and -help." {
 		t.Fatalf("expected rewritten mention response, got %v", responses)
 	}
 	if env.apiClient.mentionPrefix != "-" {
 		t.Fatalf("expected mention command prefix '-', got %q", env.apiClient.mentionPrefix)
+	}
+}
+
+// TestRetiredTriviaCommandsAreUnknown verifies that after the trivia system was
+// removed, trivia-related commands (!trivia, !quiz, and the former code-quiz
+// helpers) are no longer registered as core commands. They fall through to the
+// Python API, which returns an "Unknown command" response that the handler
+// silently ignores, producing no channel output. (Requirement 2.7)
+func TestRetiredTriviaCommandsAreUnknown(t *testing.T) {
+	env, cleanup := newHandlerTestEnv(t)
+	defer cleanup()
+
+	// Sanity check: the API client models the same unknown-command behavior as
+	// the real API / mock API for any command that is not registered.
+	resp, err := env.apiClient.SendCommand(context.Background(), "trivia", []string{"math"}, "alice", "", "libera", "#chan", false, 0)
+	if err != nil {
+		t.Fatalf("SendCommand(trivia) failed: %v", err)
+	}
+	if resp.Status != "error" || resp.Message != "Unknown command: trivia" {
+		t.Fatalf("expected unknown-command error for trivia, got status=%q message=%q", resp.Status, resp.Message)
+	}
+
+	ctx := context.Background()
+	for _, cmd := range []string{"trivia math", "quiz history", "hint", "top10", "triviarules"} {
+		responses, err := env.handler.HandleMessage(ctx, "alice", "", "#chan", "!"+cmd, false, nil)
+		if err != nil {
+			t.Fatalf("HandleMessage !%s failed: %v", cmd, err)
+		}
+		if len(responses) != 0 {
+			t.Fatalf("expected retired command %q to be silently ignored as unknown, got %v", cmd, responses)
+		}
 	}
 }

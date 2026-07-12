@@ -14,7 +14,6 @@ type Config struct {
 	API                APIConfig                `toml:"api"`
 	Images             ImagesConfig             `toml:"images"`
 	PhoneNotifications PhoneNotificationsConfig `toml:"phone_notifications"`
-	Trivia             TriviaConfig             `toml:"trivia"`
 }
 
 const DefaultNetworkID = "libera"
@@ -35,6 +34,13 @@ type NetworkConfig struct {
 	NickServPassword string   `toml:"nickserv_password"`
 	Channels         []string `toml:"channels"`
 	Required         bool     `toml:"required"`
+	// SASLRequired / NickServRequired let an operator explicitly opt in to
+	// enforcing that the corresponding secret is present. When true and the
+	// secret cannot be resolved (from TOML or the LOLO_* env vars), startup
+	// fails with a clear error. They default to false so existing configs that
+	// authenticate optionally (or not at all) keep starting unchanged.
+	SASLRequired     bool `toml:"sasl_required"`
+	NickServRequired bool `toml:"nickserv_required"`
 }
 
 // ImagesConfig contains image download settings
@@ -132,13 +138,31 @@ type LimitsConfig struct {
 	ReconnectDelayMax       int `toml:"reconnect_delay_max"`
 	CommandCooldown         int `toml:"command_cooldown"`
 	MentionAggregateDelayMS int `toml:"mention_aggregate_delay_ms"` // Delay to wait for overflow messages (default: 1000ms)
+	MentionHistoryDepth     int `toml:"mention_history_depth"`      // Number of recent channel messages sent as mention context (default: 20)
 }
 
 // DatabaseConfig contains database settings
 type DatabaseConfig struct {
-	WALMode              bool `toml:"wal_mode"`
-	VacuumInterval       int  `toml:"vacuum_interval"`
-	MessageRetentionDays int  `toml:"message_retention_days"`
+	// Path is the SQLite database file path. When empty it falls back to the
+	// documented default ("data/bot.db"). Kept config-driven per Requirement 6.6
+	// so operators can relocate the database without editing source.
+	Path                 string `toml:"path"`
+	WALMode              bool   `toml:"wal_mode"`
+	VacuumInterval       int    `toml:"vacuum_interval"`
+	MessageRetentionDays int    `toml:"message_retention_days"`
+}
+
+// DefaultDatabasePath is the documented default location of the SQLite database
+// file, used when database.path is left unset.
+const DefaultDatabasePath = "data/bot.db"
+
+// GetPath returns the configured database file path, falling back to the
+// documented default ("data/bot.db") when unset.
+func (c *DatabaseConfig) GetPath() string {
+	if c.Path == "" {
+		return DefaultDatabasePath
+	}
+	return c.Path
 }
 
 // LoggingConfig contains logging settings
@@ -149,32 +173,24 @@ type LoggingConfig struct {
 
 // APIConfig contains Python API integration settings
 type APIConfig struct {
-	CircuitBreakerThreshold int `toml:"circuit_breaker_threshold"`
-	CircuitBreakerTimeout   int `toml:"circuit_breaker_timeout"`
-	MaxRetries              int `toml:"max_retries"`
-	RetryBackoffMS          int `toml:"retry_backoff_ms"`
+	CircuitBreakerThreshold int        `toml:"circuit_breaker_threshold"`
+	CircuitBreakerTimeout   int        `toml:"circuit_breaker_timeout"`
+	MaxRetries              int        `toml:"max_retries"`
+	RetryBackoffMS          int        `toml:"retry_backoff_ms"`
+	HTTP                    HTTPConfig `toml:"http"`
 }
 
-// TriviaConfig contains trivia/quiz system configuration.
-type TriviaConfig struct {
-	Enabled                  bool   `toml:"enabled"`
-	DatabasePath             string `toml:"database_path"`
-	OpenAIModel              string `toml:"openai_model"`
-	OpenAIReasoningEffort    string `toml:"openai_reasoning_effort"`
-	OpenAIAPIKeyEnv          string `toml:"openai_api_key_env"`
-	OpenAIBaseURL            string `toml:"openai_base_url"`
-	RequestTimeoutSeconds    int    `toml:"request_timeout_seconds"`
-	MaxOutputTokens          int    `toml:"max_output_tokens"`
-	GenerationRetryLimit     int    `toml:"generation_retry_limit"`
-	DefaultAnswerTimeSeconds int    `toml:"default_answer_time_seconds"`
-	DefaultCodeAnswerTime    int    `toml:"default_code_answer_time_seconds"`
-	DefaultHintsEnabled      bool   `toml:"default_hints_enabled"`
-	DefaultBasePoints        int    `toml:"default_base_points"`
-	DefaultMinimumPoints     int    `toml:"default_minimum_points"`
-	DefaultHintPenalty       int    `toml:"default_hint_penalty"`
-	DefaultEnabled           bool   `toml:"default_enabled"`
-	DefaultDifficulty        string `toml:"default_difficulty"`
-	DefaultCodeDifficulty    string `toml:"default_code_difficulty"`
+// HTTPConfig contains HTTP transport tunables for the Python API client.
+// Defaults match the values previously hardcoded in the API client so that
+// existing behavior is preserved when these fields are absent.
+type HTTPConfig struct {
+	DialTimeout           int `toml:"dial_timeout"`            // seconds; time to establish a TCP connection (default: 10)
+	KeepAlive             int `toml:"keep_alive"`              // seconds; keep-alive probe interval (default: 30)
+	TLSHandshakeTimeout   int `toml:"tls_handshake_timeout"`   // seconds; time allowed for the TLS handshake (default: 10)
+	MaxIdleConns          int `toml:"max_idle_conns"`          // max idle connections across all hosts (default: 100)
+	MaxIdleConnsPerHost   int `toml:"max_idle_conns_per_host"` // max idle connections per host (default: 10)
+	IdleConnTimeout       int `toml:"idle_conn_timeout"`       // seconds; how long idle connections stay in the pool (default: 90)
+	ResponseHeaderTimeout int `toml:"response_header_timeout"` // seconds; time to receive response headers after the request (default: 30)
 }
 
 // GetAPITimeoutDuration returns the API timeout as a time.Duration
@@ -221,7 +237,36 @@ func (c *APIConfig) GetRetryBackoffDuration() time.Duration {
 	return time.Duration(c.RetryBackoffMS) * time.Millisecond
 }
 
-// GetRequestTimeoutDuration returns trivia generation timeout as duration.
-func (c *TriviaConfig) GetRequestTimeoutDuration() time.Duration {
-	return time.Duration(c.RequestTimeoutSeconds) * time.Second
+// GetDialTimeoutDuration returns the HTTP dial timeout as a time.Duration
+func (c *HTTPConfig) GetDialTimeoutDuration() time.Duration {
+	return time.Duration(c.DialTimeout) * time.Second
+}
+
+// GetKeepAliveDuration returns the HTTP keep-alive interval as a time.Duration
+func (c *HTTPConfig) GetKeepAliveDuration() time.Duration {
+	return time.Duration(c.KeepAlive) * time.Second
+}
+
+// GetTLSHandshakeTimeoutDuration returns the TLS handshake timeout as a time.Duration
+func (c *HTTPConfig) GetTLSHandshakeTimeoutDuration() time.Duration {
+	return time.Duration(c.TLSHandshakeTimeout) * time.Second
+}
+
+// GetIdleConnTimeoutDuration returns the idle connection timeout as a time.Duration
+func (c *HTTPConfig) GetIdleConnTimeoutDuration() time.Duration {
+	return time.Duration(c.IdleConnTimeout) * time.Second
+}
+
+// GetResponseHeaderTimeoutDuration returns the response header timeout as a time.Duration
+func (c *HTTPConfig) GetResponseHeaderTimeoutDuration() time.Duration {
+	return time.Duration(c.ResponseHeaderTimeout) * time.Second
+}
+
+// GetMentionHistoryDepth returns the configured mention history depth, falling
+// back to the documented default (20) when unset or invalid.
+func (c *LimitsConfig) GetMentionHistoryDepth() int {
+	if c.MentionHistoryDepth <= 0 {
+		return 20
+	}
+	return c.MentionHistoryDepth
 }

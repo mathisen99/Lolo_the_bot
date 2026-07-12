@@ -65,7 +65,6 @@ class SourceCodeTool(Tool):
         "*.pyc",
         
         # Subprojects with their own secrets
-        "CosyVoice/",
         "IsolateVoice/",
         
         # Firecracker VM (has keys, sockets)

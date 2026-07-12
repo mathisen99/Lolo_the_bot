@@ -43,7 +43,6 @@ def handle_mention(request: MentionRequest) -> MentionResponse:
     - Python execution for calculations and code examples
     - Concise responses optimized for IRC (max 3 messages)
     - Conversation history for context-aware responses
-    - Deep research mode for thorough, well-researched answers
     
     Args:
         request: MentionRequest containing mention details and conversation history
@@ -51,8 +50,7 @@ def handle_mention(request: MentionRequest) -> MentionResponse:
     Returns:
         MentionResponse with the bot's AI-generated reply
     """
-    log_info(f"[{request.request_id}] Processing mention from {request.nick} in {request.network}/{request.channel}" +
-             (" [DEEP MODE]" if request.deep_mode else ""))
+    log_info(f"[{request.request_id}] Processing mention from {request.nick} in {request.network}/{request.channel}")
     
     # Check channel question rate limit before processing
     allowed, limit_message = check_channel_question_limit(
@@ -84,11 +82,9 @@ def handle_mention(request: MentionRequest) -> MentionResponse:
             network=request.network,
             channel=request.channel,
             conversation_history=request.history,
-            trivia_context=request.trivia_context.model_dump() if request.trivia_context else None,
             permission_level=request.permission_level,
             command_prefix=request.command_prefix,
-            request_id=request.request_id,
-            deep_mode=request.deep_mode
+            request_id=request.request_id
         )
         
         # Check for null response (user requested silence)

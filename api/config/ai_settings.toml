@@ -5,11 +5,24 @@
 # Model to use for responses
 name = "gpt-5.6-sol"
 
-# Reasoning effort: "none", "low", "medium", "high", "xhigh"
+# Reasoning effort: "none", "low", "medium", "high", "xhigh", "max"
+# ("max" is new in GPT-5.6 for the hardest quality-first workloads)
 reasoning_effort = "medium"
 
 # Verbosity: "low", "medium", "high"
 verbosity = "low"
+
+# Persisted reasoning across turns (GPT-5.6):
+#   "auto"         - use the model default
+#   "all_turns"    - reuse reasoning across the multi-turn tool loop (better quality
+#                    and cache efficiency; recommended when goals stay stable)
+#   "current_turn" - discard earlier reasoning each turn
+reasoning_context = "all_turns"
+
+# Reasoning mode (GPT-5.6): "standard" or "pro".
+# Pro mode does more model work for higher reliability on hard tasks, but uses more
+# tokens and is therefore more expensive. Kept OFF ("standard") by default.
+reasoning_mode = "standard"
 
 # How long the OpenAI API retains the prompt cache for prefix reuse (default "24h")
 prompt_cache_retention = "24h"

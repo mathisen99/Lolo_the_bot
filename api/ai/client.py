@@ -41,6 +41,41 @@ class AIClient:
         self._setup_tools()
 
     @staticmethod
+    def _safety_identifier(nick: str = "", network: str = "libera") -> str:
+        """
+        Build a stable, privacy-preserving safety identifier for a request.
+
+        GPT-5.6 guidance recommends sending a stable `safety_identifier` with each
+        request when the application serves individual end users (see docs/gpt56.md).
+        We serve many distinct IRC users, so we derive an opaque, per-user id by
+        hashing the network + nick. The raw nick is never sent to the API.
+        """
+        import hashlib
+        raw = f"{(network or 'libera').lower()}:{(nick or 'anonymous').lower()}"
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+        return f"irc-{digest}"
+
+    def _build_reasoning(self) -> Dict[str, Any]:
+        """
+        Build the reasoning payload for a Responses API call (GPT-5.6).
+
+        Combines the configured effort with two GPT-5.6 features:
+        - context: persisted reasoning across turns ("auto"/"all_turns"/"current_turn").
+          "all_turns" lets the model reuse reasoning across our multi-turn tool loop
+          (which chains with previous_response_id) for better quality and cache reuse.
+        - mode: "standard" or "pro". Pro mode is more thorough but costs more tokens,
+          so it stays off unless explicitly enabled in config.
+        """
+        reasoning: Dict[str, Any] = {"effort": self.config.reasoning_effort}
+        context = getattr(self.config, "reasoning_context", "auto")
+        if context:
+            reasoning["context"] = context
+        mode = getattr(self.config, "reasoning_mode", "standard")
+        if mode:
+            reasoning["mode"] = mode
+        return reasoning
+
+    @staticmethod
     def _build_input_image_content(image_url: str, detail: Optional[str] = None) -> Dict[str, Any]:
         """Build an input_image item while preserving explicit detail choices."""
         content = {
@@ -281,12 +316,13 @@ class AIClient:
             response = self.client.responses.create(
                 model=self.config.model_name,
                 input=full_input,
-                reasoning={"effort": self.config.reasoning_effort},
+                reasoning=self._build_reasoning(),
                 text={"verbosity": self.config.verbosity},
                 max_output_tokens=self.config.max_output_tokens,
                 tools=tool_defs if tool_defs else None,
                 timeout=self.config.timeout,
-                prompt_cache_retention=self.config.prompt_cache_retention
+                prompt_cache_retention=self.config.prompt_cache_retention,
+                safety_identifier=self._safety_identifier()
             )
             
             # Check which tools were used
@@ -349,20 +385,21 @@ class AIClient:
                 permission_level
             )
             
-            reasoning_effort = self.config.reasoning_effort
             max_tokens = self.config.max_output_tokens
             request_timeout = self.config.timeout
+            safety_id = self._safety_identifier(nick, network)
             
             # Make API request with extended cache retention for better prefix caching
             response = self.client.responses.create(
                 model=self.config.model_name,
                 input=full_input,
-                reasoning={"effort": reasoning_effort},
+                reasoning=self._build_reasoning(),
                 text={"verbosity": self.config.verbosity},
                 max_output_tokens=max_tokens,
                 tools=tool_defs if tool_defs else None,
                 timeout=request_timeout,
-                prompt_cache_retention=self.config.prompt_cache_retention
+                prompt_cache_retention=self.config.prompt_cache_retention,
+                safety_identifier=safety_id
             )
             
             # Check which tools were used
@@ -734,7 +771,8 @@ class AIClient:
                                         ]
                                     }],
                                     max_output_tokens=1000,
-                                    timeout=60
+                                    timeout=60,
+                                    safety_identifier=self._safety_identifier(nick, network)
                                 )
                                 
                                 # Extract description
@@ -774,11 +812,12 @@ class AIClient:
                     input=function_outputs,
                     previous_response_id=response_id,
                     tools=tool_defs if tool_defs else None,
-                    reasoning={"effort": self.config.reasoning_effort},
+                    reasoning=self._build_reasoning(),
                     text={"verbosity": self.config.verbosity},
                     max_output_tokens=self.config.max_output_tokens,
                     timeout=self.config.timeout,
-                    prompt_cache_retention=self.config.prompt_cache_retention
+                    prompt_cache_retention=self.config.prompt_cache_retention,
+                    safety_identifier=self._safety_identifier(nick, network)
                 )
                 
                 # Track usage

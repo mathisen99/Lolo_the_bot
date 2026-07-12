@@ -37,6 +37,14 @@ class AIConfig:
         self.verbosity: str = config["model"]["verbosity"]
         # How long the OpenAI API retains the prompt cache (default "24h")
         self.prompt_cache_retention: str = config["model"].get("prompt_cache_retention", "24h")
+        # Persisted reasoning across turns (GPT-5.6). "auto" uses the model default,
+        # "all_turns" reuses reasoning across the multi-turn tool loop (better quality
+        # and cache efficiency), "current_turn" discards earlier reasoning.
+        self.reasoning_context: str = config["model"].get("reasoning_context", "all_turns")
+        # Reasoning mode (GPT-5.6): "standard" or "pro". Pro mode does more model
+        # work for higher reliability but uses more tokens (more expensive), so it is
+        # OFF by default.
+        self.reasoning_mode: str = config["model"].get("reasoning_mode", "standard")
         
         # Limits
         self.max_output_tokens: int = config["limits"]["max_output_tokens"]

@@ -1,9 +1,12 @@
 """
-Source code introspection tool.
+Source code introspection tool - OWNER ONLY.
 
 Allows the bot to read and browse its own source code to answer questions
 about how it works. Implements strict security boundaries to prevent
 access to sensitive files.
+
+This is a privileged tool restricted to the bot owner. It is not exposed in
+the tool list for non-owner users, so normal users never see that it exists.
 
 Uses system tools: rg (ripgrep), wc
 """
@@ -17,7 +20,7 @@ from .base import Tool
 
 
 class SourceCodeTool(Tool):
-    """Tool for browsing, searching, and reading the bot's own source code."""
+    """Tool for browsing, searching, and reading the bot's own source code. Owner only."""
     
     # Project root (where the bot runs from)
     PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
@@ -101,7 +104,9 @@ class SourceCodeTool(Tool):
         return {
             "type": "function",
             "name": self.name,
-            "description": """Browse, search, and read your own source code (Lolo's codebase).
+            "description": """Browse, search, and read your own source code (Lolo's codebase). OWNER ONLY.
+
+OWNER ONLY: Only the bot owner may use this tool. If the requesting user is not the owner (see "User permission level" in the context), do NOT call this tool - instead explain that reading source code is owner-only and they can ask the owner (Mathisen) if they need it. This tool refuses to execute for non-owners.
 
 === PROJECT MAP (use this to go directly to files) ===
 GO BOT (internal/):
@@ -403,8 +408,14 @@ Blocked: .env, config/bot.toml, data/, all secrets""",
     
     def execute(self, action: str, path: Optional[str] = None, 
                 query: Optional[str] = None, start_line: Optional[int] = None,
-                end_line: Optional[int] = None, **kwargs) -> str:
-        """Execute source code action."""
+                end_line: Optional[int] = None, permission_level: str = "normal",
+                **kwargs) -> str:
+        """Execute source code action. Owner only."""
+        # CRITICAL: Owner-only check. This tool is not exposed to non-owners in
+        # the tool list, but we defend in depth here in case it is ever called.
+        if permission_level != "owner":
+            return "Permission denied: This tool is restricted to the bot owner only."
+        
         if action == "search":
             return self._search(query or "", path)
         elif action == "list_files":

@@ -13,6 +13,16 @@ from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditToo
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
+# Tools that are restricted to the bot owner at execution time. These tools ARE
+# still exposed to every user so the model knows they exist and can explain to a
+# non-owner that only the owner may run them (and to ask the owner if needed).
+# Each of these tools enforces the owner check at execution time.
+OWNER_ONLY_TOOLS = frozenset({
+    "execute_shell",  # shell/bash execution
+    "source_code",    # source code introspection
+})
+
+
 class AIClient:
     """Client for interacting with the configured OpenAI model."""
     
@@ -236,6 +246,17 @@ class AIClient:
             self.tools[log_analyzer.name] = log_analyzer
             log_info("Log analyzer tool enabled")
     
+    def _get_tool_definitions(self) -> List[Dict[str, Any]]:
+        """
+        Build the list of tool definitions to expose to the model.
+
+        All tools (including owner-only ones like execute_shell and source_code)
+        are exposed to every user. Owner-only tools enforce their restriction at
+        execution time and their descriptions instruct the model to explain to
+        non-owners that only the owner may run them.
+        """
+        return [tool.get_definition() for tool in self.tools.values()]
+
     def generate_response(self, user_message: str, request_id: str) -> str:
         """
         Generate AI response to user message.
@@ -251,7 +272,7 @@ class AIClient:
         
         try:
             # Build tool definitions
-            tool_defs = [tool.get_definition() for tool in self.tools.values()]
+            tool_defs = self._get_tool_definitions()
             
             # Prepare the input with system prompt
             full_input = f"{self.config.system_prompt}\n\nUser: {user_message}"
@@ -315,7 +336,7 @@ class AIClient:
         
         try:
             # Build tool definitions
-            tool_defs = [tool.get_definition() for tool in self.tools.values()]
+            tool_defs = self._get_tool_definitions()
             
             # Build the context-aware prompt
             full_input = self._build_context_prompt(
@@ -324,7 +345,8 @@ class AIClient:
                 network,
                 channel, 
                 conversation_history,
-                command_prefix
+                command_prefix,
+                permission_level
             )
             
             reasoning_effort = self.config.reasoning_effort
@@ -626,7 +648,7 @@ class AIClient:
                             continue
                     
                     # Inject permission_level/context for specific tools
-                    if func_name in ('manage_user_rules', 'execute_shell', 'bug_report', 'irc_command', 'reminder', 'log_analyzer', 'usage_stats'):
+                    if func_name in ('manage_user_rules', 'execute_shell', 'source_code', 'bug_report', 'irc_command', 'reminder', 'log_analyzer', 'usage_stats'):
                         func_args['permission_level'] = permission_level
                         if func_name == 'bug_report':
                             func_args['requesting_user'] = nick
@@ -743,7 +765,7 @@ class AIClient:
             
             # If we have function outputs, make the next API call
             if function_outputs:
-                tool_defs = [t.get_definition() for t in self.tools.values()]
+                tool_defs = self._get_tool_definitions()
                 
                 # Use previous_response_id for multi-turn - this enables CoT passing
                 # and better caching as documented in GPT-5.x Responses guidance
@@ -799,7 +821,8 @@ class AIClient:
         network: str,
         channel: str,
         conversation_history: list,
-        command_prefix: str
+        command_prefix: str,
+        permission_level: str = "normal"
     ) -> str:
         """
         Build a prompt with conversation context.
@@ -842,6 +865,7 @@ class AIClient:
         prompt_parts.append(f"Network: {network}")
         prompt_parts.append(f"Channel: {channel}")
         prompt_parts.append(f"User: {nick}")
+        prompt_parts.append(f"User permission level: {permission_level}")
         prompt_parts.append(f"Command prefix: {command_prefix}")
         prompt_parts.append(f"Message: {user_message}")
         prompt_parts.append("")

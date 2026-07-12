@@ -34,6 +34,8 @@ class ShellExecTool(Tool):
             "name": "execute_shell",
             "description": """Execute shell commands on the Linux system. OWNER ONLY - requires owner permission level.
 
+OWNER ONLY: If the requesting user is not the owner (see "User permission level" in the context), do NOT call this tool - instead explain that running shell commands is owner-only and they can ask the owner (Mathisen) if they need it. This tool refuses to execute for non-owners.
+
 Use this when the owner asks to:
 - Check system status (uptime, disk space, memory, processes)
 - Run diagnostic commands (curl, ping, netstat, etc.)

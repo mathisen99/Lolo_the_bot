@@ -85,7 +85,7 @@ class PasteTool(Tool):
         return {
             "type": "function",
             "name": "create_paste",
-            "description": "Create a paste on botbin.net for content that doesn't work well on IRC (code, long text, formatted content). Use this when your response would exceed 3 IRC messages or contains code/formatted text that needs proper display. Returns a short URL to the paste.",
+            "description": "Create a paste on botbin.net for content that does not display well on IRC, such as multi-line code, scripts, long text, or layout-sensitive content. Use it when the response would exceed 3 IRC messages or needs preserved formatting. Do not use it merely because text is technically code: keep readable one-liners and compact snippets inline when they fit comfortably in one IRC message. Returns a short URL to the paste.",
             "parameters": {
                 "type": "object",
                 "properties": {

@@ -2,8 +2,13 @@
 """
 Test script for AI mention handler.
 
-Tests the AI client and tools without requiring the full bot setup.
+Tests the AI client and tools without requiring the full bot setup. This is an
+opt-in live diagnostic, not an automated pytest module.
 """
+
+# The functions below intentionally accept objects returned by earlier steps
+# rather than pytest fixtures and may contact configured external services.
+__test__ = False
 
 import os
 import sys

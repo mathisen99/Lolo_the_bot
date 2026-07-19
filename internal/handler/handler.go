@@ -16,6 +16,7 @@ import (
 	"github.com/yourusername/lolo/internal/commands"
 	"github.com/yourusername/lolo/internal/database"
 	"github.com/yourusername/lolo/internal/errors"
+	"github.com/yourusername/lolo/internal/game"
 	"github.com/yourusername/lolo/internal/ircformat"
 	"github.com/yourusername/lolo/internal/output"
 	"github.com/yourusername/lolo/internal/splitter"
@@ -39,6 +40,7 @@ type MessageHandler struct {
 	imageDownloadChannels []string                           // Channels to auto-download images from
 	sendMessageFunc       func(target, message string) error // Callback to send IRC messages
 	network               string
+	gameRouter            *game.Router
 }
 
 // MessageHandlerConfig contains configuration for the message handler
@@ -58,6 +60,7 @@ type MessageHandlerConfig struct {
 	MentionAggregateDelay    time.Duration // How long to wait for overflow messages (default: 1s)
 	MentionHistoryDepth      int           // Recent channel messages sent as mention context (default: 20)
 	Network                  string
+	GameRouter               *game.Router
 }
 
 // NewMessageHandler creates a new message handler
@@ -96,6 +99,7 @@ func NewMessageHandler(config *MessageHandlerConfig) *MessageHandler {
 		commandMetadata:       make(map[string]*CommandMetadata),
 		imageDownloadChannels: config.ImageDownloadChannels,
 		network:               defaultNetwork(config.Network),
+		gameRouter:            config.GameRouter,
 	}
 }
 
@@ -130,6 +134,46 @@ func (h *MessageHandler) GetCommandMetadata(command string) *CommandMetadata {
 // This is the main entry point for message processing
 // statusCallback is an optional function to send immediate status updates (user loop feedback)
 func (h *MessageHandler) HandleMessage(ctx context.Context, nick, hostmask, channel, message string, isPM bool, statusCallback func(string)) ([]string, error) {
+	// PMs are classified and consumed before logging or any generic executable
+	// path. This also keeps verification passwords out of ordinary logs.
+	if isPM && h.gameRouter != nil {
+		input := game.RouteInput{
+			NetworkID: h.network,
+			Nick:      nick,
+			Hostmask:  hostmask,
+			Channel:   "",
+			Message:   message,
+			IsPM:      true,
+			Prefix:    h.dispatcher.GetActivePrefix("", true),
+		}
+		var routed game.RouteOutput
+		var err error
+		if h.gameRouter.Enabled() {
+			routed, err = h.gameRouter.RoutePM(ctx, input)
+		} else {
+			routed, err = h.gameRouter.RoutePMFeatureOff(input)
+		}
+		if routed.Handled {
+			responses := make([]string, 0)
+			for _, delivery := range routed.Deliveries {
+				if delivery.Target != game.DeliveryPM {
+					continue
+				}
+				for _, line := range delivery.Lines {
+					formatted := ircformat.Format(line)
+					if (routed.Kind == game.PMRouteGameCommand || routed.Kind == game.PMRouteContinuation) && h.sendMessageFunc != nil {
+						if _, sendErr := h.SendSplitMessage(ctx, nick, formatted, h.sendMessageFunc); sendErr != nil {
+							return nil, sendErr
+						}
+						continue
+					}
+					responses = append(responses, h.splitMessage(formatted)...)
+				}
+			}
+			return responses, err
+		}
+	}
+
 	// Log the incoming message
 	if isPM {
 		h.logger.PrivateMessage(nick, message)
@@ -150,6 +194,42 @@ func (h *MessageHandler) HandleMessage(ctx context.Context, nick, hostmask, chan
 			if err := h.downloadImage(imageURL); err != nil {
 				h.logger.Warning("Failed to download image: %v", err)
 			}
+		}
+	}
+
+	// Reserve the configured game namespace before generic command dispatch.
+	// The private-solo release consumes channel invocations locally and, when
+	// configured, directs the player to the dedicated PM game route.
+	if !isPM && h.gameRouter != nil {
+		input := game.RouteInput{
+			NetworkID: h.network,
+			Nick:      nick,
+			Hostmask:  hostmask,
+			Channel:   channel,
+			Message:   message,
+			IsPM:      false,
+			Prefix:    h.dispatcher.GetActivePrefix(channel, false),
+		}
+		routed, routeErr := h.gameRouter.RouteChannel(input)
+		if routed.Handled {
+			enabled, stateErr := h.db.GetChannelStateForNetwork(h.network, channel)
+			if stateErr != nil {
+				dbErr := errors.NewDatabaseError("check channel state", stateErr)
+				return []string{h.errorHandler.Handle(dbErr)}, nil
+			}
+			if !enabled {
+				return nil, nil
+			}
+			responses := make([]string, 0)
+			for _, delivery := range routed.Deliveries {
+				if delivery.Target != game.DeliveryChannel {
+					continue
+				}
+				for _, line := range delivery.Lines {
+					responses = append(responses, h.splitMessage(ircformat.Format(line))...)
+				}
+			}
+			return responses, routeErr
 		}
 	}
 

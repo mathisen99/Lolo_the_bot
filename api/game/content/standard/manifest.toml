@@ -1,0 +1,33 @@
+schema_version = 1
+content_version = "standard-2026.1"
+campaign_id = "lantern-haven-rescue"
+profile = "standard"
+effective_profile = "standard"
+classification = "original_content"
+fictionalized = true
+real_person_content = false
+immutable = true
+
+[[files]]
+path = "locations.json"
+sha256 = "e84c77807795192dc820179b690fb3610883ee234286639cfa9d92e666b2d969"
+
+[[files]]
+path = "encounters.json"
+sha256 = "62a6b54cf5355936d6c7f616b8767cb16471680b261fa088cccdd964e133b038"
+
+[[files]]
+path = "items.json"
+sha256 = "9011fcb40b0cc068508cc7e6a6b58cfd2c3c12fbc9d99c1a7a5749184d3481c3"
+
+[[files]]
+path = "quests.json"
+sha256 = "c5ffbd41cde0f32a107dea44fb59d0823b6bbcf6566a4cb9ea4808657ec37644"
+
+[[files]]
+path = "random_tables.json"
+sha256 = "1b1d0a4bd3d5dd128ccd72abd03ee1476e43e6f9c245ee9dac5f1bbb429618a8"
+
+[[files]]
+path = "text.json"
+sha256 = "2050732c794e31b1d7031933e93b1b7dcc0fd963d9bbdf44437114b0250f1315"

@@ -14,6 +14,16 @@ console = Console()
 # Create router
 router = APIRouter()
 
+# Gameplay is reserved for the dedicated contract. It is intentionally absent
+# from dynamic discovery, and generic execution rejects it before consulting
+# the command loader so a plugin cannot accidentally acquire mutation access.
+_RESERVED_GAME_COMMAND = "avenger"
+_GAME_ROUTE_MESSAGE = "Game commands require the dedicated /game/action route"
+
+
+def _is_reserved_game_command(command: str) -> bool:
+    return command.strip().lower() == _RESERVED_GAME_COMMAND
+
 
 # Request/Response Models
 class CommandRequest(BaseModel):
@@ -124,7 +134,14 @@ async def handle_command(request: CommandRequest) -> CommandResponse:
     """
     console.print(f"[cyan]→[/cyan] Command request [dim]{request.request_id}[/dim]: "
                   f"[bold]{request.command}[/bold] from {request.nick} on {request.network}")
-    
+
+    if _is_reserved_game_command(request.command):
+        return CommandResponse(
+            request_id=request.request_id,
+            status="error",
+            message=_GAME_ROUTE_MESSAGE,
+        )
+
     try:
         # Import here to avoid circular dependency
         from api.main import get_command_loader
@@ -199,6 +216,14 @@ async def handle_command_stream(request: CommandRequest):
     
     async def generate_chunks():
         """Generator that yields command response chunks."""
+        if _is_reserved_game_command(request.command):
+            yield json.dumps({
+                "request_id": request.request_id,
+                "status": "error",
+                "message": _GAME_ROUTE_MESSAGE,
+                "streaming": False,
+            }) + "\n"
+            return
         try:
             # Import here to avoid circular dependency
             from api.main import get_command_loader

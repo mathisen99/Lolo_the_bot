@@ -8,20 +8,24 @@ import (
 
 const (
 	rizonOwnerNick       = "Mathisen"
-	nickServStatusAccept = "STATUS Mathisen 3"
+	nickServStatusAccept = "Mathisen 3"
 )
+
+type ownerStatusSender interface {
+	SendMessage(target, message string) error
+}
 
 // OwnerVerifier performs active NickServ STATUS checks for networks where
 // hostmask/nick database identity is not safe enough for owner privileges.
 type OwnerVerifier struct {
-	client  *Client
+	client  ownerStatusSender
 	timeout time.Duration
 
 	mu      sync.Mutex
 	pending chan string
 }
 
-func NewOwnerVerifier(client *Client) *OwnerVerifier {
+func NewOwnerVerifier(client ownerStatusSender) *OwnerVerifier {
 	return &OwnerVerifier{
 		client:  client,
 		timeout: 5 * time.Second,
@@ -49,7 +53,7 @@ func (v *OwnerVerifier) Verify(nick string) (bool, error) {
 
 	select {
 	case msg := <-pending:
-		return strings.TrimSpace(msg) == nickServStatusAccept, nil
+		return msg == nickServStatusAccept, nil
 	case <-time.After(v.timeout):
 		return false, nil
 	}
@@ -69,7 +73,7 @@ func (v *OwnerVerifier) HandleNotice(source, message string) {
 	}
 
 	select {
-	case pending <- strings.TrimSpace(message):
+	case pending <- message:
 	default:
 	}
 }

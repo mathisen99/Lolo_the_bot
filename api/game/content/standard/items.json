@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "profile": "standard",
+  "classification": "original_content",
+  "fictionalized": true,
+  "real_person_content": false,
+  "items": [
+    {
+      "id": "medkit",
+      "name": "Field Patch Kit",
+      "price": 5,
+      "sell_price": 2,
+      "capacity_cost": 1,
+      "recovery_amount": 8,
+      "equipment_slot": null,
+      "combat_damage_bonus": 0,
+      "combat_usable": true
+    },
+    {
+      "id": "pulse_blade",
+      "name": "Resonance Cutter",
+      "price": 8,
+      "sell_price": 4,
+      "capacity_cost": 1,
+      "recovery_amount": 0,
+      "equipment_slot": "weapon",
+      "combat_damage_bonus": 1,
+      "combat_usable": false
+    }
+  ],
+  "equipment_slots": ["weapon", "armor"]
+}

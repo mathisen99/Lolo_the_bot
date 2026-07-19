@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/yourusername/lolo/internal/circuitbreaker"
 	"github.com/yourusername/lolo/internal/database"
+	"github.com/yourusername/lolo/internal/game"
 )
 
 // APIClientInterface defines the interface for API clients (real or mock)
@@ -30,11 +31,14 @@ type APIClientInterface interface {
 
 // APIClient handles communication with the Python API
 type APIClient struct {
-	endpoint       string
-	timeout        time.Duration
-	httpClient     *http.Client
-	inflightReqs   sync.WaitGroup
-	circuitBreaker *circuitbreaker.CircuitBreaker
+	endpoint           string
+	timeout            time.Duration
+	httpClient         *http.Client
+	inflightReqs       sync.WaitGroup
+	circuitBreaker     *circuitbreaker.CircuitBreaker
+	gameCircuitBreaker *circuitbreaker.CircuitBreaker
+	gameMaxRetries     int
+	gameMaxBodyBytes   int64
 }
 
 // HTTPTransportConfig holds the tunable HTTP transport settings for the API
@@ -134,6 +138,8 @@ func NewAPIClient(endpoint string, timeout time.Duration, transportCfg HTTPTrans
 			// Timeout: timeout would kill long-running streams
 			Transport: transport,
 		},
+		gameMaxRetries:   1,
+		gameMaxBodyBytes: 64 * 1024,
 	}
 
 	// Create circuit breaker with health check function
@@ -142,6 +148,15 @@ func NewAPIClient(endpoint string, timeout time.Duration, transportCfg HTTPTrans
 		Timeout:   30 * time.Second, // Wait 30 seconds before retry
 		HealthCheckFn: func(ctx context.Context) error {
 			_, err := client.CheckHealth(ctx)
+			return err
+		},
+	})
+	// Game failures are isolated from generic command/mention availability.
+	client.gameCircuitBreaker = circuitbreaker.New(circuitbreaker.Config{
+		Threshold: 5,
+		Timeout:   30 * time.Second,
+		HealthCheckFn: func(ctx context.Context) error {
+			_, err := client.checkGameHealthOnce(ctx, uuid.NewString(), 5*time.Second)
 			return err
 		},
 	})
@@ -918,4 +933,196 @@ func (c *APIClient) doStreamRequest(ctx context.Context, endpoint string, payloa
 	// If we get here without seeing streaming=false, it's an error
 	fmt.Printf("[API Client] Streaming request [%s] ended without final chunk\n", requestID)
 	return fmt.Errorf("streaming response ended without final chunk")
+}
+
+// ConfigureGameTransport applies bounded retry/read settings to only the
+// dedicated game path. It does not alter generic command or streaming calls.
+func (c *APIClient) ConfigureGameTransport(maxRetries int, maxBodyBytes int64) {
+	if maxRetries >= 0 {
+		c.gameMaxRetries = maxRetries
+	}
+	if maxBodyBytes > 0 {
+		c.gameMaxBodyBytes = maxBodyBytes
+	}
+}
+
+// SendGameAction posts only to /game/action. The caller owns the Request ID;
+// retries reuse the exact serialized body and X-Request-ID value.
+func (c *APIClient) SendGameAction(ctx context.Context, request game.ActionRequest, timeout time.Duration) (*game.ActionResponse, error) {
+	limits := game.BoundaryLimits{MaxInputBytes: 4096, MaxMenuLines: 20, MaxChoicesPerPage: 12, MaxNarrationBytes: 2000, ActionTimeoutSeconds: int(timeout.Seconds())}
+	if err := request.Validate(request.RequestID, limits); err != nil {
+		return nil, err
+	}
+	var response game.ActionResponse
+	err := c.gameCircuitBreaker.Call(ctx, func() error {
+		if err := c.doBoundedGameRequest(ctx, http.MethodPost, "/game/action", request, request.RequestID, timeout, &response); err != nil {
+			return err
+		}
+		if err := response.Validate(request.RequestID, limits); err != nil {
+			return fmt.Errorf("%w: %v", game.ErrResponseInvalid, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("game action request: %w", err)
+	}
+	return &response, nil
+}
+
+// SendGameLifecycle posts only to /game/lifecycle with caller-owned request
+// correlation and the same bounded, non-streaming transport policy.
+func (c *APIClient) SendGameLifecycle(ctx context.Context, request game.LifecycleRequest, timeout time.Duration) (*game.LifecycleResponse, error) {
+	if err := request.Validate(request.RequestID); err != nil {
+		return nil, err
+	}
+	var response game.LifecycleResponse
+	err := c.gameCircuitBreaker.Call(ctx, func() error {
+		if err := c.doBoundedGameRequest(ctx, http.MethodPost, "/game/lifecycle", request, request.RequestID, timeout, &response); err != nil {
+			return err
+		}
+		if err := response.Validate(request.RequestID); err != nil {
+			return fmt.Errorf("%w: %v", game.ErrResponseInvalid, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("game lifecycle request: %w", err)
+	}
+	return &response, nil
+}
+
+// CheckGameHealth queries only /game/health and propagates a caller-created
+// Request ID in the header for correlation.
+func (c *APIClient) CheckGameHealth(ctx context.Context, requestID string, timeout time.Duration) (*game.HealthStatus, error) {
+	if _, err := uuid.Parse(requestID); err != nil {
+		return nil, fmt.Errorf("invalid game health request ID: %w", err)
+	}
+	var response *game.HealthStatus
+	err := c.gameCircuitBreaker.Call(ctx, func() error {
+		var callErr error
+		response, callErr = c.checkGameHealthOnce(ctx, requestID, timeout)
+		return callErr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("game health request: %w", err)
+	}
+	return response, nil
+}
+
+func (c *APIClient) checkGameHealthOnce(ctx context.Context, requestID string, timeout time.Duration) (*game.HealthStatus, error) {
+	var response game.HealthStatus
+	if err := c.doBoundedGameRequest(ctx, http.MethodGet, "/game/health", nil, requestID, timeout, &response); err != nil {
+		return nil, err
+	}
+	if err := response.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %v", game.ErrResponseInvalid, err)
+	}
+	return &response, nil
+}
+
+// TransferUnregisteredIdentity implements the game lifecycle callback without
+// exposing generic API methods to the lifecycle manager.
+func (c *APIClient) TransferUnregisteredIdentity(ctx context.Context, networkID, oldIdentity, newIdentity string) error {
+	requestID := uuid.NewString()
+	request := game.LifecycleRequest{
+		RequestID: requestID, NetworkID: networkID,
+		Operation:             game.OperationTransferIdentity,
+		Identity:              game.SessionIdentity{Kind: game.IdentityUnregistered, Value: oldIdentity},
+		NewIdentity:           &game.SessionIdentity{Kind: game.IdentityUnregistered, Value: newIdentity},
+		ConfigurationRevision: 1,
+	}
+	response, err := c.SendGameLifecycle(ctx, request, 10*time.Second)
+	if err != nil {
+		return err
+	}
+	if response.Status != "success" {
+		return game.ErrIdentityAmbiguous
+	}
+	return nil
+}
+
+type gameHTTPStatusError struct{ status int }
+
+func (e gameHTTPStatusError) Error() string {
+	return fmt.Sprintf("game API returned status %d", e.status)
+}
+
+func (c *APIClient) doBoundedGameRequest(ctx context.Context, method, path string, payload interface{}, requestID string, timeout time.Duration, destination interface{}) error {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	var body []byte
+	var err error
+	if payload != nil {
+		body, err = json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshal game request: %w", err)
+		}
+	}
+	maxBody := c.gameMaxBodyBytes
+	if maxBody <= 0 {
+		maxBody = 64 * 1024
+	}
+	var lastErr error
+	for attempt := 0; attempt <= c.gameMaxRetries; attempt++ {
+		if attempt > 0 {
+			delay := time.Duration(100*(1<<(attempt-1))) * time.Millisecond
+			select {
+			case <-time.After(delay):
+			case <-deadlineCtx.Done():
+				return deadlineCtx.Err()
+			}
+		}
+		var reader io.Reader
+		if body != nil {
+			reader = bytes.NewReader(body)
+		}
+		req, err := http.NewRequestWithContext(deadlineCtx, method, c.endpoint+path, reader)
+		if err != nil {
+			return fmt.Errorf("create game request: %w", err)
+		}
+		req.Header.Set("X-Request-ID", requestID)
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		c.inflightReqs.Add(1)
+		resp, err := c.httpClient.Do(req)
+		c.inflightReqs.Done()
+		if err != nil {
+			lastErr = err
+			if deadlineCtx.Err() != nil {
+				return deadlineCtx.Err()
+			}
+			continue
+		}
+		limited := io.LimitReader(resp.Body, maxBody+1)
+		responseBody, readErr := io.ReadAll(limited)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			lastErr = readErr
+			continue
+		}
+		if int64(len(responseBody)) > maxBody {
+			return fmt.Errorf("game response exceeds %d bytes", maxBody)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			lastErr = gameHTTPStatusError{status: resp.StatusCode}
+			if resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
+				return lastErr
+			}
+			continue
+		}
+		if err := json.Unmarshal(responseBody, destination); err != nil {
+			return fmt.Errorf("decode game response: %w", err)
+		}
+		return nil
+	}
+	return lastErr
+}
+
+func (c *APIClient) GetGameCircuitBreakerState() circuitbreaker.State {
+	return c.gameCircuitBreaker.GetState()
 }

@@ -1,0 +1,87 @@
+# Deterministic game settings. This file intentionally contains no API keys,
+# passwords, identity secrets, signing keys, or provider credentials.
+[game]
+enabled = true
+command = "avenger"
+public_title = "Harbor Sentinel"
+pm_enabled = true
+pm_reject_mode = "help"
+channel_play_enabled = false
+channel_handoff_notice = true
+channel_allowlist = []
+database_path = "data/game.db"
+database_busy_timeout_ms = 5000
+database_pool_size = 4
+action_timeout_seconds = 10
+recovery_timeout_seconds = 30
+menu_context_ttl_seconds = 900
+reset_confirmation_ttl_seconds = 300
+max_continuations_per_context = 12
+max_continuation_identities = 10000
+max_input_bytes = 512
+max_pending_actions_per_player = 2
+action_cooldown_ms = 750
+action_burst = 4
+action_window_seconds = 10
+max_menu_lines = 4
+max_choices_per_page = 10
+page_size = 10
+max_narration_bytes = 600
+standard_content_profile = "standard"
+adult_content_enabled = false
+real_person_content_enabled = false
+ai_enhancement_enabled = false
+milestone_announcements_enabled = false
+save_retention_days = 180
+save_expiry_warning_days = 30
+action_record_retention_days = 90
+reset_archive_retention_days = 30
+recovery_snapshot_retention_days = 30
+audit_retention_days = 365
+maintenance_interval_seconds = 86400
+maintenance_batch_size = 100
+backup_enabled = true
+backup_interval_seconds = 86400
+backup_directory = "data/backups/game"
+backup_retention_count = 7
+config_revision = 1
+content_policy_revision = 1
+
+[game.campaign]
+starting_location = "haven"
+starting_health = 20
+starting_max_health = 20
+starting_currency = 5
+starting_inventory = [
+  { item_id = "medkit", quantity = 1 },
+]
+starting_level = 1
+starting_experience = 0
+starting_day = 1
+starting_countdown = 6
+recovery_per_advance = 2
+recovery_action_amount = 8
+maximum_health = 1000
+maximum_currency = 1000000
+maximum_item_quantity = 99
+inventory_capacity = 20
+maximum_level = 100
+maximum_experience = 1000000
+post_game_choices = ["status", "credits", "reset"]
+
+[game.milestones]
+eligible_types = ["campaign_completed"]
+destinations = []
+
+[game.content_policy]
+sexual_content = "exclude"
+drug_references = "non_instructional_only"
+violence_intensity = "non_graphic"
+abusive_language = "exclude_targeted"
+real_person_content = "exclude"
+
+[game.rate_limits.ai]
+enabled = true
+requests = 2
+window_seconds = 600
+burst = 1

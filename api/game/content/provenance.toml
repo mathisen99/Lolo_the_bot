@@ -1,0 +1,113 @@
+schema_version = 1
+scope = "standard-profile shipped files"
+upstream_title = "FSF Avenger"
+upstream_source = "TEMP-GAME.pas"
+upstream_copyright_notice = "© 2026 Britney Lozza / CerberusGames.ca"
+upstream_stated_license = "GPLv3"
+reuse_strategy = "mechanics_only_independent_fictionalization"
+license_boundary = "Lolo's root MIT license applies only to Lolo's original code and content. It does not relicense upstream or GPL-derived material; separately approved GPL-derived material remains under its applicable GPL terms and source-availability obligations."
+
+[[records]]
+path = "standard/manifest.toml"
+classification = "original_content"
+origin = "independently authored for Lolo"
+author = "Lolo project contributors"
+copyright_notice = "Copyright (c) 2025 Mathisen"
+license = "MIT"
+license_evidence = "repository root LICENSE"
+mechanics_reference = "approved mechanics specification in the avenger-irc-game spec"
+adaptation_status = "independent_fictionalization"
+real_person_content = false
+product_approved = true
+provenance_approved = true
+notes = "Immutable file inventory only; no upstream expressive material reused."
+
+[[records]]
+path = "standard/locations.json"
+classification = "original_content"
+origin = "independently authored for Lolo"
+author = "Lolo project contributors"
+copyright_notice = "Copyright (c) 2025 Mathisen"
+license = "MIT"
+license_evidence = "repository root LICENSE"
+mechanics_reference = "hub travel and prerequisite mechanics only"
+adaptation_status = "independent_fictionalization"
+real_person_content = false
+product_approved = true
+provenance_approved = true
+notes = "Original fictional places and descriptions; no upstream expressive material reused."
+
+[[records]]
+path = "standard/encounters.json"
+classification = "original_content"
+origin = "independently authored for Lolo"
+author = "Lolo project contributors"
+copyright_notice = "Copyright (c) 2025 Mathisen"
+license = "MIT"
+license_evidence = "repository root LICENSE"
+mechanics_reference = "bounded combat mechanics only"
+adaptation_status = "independent_fictionalization"
+real_person_content = false
+product_approved = true
+provenance_approved = true
+notes = "Original fictional encounter; non-graphic and not attributable to a real person."
+
+[[records]]
+path = "standard/items.json"
+classification = "original_content"
+origin = "independently authored for Lolo"
+author = "Lolo project contributors"
+copyright_notice = "Copyright (c) 2025 Mathisen"
+license = "MIT"
+license_evidence = "repository root LICENSE"
+mechanics_reference = "inventory, recovery, commerce, and equipment mechanics only"
+adaptation_status = "independent_fictionalization"
+real_person_content = false
+product_approved = true
+provenance_approved = true
+notes = "Original fictional item presentation; no upstream expressive material reused."
+
+[[records]]
+path = "standard/quests.json"
+classification = "original_content"
+origin = "independently authored for Lolo"
+author = "Lolo project contributors"
+copyright_notice = "Copyright (c) 2025 Mathisen"
+license = "MIT"
+license_evidence = "repository root LICENSE"
+mechanics_reference = "clue gates, progression, countdown events, and finale mechanics only"
+adaptation_status = "independent_fictionalization"
+real_person_content = false
+product_approved = true
+provenance_approved = true
+notes = "Original rescue campaign events; no upstream plot, character, or dialogue reused."
+
+[[records]]
+path = "standard/random_tables.json"
+classification = "original_content"
+origin = "independently authored for Lolo"
+author = "Lolo project contributors"
+copyright_notice = "Copyright (c) 2025 Mathisen"
+license = "MIT"
+license_evidence = "repository root LICENSE"
+mechanics_reference = "bounded random outcome mechanics only"
+adaptation_status = "independent_fictionalization"
+real_person_content = false
+product_approved = true
+provenance_approved = true
+notes = "Declarative outcomes contain no executable code."
+
+[[records]]
+path = "standard/text.json"
+classification = "original_content"
+origin = "independently authored for Lolo"
+author = "Lolo project contributors"
+copyright_notice = "Copyright (c) 2025 Mathisen"
+license = "MIT"
+license_evidence = "repository root LICENSE"
+mechanics_reference = "campaign-state facts only"
+adaptation_status = "independent_fictionalization"
+real_person_content = false
+product_approved = true
+provenance_approved = true
+notes = "Wholly original fictional prose; no copying, translation, transcription, or close paraphrase of upstream expression."

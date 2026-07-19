@@ -14,6 +14,7 @@ type Config struct {
 	API                APIConfig                `toml:"api"`
 	Images             ImagesConfig             `toml:"images"`
 	PhoneNotifications PhoneNotificationsConfig `toml:"phone_notifications"`
+	Game               GameConfig               `toml:"game"`
 }
 
 const DefaultNetworkID = "libera"
@@ -269,4 +270,127 @@ func (c *LimitsConfig) GetMentionHistoryDepth() int {
 		return 20
 	}
 	return c.MentionHistoryDepth
+}
+
+// DefaultGameDatabasePath is the Python-owned, dedicated game database.
+const DefaultGameDatabasePath = "data/game.db"
+
+// GameConfig contains only game routing, policy, and boundary settings. Secrets
+// are deliberately absent: provider/API credentials remain environment-only.
+type GameConfig struct {
+	Enabled                       bool                `toml:"enabled"`
+	Command                       string              `toml:"command"`
+	PublicTitle                   string              `toml:"public_title"`
+	PMEnabled                     bool                `toml:"pm_enabled"`
+	PMRejectMode                  string              `toml:"pm_reject_mode"`
+	ChannelPlayEnabled            bool                `toml:"channel_play_enabled"`
+	ChannelHandoffNotice          bool                `toml:"channel_handoff_notice"`
+	ChannelAllowlist              []GameChannel       `toml:"channel_allowlist"`
+	DatabasePath                  string              `toml:"database_path"`
+	DatabaseBusyTimeoutMS         int                 `toml:"database_busy_timeout_ms"`
+	DatabasePoolSize              int                 `toml:"database_pool_size"`
+	ActionTimeoutSeconds          int                 `toml:"action_timeout_seconds"`
+	RecoveryTimeoutSeconds        int                 `toml:"recovery_timeout_seconds"`
+	MenuContextTTLSeconds         int                 `toml:"menu_context_ttl_seconds"`
+	MaxContinuationsPerContext    int                 `toml:"max_continuations_per_context"`
+	MaxContinuationIdentities     int                 `toml:"max_continuation_identities"`
+	MaxInputBytes                 int                 `toml:"max_input_bytes"`
+	MaxPendingActionsPerPlayer    int                 `toml:"max_pending_actions_per_player"`
+	ActionCooldownMS              int                 `toml:"action_cooldown_ms"`
+	ActionBurst                   int                 `toml:"action_burst"`
+	ActionWindowSeconds           int                 `toml:"action_window_seconds"`
+	MaxMenuLines                  int                 `toml:"max_menu_lines"`
+	MaxChoicesPerPage             int                 `toml:"max_choices_per_page"`
+	PageSize                      int                 `toml:"page_size"`
+	MaxNarrationBytes             int                 `toml:"max_narration_bytes"`
+	StandardContentProfile        string              `toml:"standard_content_profile"`
+	AdultContentEnabled           bool                `toml:"adult_content_enabled"`
+	RealPersonContentEnabled      bool                `toml:"real_person_content_enabled"`
+	AIEnhancementEnabled          bool                `toml:"ai_enhancement_enabled"`
+	MilestoneAnnouncementsEnabled bool                `toml:"milestone_announcements_enabled"`
+	SaveRetentionDays             int                 `toml:"save_retention_days"`
+	SaveExpiryWarningDays         int                 `toml:"save_expiry_warning_days"`
+	ActionRecordRetentionDays     int                 `toml:"action_record_retention_days"`
+	ResetArchiveRetentionDays     int                 `toml:"reset_archive_retention_days"`
+	RecoverySnapshotRetentionDays int                 `toml:"recovery_snapshot_retention_days"`
+	AuditRetentionDays            int                 `toml:"audit_retention_days"`
+	MaintenanceIntervalSeconds    int                 `toml:"maintenance_interval_seconds"`
+	BackupEnabled                 bool                `toml:"backup_enabled"`
+	BackupIntervalSeconds         int                 `toml:"backup_interval_seconds"`
+	BackupDirectory               string              `toml:"backup_directory"`
+	BackupRetentionCount          int                 `toml:"backup_retention_count"`
+	ConfigRevision                int64               `toml:"config_revision"`
+	ContentPolicyRevision         int64               `toml:"content_policy_revision"`
+	Milestones                    GameMilestoneConfig `toml:"milestones"`
+	ContentPolicy                 GameContentPolicy   `toml:"content_policy"`
+	RateLimits                    GameRateLimits      `toml:"rate_limits"`
+	validationErrors              []string
+}
+
+type GameChannel struct {
+	Network string `toml:"network"`
+	Channel string `toml:"channel"`
+}
+
+type GameMilestoneConfig struct {
+	EligibleTypes []string      `toml:"eligible_types"`
+	Destinations  []GameChannel `toml:"destinations"`
+}
+
+type GameContentPolicy struct {
+	SexualContent     string `toml:"sexual_content"`
+	DrugReferences    string `toml:"drug_references"`
+	ViolenceIntensity string `toml:"violence_intensity"`
+	AbusiveLanguage   string `toml:"abusive_language"`
+	RealPersonContent string `toml:"real_person_content"`
+}
+
+type GameRateLimits struct {
+	AI GameAIRateLimit `toml:"ai"`
+}
+
+type GameAIRateLimit struct {
+	Enabled       bool `toml:"enabled"`
+	Requests      int  `toml:"requests"`
+	WindowSeconds int  `toml:"window_seconds"`
+	Burst         int  `toml:"burst"`
+}
+
+// GameBoundaryLimits are duplicated on both sides of the HTTP boundary. The
+// effective values are always the stricter (smaller) positive values.
+type GameBoundaryLimits struct {
+	MaxInputBytes        int
+	MaxMenuLines         int
+	MaxChoicesPerPage    int
+	MaxNarrationBytes    int
+	ActionTimeoutSeconds int
+}
+
+func (l GameBoundaryLimits) Reconcile(other GameBoundaryLimits) GameBoundaryLimits {
+	return GameBoundaryLimits{
+		MaxInputBytes:        minPositive(l.MaxInputBytes, other.MaxInputBytes),
+		MaxMenuLines:         minPositive(l.MaxMenuLines, other.MaxMenuLines),
+		MaxChoicesPerPage:    minPositive(l.MaxChoicesPerPage, other.MaxChoicesPerPage),
+		MaxNarrationBytes:    minPositive(l.MaxNarrationBytes, other.MaxNarrationBytes),
+		ActionTimeoutSeconds: minPositive(l.ActionTimeoutSeconds, other.ActionTimeoutSeconds),
+	}
+}
+
+func minPositive(a, b int) int {
+	if a <= 0 {
+		return b
+	}
+	if b <= 0 || a < b {
+		return a
+	}
+	return b
+}
+
+func (c GameConfig) BoundaryLimits() GameBoundaryLimits {
+	return GameBoundaryLimits{c.MaxInputBytes, c.MaxMenuLines, c.MaxChoicesPerPage, c.MaxNarrationBytes, c.ActionTimeoutSeconds}
+}
+
+// ValidationErrors returns a copy of non-fatal, game-only configuration errors.
+func (c GameConfig) ValidationErrors() []string {
+	return append([]string(nil), c.validationErrors...)
 }

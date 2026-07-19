@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "profile": "standard",
+  "classification": "original_content",
+  "fictionalized": true,
+  "real_person_content": false,
+  "locations": [
+    {
+      "id": "haven",
+      "name": "Lantern Haven",
+      "description_text_id": "location.haven",
+      "recovery_allowed": false,
+      "commerce_allowed": true,
+      "investigation_id": null,
+      "edges": [
+        {"destination_id": "docks", "gate": {}},
+        {"destination_id": "clinic", "gate": {}},
+        {"destination_id": "archive", "gate": {"required_flags": ["clue_dock_signal"]}},
+        {"destination_id": "spire", "gate": {"required_flags": ["clue_dock_signal", "clue_archive_cipher"]}}
+      ]
+    },
+    {
+      "id": "docks",
+      "name": "Tidemark Piers",
+      "description_text_id": "location.docks",
+      "recovery_allowed": false,
+      "commerce_allowed": false,
+      "investigation_id": "search_docks",
+      "edges": [{"destination_id": "haven", "gate": {}}]
+    },
+    {
+      "id": "clinic",
+      "name": "Menders' Loft",
+      "description_text_id": "location.clinic",
+      "recovery_allowed": true,
+      "commerce_allowed": false,
+      "investigation_id": null,
+      "edges": [{"destination_id": "haven", "gate": {}}]
+    },
+    {
+      "id": "archive",
+      "name": "Signal Archive",
+      "description_text_id": "location.archive",
+      "recovery_allowed": false,
+      "commerce_allowed": false,
+      "investigation_id": "decode_archive",
+      "edges": [{"destination_id": "haven", "gate": {}}]
+    },
+    {
+      "id": "spire",
+      "name": "Stormglass Spire",
+      "description_text_id": "location.spire",
+      "recovery_allowed": false,
+      "commerce_allowed": false,
+      "investigation_id": null,
+      "edges": [{"destination_id": "haven", "gate": {}}]
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "profile": "standard",
+  "classification": "original_content",
+  "fictionalized": true,
+  "real_person_content": false,
+  "prohibited_categories": [],
+  "entries": [
+    {"id": "empty", "text": ""},
+    {"id": "location.haven", "text": "Lantern Haven drifts above the cloud sea, sheltering navigators who search for a missing survey crew."},
+    {"id": "location.docks", "text": "The Tidemark Piers hold silent skiffs and a trail of blue signal glass."},
+    {"id": "location.clinic", "text": "The Menders' Loft offers quiet rest and practical field care."},
+    {"id": "location.archive", "text": "The Signal Archive stores weather songs as rings of light."},
+    {"id": "location.spire", "text": "Stormglass Spire gathers the false beacon that keeps the survey crew's skiff circling in the clouds."},
+    {"id": "quest.search_docks", "text": "You align the signal-glass fragments and reveal a route toward the archive."},
+    {"id": "quest.decode_archive", "text": "You decode the weather-song and learn how to safely silence the false beacon."},
+    {"id": "event.day_two", "text": "A distant beacon pulse warns that the search window is narrowing."},
+    {"id": "travel.quiet", "text": "The cloudway is calm."},
+    {"id": "travel.supply_cache", "text": "A tethered emergency case contains a field patch kit."},
+    {"id": "travel.scrap_warden", "text": "A clockwork scrap warden blocks the cloudway and demands a harmless test of skill."},
+    {"id": "reward.no_bonus", "text": "The clue is the useful discovery."},
+    {"id": "reward.salvage", "text": "You return loose signal fittings to the Haven exchange for three credits."},
+    {"id": "combat.player_miss", "text": "Your careful strike glances away."},
+    {"id": "combat.player_hit", "text": "Your strike disrupts the warden's balance."},
+    {"id": "combat.enemy_miss", "text": "The warden's padded arm sweeps past."},
+    {"id": "combat.enemy_hit", "text": "The warden's padded arm knocks you off balance."},
+    {"id": "combat.escape_blocked", "text": "A closing safety rail blocks the exit for this turn."},
+    {"id": "combat.escaped", "text": "You slip beyond the warden's marked practice ring."},
+    {"id": "combat.warden_reward", "text": "The calmed warden opens its recovered-supplies locker."},
+    {"id": "final.victory", "text": "The false beacon fades, and the missing survey crew guides its skiff home to Lantern Haven."},
+    {"id": "final.setback", "text": "The beacon pattern resets; you can regroup and attempt the sequence again."}
+  ]
+}

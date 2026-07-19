@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "profile": "standard",
+  "classification": "original_content",
+  "fictionalized": true,
+  "real_person_content": false,
+  "tables": [
+    {
+      "id": "travel_encounters",
+      "version": "1",
+      "outcomes": [
+        {"id": "quiet", "text_id": "travel.quiet", "value": 0},
+        {"id": "supply_cache", "text_id": "travel.supply_cache", "item_id": "medkit", "item_quantity": 1, "grant_id": "reward:travel_supply_cache"},
+        {"id": "dock_raider", "text_id": "travel.scrap_warden", "encounter_id": "dock_raider"}
+      ]
+    },
+    {
+      "id": "investigation_rewards",
+      "version": "1",
+      "outcomes": [
+        {"id": "no_bonus", "text_id": "reward.no_bonus"},
+        {"id": "salvage", "text_id": "reward.salvage", "currency": 3, "grant_id": "reward:docks_salvage"}
+      ]
+    },
+    {
+      "id": "combat_player_hit",
+      "version": "1",
+      "outcomes": [
+        {"id": "miss", "text_id": "combat.player_miss", "value": 0},
+        {"id": "hit", "text_id": "combat.player_hit", "value": 1}
+      ]
+    },
+    {
+      "id": "combat_player_damage",
+      "version": "1",
+      "outcomes": [
+        {"id": "damage_2", "text_id": "empty", "value": 2},
+        {"id": "damage_3", "text_id": "empty", "value": 3},
+        {"id": "damage_4", "text_id": "empty", "value": 4}
+      ]
+    },
+    {
+      "id": "combat_enemy_hit",
+      "version": "1",
+      "outcomes": [
+        {"id": "miss", "text_id": "combat.enemy_miss", "value": 0},
+        {"id": "hit", "text_id": "combat.enemy_hit", "value": 1}
+      ]
+    },
+    {
+      "id": "combat_enemy_damage",
+      "version": "1",
+      "outcomes": [
+        {"id": "damage_1", "text_id": "empty", "value": 1},
+        {"id": "damage_2", "text_id": "empty", "value": 2},
+        {"id": "damage_3", "text_id": "empty", "value": 3}
+      ]
+    },
+    {
+      "id": "combat_escape",
+      "version": "1",
+      "outcomes": [
+        {"id": "blocked", "text_id": "combat.escape_blocked", "value": 0},
+        {"id": "escaped", "text_id": "combat.escaped", "value": 1}
+      ]
+    },
+    {
+      "id": "dock_raider_rewards",
+      "version": "1",
+      "outcomes": [
+        {"id": "warden_stilled", "text_id": "combat.warden_reward", "currency": 4, "experience": 10, "grants_flag": "dock_raider_defeated", "grant_id": "encounter:dock_raider:v1:victory"}
+      ]
+    },
+    {
+      "id": "final_encounter",
+      "version": "1",
+      "outcomes": [
+        {"id": "victory", "text_id": "final.victory", "grant_id": "final_victory", "completes_campaign": true},
+        {"id": "setback", "text_id": "final.setback"}
+      ]
+    }
+  ]
+}

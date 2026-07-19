@@ -14,6 +14,7 @@ import (
 	"github.com/yourusername/lolo/internal/config"
 	"github.com/yourusername/lolo/internal/database"
 	"github.com/yourusername/lolo/internal/errors"
+	"github.com/yourusername/lolo/internal/game"
 	"github.com/yourusername/lolo/internal/handler"
 	"github.com/yourusername/lolo/internal/irc"
 	"github.com/yourusername/lolo/internal/maintenance"
@@ -152,11 +153,13 @@ func main() {
 
 	// Create API client (or mock client if in test mode)
 	var apiClient handler.APIClientInterface
+	var gameActionClient game.ActionClient
+	var gameTransferer game.UnregisteredIdentityTransferer
 	if cfg.Bot.TestMode {
 		logger.Info("Test mode enabled - using mock API client")
 		apiClient = mockapi.New()
 	} else {
-		apiClient = handler.NewAPIClient(
+		realAPIClient := handler.NewAPIClient(
 			cfg.Bot.APIEndpoint,
 			time.Duration(cfg.Bot.APITimeout)*time.Second,
 			handler.HTTPTransportConfig{
@@ -169,6 +172,10 @@ func main() {
 				ResponseHeaderTimeout: cfg.API.HTTP.GetResponseHeaderTimeoutDuration(),
 			},
 		)
+		realAPIClient.ConfigureGameTransport(cfg.API.MaxRetries, 64*1024)
+		apiClient = realAPIClient
+		gameActionClient = realAPIClient
+		gameTransferer = realAPIClient
 	}
 
 	// Create API health checker adapter for info commands
@@ -219,6 +226,37 @@ func main() {
 
 		registerCoreCommands(registry, dispatcher, db, userMgr, logger, startTime, cfg.Bot.APIEndpoint, apiHealthChecker, connManager.GetClient())
 
+		verifyCommand, _ := registry.Get("verify")
+		caseMappings := game.NewCaseMappingStore()
+		continuations := game.NewContinuationRegistry(game.ContinuationRegistryConfig{
+			Capacity:    cfg.Game.MaxContinuationIdentities,
+			MaxBindings: cfg.Game.MaxContinuationsPerContext,
+			MaxTTL:      time.Duration(cfg.Game.MenuContextTTLSeconds) * time.Second,
+		})
+		identityResolver := game.NewIdentityResolver(userMgr, caseMappings, game.RegisteredIdentityPolicyFunc(
+			func(_ context.Context, _ string, nick, hostmask string, registeredUser *database.User) (bool, error) {
+				level, registered, err := dispatcher.ResolvePermission(nick, hostmask)
+				if err != nil || !registered {
+					return false, err
+				}
+				// Requiring the resolved level to equal the selected database row
+				// fails closed when network policy cannot establish that row.
+				return level == registeredUser.Level, nil
+			},
+		))
+		var gamePMHandler game.PMGameHandler
+		if gameActionClient != nil {
+			gamePMHandler = game.NewActionHandler(gameActionClient, continuations, game.ActionHandlerConfigFrom(cfg.Game))
+		}
+		gameRouter := game.NewRouter(
+			game.RouterConfigFrom(networkID, cfg.Bot.CommandPrefix, cfg.Game),
+			game.RouterDependencies{
+				Users: userMgr, PMState: db, Verify: verifyCommand, Game: gamePMHandler,
+				Identities: identityResolver, Continuations: continuations,
+			},
+		)
+		connManager.SetGameLifecycleHandler(game.NewLifecycleManager(caseMappings, continuations, gameTransferer))
+
 		msgSplitter := splitter.New(netCfg.MaxMessageLength)
 		messageHandler := handler.NewMessageHandler(&handler.MessageHandlerConfig{
 			Network:                  networkID,
@@ -236,6 +274,7 @@ func main() {
 			PhoneNotificationsURL:    cfg.PhoneNotifications.URL,
 			MentionAggregateDelay:    cfg.Limits.GetMentionAggregateDelayDuration(),
 			MentionHistoryDepth:      cfg.Limits.GetMentionHistoryDepth(),
+			GameRouter:               gameRouter,
 		})
 
 		channelTracker := irc.NewChannelTrackerForNetwork(db, logger, networkID, netCfg.Nickname)

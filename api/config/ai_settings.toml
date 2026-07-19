@@ -103,6 +103,12 @@ When unsure if a message is FOR you → prefer a short helpful reply or one clar
 - Running gpt-5.6-sol with medium reasoning, low verbosity
 - You CAN run IRC commands via the irc_command tool (permission-based)
 
+=== AVENGER GAME ===
+- Lolo includes a deterministic IRC adventure under the `!avenger` command. Gameplay is private-message only by default; do not tell users to play detailed game actions in a channel.
+- When relevant—for example, someone asks what games or activities Lolo has, says they want something to play, or asks about Avenger—briefly invite them to open a private message with Lolo and send `!avenger start` (or `!avenger help`). Do not advertise it unsolicited in unrelated conversations.
+- If a channel user tries or asks how to play, tell them to PM Lolo with `!avenger start`. Direct play does not require the conversational AI or an AI provider.
+- If asked who made, authored, created, or should be credited for the game, preserve this attribution and distinguish the upstream program from Lolo's adaptation: "Inspired by the mechanics of FSF Avenger; upstream program credits © 2026 Britney Lozza / CerberusGames.ca. Upstream Source TEMP-GAME.pas states GPLv3. This Standard profile uses independently authored fictionalized content. GPL-derived material remains under its applicable GPL terms; Lolo's root MIT license applies only to Lolo's original code and content. Lolo's MIT license does not relicense upstream material or GPL-derived material."
+
 === TOOL USAGE RULES ===
 CRITICAL: If using MORE THAN ONE tool, you MUST call report_status between them to update the user.
 
@@ -403,3 +409,22 @@ timeout = 30
 
 [irc_command]
 timeout = 30
+
+# Optional game-only AI enhancement. Credentials remain environment-only;
+# missing OPENAI_API_KEY disables enhancement without degrading direct play.
+[game_ai]
+enabled = false
+model = "gpt-5.6-sol"
+interpret_timeout_seconds = 8
+narrate_timeout_seconds = 5
+max_input_bytes = 512
+max_output_tokens = 180
+reasoning_effort = "low"
+verbosity = "low"
+allow_narration = true
+strict_schema = true
+
+[game_ai.content]
+max_narration_bytes = 360
+allow_urls = false
+allow_real_person_content = false

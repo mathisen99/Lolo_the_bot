@@ -27,6 +27,16 @@ type CTCPResponseHandler func(source, ctcpType, response string)
 // JoinHandler is a callback function for handling JOIN events (for reminders, etc.)
 type JoinHandler func(nick, channel string)
 
+// GameLifecycleHandler receives only observed transport lifecycle events. It
+// cannot send IRC commands and therefore cannot introduce WHOIS on these paths.
+type GameLifecycleHandler interface {
+	OnISupport(networkID string, params []string)
+	OnObservedNickChange(networkID, oldNick, newNick string)
+	OnUserQuit(networkID, nick string)
+	OnConnectionClosed(networkID string)
+	OnConnectionEstablished(networkID string)
+}
+
 // ChannelUserTracker interface for tracking channel users
 type ChannelUserTracker interface {
 	OnNamesReply(channel string, names []string)
@@ -69,6 +79,7 @@ type ConnectionManager struct {
 	ctcpResponseHandler CTCPResponseHandler // Callback for handling CTCP responses
 	channelUserTracker  ChannelUserTracker  // Tracker for channel user state
 	joinHandler         JoinHandler         // Callback for handling JOIN events (reminders)
+	gameLifecycle       GameLifecycleHandler
 }
 
 // NewConnectionManager creates a new connection manager
@@ -122,6 +133,10 @@ func NewConnectionManagerForNetwork(network string, cfg *config.Config, logger o
 // Connect establishes connection and performs authentication
 // Note: The event loop (Run) must be started BEFORE calling this method
 func (cm *ConnectionManager) Connect() error {
+	// Restart/reconnect never reconstructs bare continuation state.
+	if cm.gameLifecycle != nil {
+		cm.gameLifecycle.OnConnectionEstablished(cm.network)
+	}
 	// Reset registration state for reconnection
 	cm.registered = false
 
@@ -183,6 +198,9 @@ func (cm *ConnectionManager) StopReconnectionManager() {
 
 // Disconnect closes the connection
 func (cm *ConnectionManager) Disconnect() error {
+	if cm.gameLifecycle != nil {
+		cm.gameLifecycle.OnConnectionClosed(cm.network)
+	}
 	return cm.client.Disconnect()
 }
 
@@ -225,8 +243,11 @@ func (cm *ConnectionManager) handleMessage(client *irc.Client, msg *irc.Message)
 		cm.logger.Info("Server: %s", msg.Trailing())
 
 	case "005": // RPL_ISUPPORT
-		// Server capabilities
+		// Server capabilities, including network-specific nickname casemapping.
 		cm.logger.Info("Server capabilities: %v", msg.Params)
+		if cm.gameLifecycle != nil {
+			cm.gameLifecycle.OnISupport(cm.network, msg.Params)
+		}
 
 	case "376", "422": // RPL_ENDOFMOTD, ERR_NOMOTD
 		// End of MOTD - connection is fully established
@@ -285,6 +306,9 @@ func (cm *ConnectionManager) handleMessage(client *irc.Client, msg *irc.Message)
 
 	case "ERROR":
 		cm.logger.Error("IRC Error: %s", msg.Trailing())
+		if cm.gameLifecycle != nil {
+			cm.gameLifecycle.OnConnectionClosed(cm.network)
+		}
 
 	default:
 		// Handle numeric responses (WHOIS, WHOWAS, etc.)
@@ -381,6 +405,12 @@ func (cm *ConnectionManager) handleNickChange(msg *irc.Message) {
 		// Log the nick change event
 		cm.logNickChangeEvent(oldNick, newNick, hostmask)
 
+		// An identity transfer is valid only because this NICK event was observed
+		// on the same live connection.
+		if cm.gameLifecycle != nil {
+			cm.gameLifecycle.OnObservedNickChange(cm.network, oldNick, newNick)
+		}
+
 		// Check if it's our own nick change
 		if strings.EqualFold(oldNick, cm.currentNick) {
 			cm.currentNick = newNick
@@ -430,6 +460,9 @@ func (cm *ConnectionManager) handleQuit(msg *irc.Message) {
 	// Notify tracker (user quit from all channels)
 	if cm.channelUserTracker != nil {
 		cm.channelUserTracker.OnQuit(nick)
+	}
+	if cm.gameLifecycle != nil {
+		cm.gameLifecycle.OnUserQuit(cm.network, nick)
 	}
 
 	// If the user who quit had our primary nickname, try to reclaim it
@@ -835,6 +868,11 @@ func (cm *ConnectionManager) handleNumericIfApplicable(msg *irc.Message) {
 // This is used by the callback server to collect VERSION/TIME responses
 func (cm *ConnectionManager) SetCTCPResponseHandler(handler CTCPResponseHandler) {
 	cm.ctcpResponseHandler = handler
+}
+
+// SetGameLifecycleHandler sets the fail-closed game continuation lifecycle callback.
+func (cm *ConnectionManager) SetGameLifecycleHandler(handler GameLifecycleHandler) {
+	cm.gameLifecycle = handler
 }
 
 // SetChannelUserTracker sets the channel user tracker for tracking user state

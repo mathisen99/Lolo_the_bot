@@ -26,6 +26,9 @@ func Load(path string) (*Config, error) {
 	}
 
 	var cfg Config
+	// Seed only the additive game section so omitted values receive documented
+	// defaults while explicit false values in TOML remain authoritative.
+	cfg.Game = DefaultGameConfig()
 	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse configuration file: %w", err)
 	}
@@ -181,6 +184,7 @@ func DefaultConfig() *Config {
 			Active: false,
 			URL:    "",
 		},
+		Game: DefaultGameConfig(),
 	}
 }
 
@@ -429,6 +433,13 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("api.http.response_header_timeout must be positive, got %d", cfg.API.HTTP.ResponseHeaderTimeout)
 	}
 
+	// Invalid game settings are intentionally non-fatal to the bot. Preserve
+	// field-specific diagnostics and force the game master flag off.
+	cfg.Game.validationErrors = validateGameConfig(cfg.Game, cfg.Networks)
+	if len(cfg.Game.validationErrors) > 0 {
+		cfg.Game.Enabled = false
+	}
+
 	return nil
 }
 
@@ -498,4 +509,167 @@ func validateNetworks(networks []NetworkConfig) error {
 		}
 	}
 	return nil
+}
+
+// DefaultGameConfig documents the safe initial game policy. Rollout, channel
+// play, milestones, adult/real-person content, and AI are all default-off.
+func DefaultGameConfig() GameConfig {
+	return GameConfig{
+		Enabled: false, Command: "avenger", PublicTitle: "Harbor Sentinel",
+		PMEnabled: true, PMRejectMode: "help", ChannelPlayEnabled: false,
+		ChannelHandoffNotice: true, ChannelAllowlist: []GameChannel{},
+		DatabasePath: DefaultGameDatabasePath, DatabaseBusyTimeoutMS: 5000,
+		DatabasePoolSize: 4, ActionTimeoutSeconds: 10, RecoveryTimeoutSeconds: 30,
+		MenuContextTTLSeconds: 900, MaxContinuationsPerContext: 12,
+		MaxContinuationIdentities: 10000, MaxInputBytes: 512,
+		MaxPendingActionsPerPlayer: 2, ActionCooldownMS: 750, ActionBurst: 4,
+		ActionWindowSeconds: 10, MaxMenuLines: 4, MaxChoicesPerPage: 10,
+		PageSize: 10, MaxNarrationBytes: 600, StandardContentProfile: "standard",
+		AdultContentEnabled: false, RealPersonContentEnabled: false,
+		AIEnhancementEnabled: false, MilestoneAnnouncementsEnabled: false,
+		SaveRetentionDays: 180, SaveExpiryWarningDays: 30,
+		ActionRecordRetentionDays: 90, ResetArchiveRetentionDays: 30,
+		RecoverySnapshotRetentionDays: 30, AuditRetentionDays: 365,
+		MaintenanceIntervalSeconds: 86400, BackupEnabled: true,
+		BackupIntervalSeconds: 86400, BackupDirectory: "data/backups/game",
+		BackupRetentionCount: 7, ConfigRevision: 1, ContentPolicyRevision: 1,
+		Milestones:    GameMilestoneConfig{EligibleTypes: []string{"campaign_completed"}, Destinations: []GameChannel{}},
+		ContentPolicy: GameContentPolicy{SexualContent: "exclude", DrugReferences: "non_instructional_only", ViolenceIntensity: "non_graphic", AbusiveLanguage: "exclude_targeted", RealPersonContent: "exclude"},
+		RateLimits:    GameRateLimits{AI: GameAIRateLimit{Enabled: true, Requests: 2, WindowSeconds: 600, Burst: 1}},
+	}
+}
+
+func validateGameConfig(c GameConfig, networks []NetworkConfig) []string {
+	var problems []string
+	add := func(field, reason string) { problems = append(problems, "game."+field+": "+reason) }
+	if !validLowerToken(c.Command, 1, 32) {
+		add("command", "must be a lowercase ASCII token of 1-32 characters")
+	}
+	if len(c.PublicTitle) == 0 || len([]byte(c.PublicTitle)) > 64 {
+		add("public_title", "must be 1-64 bytes")
+	}
+	if c.PMRejectMode != "help" && c.PMRejectMode != "silent" {
+		add("pm_reject_mode", "must be help or silent")
+	}
+	if !safeGamePath(c.DatabasePath, ".db") {
+		add("database_path", "must be a normalized local path under data/ ending in .db")
+	}
+	if !safeGamePath(c.BackupDirectory, "") {
+		add("backup_directory", "must be a normalized local path under data/")
+	}
+	positive := map[string]int{
+		"database_busy_timeout_ms": c.DatabaseBusyTimeoutMS, "database_pool_size": c.DatabasePoolSize,
+		"action_timeout_seconds": c.ActionTimeoutSeconds, "recovery_timeout_seconds": c.RecoveryTimeoutSeconds,
+		"menu_context_ttl_seconds": c.MenuContextTTLSeconds, "max_continuations_per_context": c.MaxContinuationsPerContext,
+		"max_continuation_identities": c.MaxContinuationIdentities, "max_input_bytes": c.MaxInputBytes,
+		"max_pending_actions_per_player": c.MaxPendingActionsPerPlayer, "action_cooldown_ms": c.ActionCooldownMS,
+		"action_burst": c.ActionBurst, "action_window_seconds": c.ActionWindowSeconds,
+		"max_menu_lines": c.MaxMenuLines, "max_choices_per_page": c.MaxChoicesPerPage, "page_size": c.PageSize,
+		"max_narration_bytes": c.MaxNarrationBytes, "save_retention_days": c.SaveRetentionDays,
+		"save_expiry_warning_days": c.SaveExpiryWarningDays, "action_record_retention_days": c.ActionRecordRetentionDays,
+		"reset_archive_retention_days": c.ResetArchiveRetentionDays, "recovery_snapshot_retention_days": c.RecoverySnapshotRetentionDays,
+		"audit_retention_days": c.AuditRetentionDays, "maintenance_interval_seconds": c.MaintenanceIntervalSeconds,
+		"backup_interval_seconds": c.BackupIntervalSeconds, "backup_retention_count": c.BackupRetentionCount,
+	}
+	for field, value := range positive {
+		if value <= 0 {
+			add(field, "must be positive")
+		}
+	}
+	if c.MaxContinuationsPerContext > 12 {
+		add("max_continuations_per_context", "must not exceed 12")
+	}
+	if c.MaxInputBytes > 4096 {
+		add("max_input_bytes", "must not exceed 4096")
+	}
+	if c.PageSize > c.MaxChoicesPerPage {
+		add("page_size", "must not exceed max_choices_per_page")
+	}
+	if c.MaxMenuLines < 2 {
+		add("max_menu_lines", "must be at least 2")
+	}
+	if c.SaveExpiryWarningDays >= c.SaveRetentionDays {
+		add("save_expiry_warning_days", "must be less than save_retention_days")
+	}
+	if c.AuditRetentionDays < c.ActionRecordRetentionDays {
+		add("audit_retention_days", "must be at least action_record_retention_days")
+	}
+	if c.ConfigRevision < 1 {
+		add("config_revision", "must be at least 1")
+	}
+	if c.ContentPolicyRevision < 1 {
+		add("content_policy_revision", "must be at least 1")
+	}
+	if c.StandardContentProfile != "standard" {
+		add("standard_content_profile", "must be standard")
+	}
+	allowed := map[string]map[string]bool{
+		"sexual_content":      {"exclude": true},
+		"drug_references":     {"exclude": true, "non_instructional_only": true},
+		"violence_intensity":  {"exclude": true, "non_graphic": true},
+		"abusive_language":    {"exclude": true, "exclude_targeted": true},
+		"real_person_content": {"exclude": true},
+	}
+	values := map[string]string{"sexual_content": c.ContentPolicy.SexualContent, "drug_references": c.ContentPolicy.DrugReferences, "violence_intensity": c.ContentPolicy.ViolenceIntensity, "abusive_language": c.ContentPolicy.AbusiveLanguage, "real_person_content": c.ContentPolicy.RealPersonContent}
+	for field, value := range values {
+		if !allowed[field][value] {
+			add("content_policy."+field, "unknown or broadening value")
+		}
+	}
+	if c.RateLimits.AI.Requests <= 0 || c.RateLimits.AI.WindowSeconds <= 0 || c.RateLimits.AI.Burst <= 0 || c.RateLimits.AI.Burst > c.RateLimits.AI.Requests {
+		add("rate_limits.ai", "requests/window/burst must be positive and burst must not exceed requests")
+	}
+	networkSet := map[string]bool{}
+	for _, n := range networks {
+		networkSet[n.ID] = true
+	}
+	seen := map[string]bool{}
+	checkPair := func(field string, pair GameChannel) {
+		key := pair.Network + "\x00" + strings.ToLower(pair.Channel)
+		if !networkSet[pair.Network] {
+			add(field, "references unknown network "+pair.Network)
+		}
+		if len(pair.Channel) < 2 || pair.Channel[0] != '#' || len([]byte(pair.Channel)) > 64 {
+			add(field, "channel must begin with # and be at most 64 bytes")
+		}
+		if seen[key] {
+			add(field, "contains duplicate network/channel pair")
+		}
+		seen[key] = true
+	}
+	for _, p := range c.ChannelAllowlist {
+		checkPair("channel_allowlist", p)
+	}
+	for _, p := range c.Milestones.Destinations {
+		checkPair("milestones.destinations", p)
+	}
+	for _, typ := range c.Milestones.EligibleTypes {
+		if typ != "campaign_completed" {
+			add("milestones.eligible_types", "unknown milestone type "+typ)
+		}
+	}
+	return problems
+}
+
+func validLowerToken(s string, minLen, maxLen int) bool {
+	if len(s) < minLen || len(s) > maxLen {
+		return false
+	}
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func safeGamePath(path, suffix string) bool {
+	if path == "" || filepath.IsAbs(path) || strings.Contains(path, "://") || strings.ContainsRune(path, '\x00') {
+		return false
+	}
+	clean := filepath.Clean(path)
+	if clean != path || clean == "data" || !strings.HasPrefix(clean, "data"+string(filepath.Separator)) {
+		return false
+	}
+	return suffix == "" || strings.HasSuffix(clean, suffix)
 }

@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "profile": "standard",
+  "classification": "original_content",
+  "fictionalized": true,
+  "real_person_content": false,
+  "investigations": [
+    {
+      "id": "search_docks",
+      "location_id": "docks",
+      "grants_flag": "clue_dock_signal",
+      "grant_id": "quest:search_docks",
+      "experience": 2,
+      "reward_table_id": "investigation_rewards",
+      "fact_text_id": "quest.search_docks"
+    },
+    {
+      "id": "decode_archive",
+      "location_id": "archive",
+      "grants_flag": "clue_archive_cipher",
+      "grant_id": "quest:decode_archive",
+      "experience": 3,
+      "reward_table_id": null,
+      "fact_text_id": "quest.decode_archive"
+    }
+  ],
+  "progression_thresholds": [
+    {
+      "level": 2,
+      "experience_required": 10,
+      "grant_id": "progression:level:2",
+      "max_health_increase": 5,
+      "health_increase": 5,
+      "ability_id": "resolve",
+      "currency": 0,
+      "item_id": null,
+      "item_quantity": 0
+    },
+    {
+      "level": 3,
+      "experience_required": 25,
+      "grant_id": "progression:level:3",
+      "max_health_increase": 5,
+      "health_increase": 5,
+      "ability_id": "precision",
+      "currency": 0,
+      "item_id": "medkit",
+      "item_quantity": 1
+    }
+  ],
+  "day_events": [
+    {"id": "day_two", "day": 2, "grants_flag": "day_two_warning", "fact_text_id": "event.day_two"}
+  ],
+  "quest_implications": [
+    {"consequence_flag": "clue_archive_cipher", "required_flags": ["clue_dock_signal"]}
+  ],
+  "finale": {
+    "location_id": "spire",
+    "table_id": "final_encounter",
+    "gate": {
+      "required_flags": ["clue_dock_signal", "clue_archive_cipher"],
+      "required_location": "spire",
+      "minimum_level": 1,
+      "profile": "standard"
+    }
+  },
+  "known_abilities": ["resolve", "precision"],
+  "known_effects": []
+}

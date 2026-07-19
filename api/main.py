@@ -12,6 +12,8 @@ from fastapi import FastAPI
 from rich.console import Console
 
 from api.router import router
+from api.game.router import router as game_router
+from api.game.runtime import game_runtime
 from api.loader import CommandLoader
 
 # Initialize rich console for colored output
@@ -23,8 +25,9 @@ startup_time = time.time()
 # Global command loader instance
 command_loader = None
 
-# Background task handle
+# Background task handles
 _chroma_task = None
+_game_maintenance_task = None
 
 # Migration interval in seconds (15 minutes)
 CHROMA_MIGRATE_INTERVAL = 15 * 60
@@ -58,16 +61,28 @@ async def chroma_scheduler():
         await asyncio.sleep(CHROMA_MIGRATE_INTERVAL)
 
 
+async def game_maintenance_scheduler():
+    """Run bounded game retention independently of unrelated API traffic."""
+    while True:
+        await asyncio.sleep(game_runtime.config().maintenance_interval_seconds)
+        await game_runtime.run_maintenance()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Lifespan context manager for startup and shutdown events.
     """
-    global command_loader, _chroma_task
+    global command_loader, _chroma_task, _game_maintenance_task
     
     # Startup
     console.print("[bold green]Starting Lolo Python API...[/bold green]")
     
+    # Initialize the isolated game boundary first. It catches configuration,
+    # content, and migration failures internally and never requires OpenAI.
+    game_runtime.start()
+    console.print(f"[green]✓[/green] Game boundary: {game_runtime.health().status}")
+
     # Initialize command loader
     command_loader = CommandLoader()
     command_loader.load_commands()
@@ -77,6 +92,8 @@ async def lifespan(app: FastAPI):
     # Start ChromaDB migration scheduler
     _chroma_task = asyncio.create_task(chroma_scheduler())
     console.print(f"[green]✓[/green] ChromaDB scheduler started (every {CHROMA_MIGRATE_INTERVAL // 60} min)")
+    _game_maintenance_task = asyncio.create_task(game_maintenance_scheduler())
+    console.print("[green]✓[/green] Game retention scheduler started")
     
     console.print("[bold green]API server ready![/bold green]")
     
@@ -84,7 +101,20 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     console.print("[bold yellow]Shutting down Lolo Python API...[/bold yellow]")
-    
+
+    # Stop retention before closing game-owned persistence.
+    if _game_maintenance_task:
+        _game_maintenance_task.cancel()
+        try:
+            await _game_maintenance_task
+        except asyncio.CancelledError:
+            pass
+        console.print("[yellow]✓[/yellow] Game retention scheduler stopped")
+
+    # Detach and close game-owned resources without affecting generic API
+    # shutdown. Disabled/degraded game startup has no resources to close.
+    await game_runtime.stop()
+
     # Cancel background task
     if _chroma_task:
         _chroma_task.cancel()
@@ -103,8 +133,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Include router
+# Include existing and isolated game routers.
 app.include_router(router)
+app.include_router(game_router)
 
 
 @app.get("/")

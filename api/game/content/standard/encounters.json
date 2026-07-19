@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "profile": "standard",
+  "classification": "original_content",
+  "fictionalized": true,
+  "real_person_content": false,
+  "encounters": [
+    {
+      "id": "dock_raider",
+      "name": "Scrap Warden",
+      "version": "1",
+      "enemy_max_health": 4,
+      "player_hit_table_id": "combat_player_hit",
+      "player_damage_table_id": "combat_player_damage",
+      "enemy_hit_table_id": "combat_enemy_hit",
+      "enemy_damage_table_id": "combat_enemy_damage",
+      "escape_table_id": "combat_escape",
+      "reward_table_id": "dock_raider_rewards",
+      "defeat_location_id": "clinic",
+      "defeat_health": 1,
+      "defeat_currency_loss": 2,
+      "defend_reduction": 1,
+      "completes_campaign": false
+    }
+  ]
+}

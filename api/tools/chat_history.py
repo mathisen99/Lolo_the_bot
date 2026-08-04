@@ -65,6 +65,13 @@ Use this when:
 - User asks about IRC events ("has anyone been kicked?", "who got banned?", "did X change nick?") - use event_type
 - You need more context than the recent 20 messages provided
 
+Recall guidance:
+- A user's summary, category, or description of an earlier message may be a paraphrase rather than a literal quote.
+- Infer the intended meaning from the conversation, including pronouns, callbacks, implied subjects, corrections, and dependencies between turns.
+- For paraphrased, ambiguous, or intent-based recall, prefer semantic=true and phrase search_term around the inferred concept, intent, and relevant entities.
+- If a narrow search misses, try alternative concepts or fetch the known participant/time window's chronological messages without search_term to inspect surrounding context.
+- A failed exact keyword search proves only that those words were not found. Do not use it alone to conclude that the conversation or request did not happen.
+
 For counting questions, use count_only=true for efficiency.
 For looking at a specific point in time with context, use hours_ago (returns messages around that time).
 For semantic analysis (like counting image generation attempts), fetch full messages and analyze the content yourself.

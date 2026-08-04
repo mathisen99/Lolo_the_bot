@@ -97,9 +97,8 @@ func TestFormat_Underline(t *testing.T) {
 func TestFormat_Strikethrough(t *testing.T) {
 	f := NewFormatter()
 
-	// Strikethrough tags should be stripped for compatibility
 	result := f.Format("<STRIKE>hello</STRIKE>")
-	expected := "hello"
+	expected := "\x1Ehello\x1E"
 	if result != expected {
 		t.Errorf("Format() = %q, want %q", result, expected)
 	}

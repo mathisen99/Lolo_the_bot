@@ -427,8 +427,8 @@ func startNetworkRunLoop(rt *networkRuntime, shutdownHandler *shutdown.Handler, 
 				case <-shutdownHandler.Done():
 					return
 				default:
-					logger.Info("[%s] Connection lost, reconnection manager will handle it...", rt.id)
-					time.Sleep(500 * time.Millisecond)
+					logger.Info("[%s] Connection closed; scheduling reconnect", rt.id)
+					rt.connManager.TriggerReconnect("IRC event loop stopped")
 					continue
 				}
 			}

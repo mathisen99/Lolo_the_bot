@@ -331,6 +331,10 @@ class AIClient:
             # Extract response text and citations
             output_text = self._extract_output(response, request_id)
             citations = self._extract_citations(response, request_id)
+
+            # JSON is layout-sensitive code and must never be flattened into
+            # inline IRC messages. Paste it before IRC cleanup removes newlines.
+            output_text = self._paste_json_for_irc(output_text, request_id)
             
             # Clean response for IRC (remove newlines, strip markdown links, append sources)
             cleaned_text = self._clean_for_irc(output_text, citations)
@@ -454,6 +458,10 @@ class AIClient:
             
             # Extract response text
             output_text = self._extract_output(final_response, request_id)
+
+            # JSON is layout-sensitive code and must never be flattened into
+            # inline IRC messages. Paste it before IRC cleanup removes newlines.
+            output_text = self._paste_json_for_irc(output_text, request_id)
             
             # Use accumulated citations from all iterations, plus any from final response
             final_citations = self._extract_citations(final_response, request_id)
@@ -1073,6 +1081,79 @@ class AIClient:
             user_rules_tool = self.tools["manage_user_rules"]
             return user_rules_tool.get_active_rules(nick)
         return None
+
+    @staticmethod
+    def _is_json_container(content: str) -> bool:
+        """Return whether content is a complete JSON object or array."""
+        try:
+            value = json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            return False
+        return isinstance(value, (dict, list))
+
+    def _upload_json_paste(self, content: str, request_id: str) -> Optional[str]:
+        """Upload JSON code through the configured paste tool."""
+        paste_tool = self.tools.get("create_paste")
+        if paste_tool is None:
+            log_error(f"[{request_id}] Cannot paste JSON: paste tool is disabled")
+            return None
+
+        try:
+            result = paste_tool.execute(
+                content=content.strip(),
+                filename="response.json",
+                retention="1week",
+            )
+        except Exception as exc:
+            log_error(f"[{request_id}] JSON paste failed: {exc}")
+            return None
+
+        if not isinstance(result, str) or result.lower().startswith("error:"):
+            log_error(f"[{request_id}] JSON paste failed: {result}")
+            return None
+
+        log_success(f"[{request_id}] JSON response pasted to BotBin")
+        return result
+
+    def _paste_json_for_irc(self, text: str, request_id: str) -> str:
+        """
+        Replace JSON output with BotBin links before IRC whitespace cleanup.
+
+        Complete raw JSON objects/arrays and JSON contained in Markdown code
+        fences are handled. Scalars such as ``true`` and ordinary prose with
+        braces are intentionally left alone to avoid false positives.
+        """
+        import re
+
+        if not text:
+            return text
+
+        stripped = text.strip()
+        if self._is_json_container(stripped):
+            paste_url = self._upload_json_paste(stripped, request_id)
+            if paste_url:
+                return f"JSON: {paste_url}"
+            return "I couldn't upload the JSON response to BotBin. Please try again."
+
+        fence_pattern = re.compile(
+            r"```[ \t]*(?P<language>[^\r\n`]*)[ \t]*\r?\n"
+            r"(?P<content>.*?)\r?\n?```",
+            flags=re.DOTALL,
+        )
+
+        def replace_fence(match: Any) -> str:
+            language = match.group("language").strip().lower()
+            content = match.group("content").strip()
+            declared_json = language in {"json", "jsonc", "application/json"}
+            if not declared_json and not self._is_json_container(content):
+                return match.group(0)
+
+            paste_url = self._upload_json_paste(content, request_id)
+            if paste_url:
+                return f"JSON: {paste_url}"
+            return "JSON paste unavailable; please try again."
+
+        return fence_pattern.sub(replace_fence, text)
     
     def _clean_for_irc(self, text: str, citations: List[str] = None) -> str:
         """

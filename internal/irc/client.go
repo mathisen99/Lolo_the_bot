@@ -234,16 +234,39 @@ func (c *Client) Run() error {
 			return fmt.Errorf("timed out waiting for connection")
 		case <-ticker.C:
 			// Continue waiting
-		case <-c.ctx.Done():
-			return fmt.Errorf("context cancelled while waiting for connection")
 		}
 	}
 
-	return conn.Run()
+	err := conn.Run()
+	c.markConnectionLost(conn)
+	return err
+}
+
+// markConnectionLost retires the connection whose event loop just stopped.
+// Comparing the client instance prevents a late return from an old event loop
+// from clearing a newer connection that has already been established.
+func (c *Client) markConnectionLost(conn *irc.Client) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.conn != conn {
+		return
+	}
+
+	if c.rawConn != nil {
+		_ = c.rawConn.Close()
+	}
+
+	c.connected = false
+	c.conn = nil
+	c.rawConn = nil
+	c.cancel()
 }
 
 // Context returns the client's context
 func (c *Client) Context() context.Context {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.ctx
 }
 

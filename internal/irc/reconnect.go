@@ -3,6 +3,7 @@ package irc
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/yourusername/lolo/internal/config"
@@ -11,17 +12,16 @@ import (
 
 // ReconnectionManager handles automatic reconnection with exponential backoff
 type ReconnectionManager struct {
-	cm                *ConnectionManager
-	config            *config.Config
-	logger            output.Logger
-	currentDelay      time.Duration
-	minDelay          time.Duration
-	maxDelay          time.Duration
-	reconnecting      bool
-	stopChan          chan struct{}
-	ctx               context.Context
-	cancel            context.CancelFunc
-	pingTimeoutDetect bool
+	cm           *ConnectionManager
+	config       *config.Config
+	logger       output.Logger
+	currentDelay time.Duration
+	minDelay     time.Duration
+	maxDelay     time.Duration
+	reconnecting atomic.Bool
+	stopChan     chan struct{}
+	ctx          context.Context
+	cancel       context.CancelFunc
 }
 
 // NewReconnectionManager creates a new reconnection manager
@@ -68,9 +68,9 @@ func (rm *ReconnectionManager) monitorConnection() {
 			return
 		case <-ticker.C:
 			// Check if we're connected
-			if !rm.cm.IsConnected() && !rm.reconnecting {
+			if !rm.cm.IsConnected() && !rm.reconnecting.Load() {
 				rm.logger.Warning("Connection lost, initiating reconnection...")
-				go rm.reconnect()
+				rm.TriggerReconnect("connection monitor detected a closed connection")
 			}
 		}
 	}
@@ -78,10 +78,7 @@ func (rm *ReconnectionManager) monitorConnection() {
 
 // reconnect attempts to reconnect with exponential backoff
 func (rm *ReconnectionManager) reconnect() {
-	rm.reconnecting = true
-	defer func() {
-		rm.reconnecting = false
-	}()
+	defer rm.reconnecting.Store(false)
 
 	attempt := 1
 
@@ -164,7 +161,9 @@ func (rm *ReconnectionManager) resetBackoff() {
 
 // TriggerReconnect manually triggers a reconnection
 func (rm *ReconnectionManager) TriggerReconnect(reason string) {
-	if rm.reconnecting {
+	// Claim the reconnect before starting the goroutine. The event loop, ping
+	// monitor, and periodic connection monitor can all notice the same failure.
+	if !rm.reconnecting.CompareAndSwap(false, true) {
 		rm.logger.Warning("Reconnection already in progress")
 		return
 	}
@@ -176,11 +175,10 @@ func (rm *ReconnectionManager) TriggerReconnect(reason string) {
 // OnPingTimeout is called when a ping timeout is detected
 func (rm *ReconnectionManager) OnPingTimeout() {
 	rm.logger.Error("Ping timeout detected")
-	rm.pingTimeoutDetect = true
 	rm.TriggerReconnect("ping timeout")
 }
 
 // IsReconnecting returns whether a reconnection is in progress
 func (rm *ReconnectionManager) IsReconnecting() bool {
-	return rm.reconnecting
+	return rm.reconnecting.Load()
 }

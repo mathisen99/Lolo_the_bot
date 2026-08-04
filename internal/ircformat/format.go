@@ -73,12 +73,20 @@ func NewFormatter() *Formatter {
 			"I":         Italic,
 			"UNDERLINE": Underline,
 			"U":         Underline,
+			"STRIKE":    Strikethrough,
+			"S":         Strikethrough,
 			"REVERSE":   Reverse,
 		},
 	}
 }
 
-// Format converts all custom tags in the input to IRC formatting codes
+var (
+	markdownStrikePattern   = regexp.MustCompile(`(^|[^~\\])~~([^~\s](?:[^~\r\n]*[^~\s])?)~~([^~]|$)`)
+	markdownStrongPattern   = regexp.MustCompile(`(^|[^*\\])\*\*([^*\s](?:[^*\r\n]*[^*\s])?)\*\*([^*]|$)`)
+	markdownEmphasisPattern = regexp.MustCompile(`(^|[^*\\])\*([^*\s](?:[^*\r\n]*[^*\s])?)\*([^*]|$)`)
+)
+
+// Format converts custom tags and Markdown emphasis to IRC formatting codes.
 func (f *Formatter) Format(input string) string {
 	if input == "" {
 		return input
@@ -86,10 +94,13 @@ func (f *Formatter) Format(input string) string {
 
 	result := input
 
+	// Convert common model-generated Markdown before handling custom tags.
+	result = f.handleMarkdownEmphasis(result)
+
 	// Handle self-closing reset tag first
 	result = f.handleResetTag(result)
 
-	// Handle special tags (MONO for compatibility, STRIKE for cleanup)
+	// Handle special tags (MONO compatibility)
 	result = f.handleSpecialTags(result)
 
 	// Handle color tags (most complex, do first)
@@ -101,9 +112,36 @@ func (f *Formatter) Format(input string) string {
 	return result
 }
 
-// handleSpecialTags handles tags that need specific compatibility logic
-// <MONO> -> Color Grey (standard IRC code) instead of Monospace (extended)
-// <STRIKE> -> Strip tags (avoid weird symbols on old clients)
+// handleMarkdownEmphasis converts paired ~~strike~~, **bold**, and *italic* delimiters.
+// Delimiters with whitespace immediately inside them are left untouched, which
+// avoids treating bullets and arithmetic expressions as emphasis.
+func (f *Formatter) handleMarkdownEmphasis(input string) string {
+	result := input
+	for {
+		formatted := markdownStrikePattern.ReplaceAllString(result, "${1}"+Strikethrough+"${2}"+Strikethrough+"${3}")
+		if formatted == result {
+			break
+		}
+		result = formatted
+	}
+	for {
+		formatted := markdownStrongPattern.ReplaceAllString(result, "${1}"+Bold+"${2}"+Bold+"${3}")
+		if formatted == result {
+			break
+		}
+		result = formatted
+	}
+	for {
+		formatted := markdownEmphasisPattern.ReplaceAllString(result, "${1}"+Italic+"${2}"+Italic+"${3}")
+		if formatted == result {
+			return result
+		}
+		result = formatted
+	}
+}
+
+// handleSpecialTags converts tags that need compatibility handling.
+// <MONO> uses standard IRC grey instead of the less widely supported 0x11 toggle.
 func (f *Formatter) handleSpecialTags(input string) string {
 	result := input
 
@@ -124,18 +162,6 @@ func (f *Formatter) handleSpecialTags(input string) string {
 	result = strings.ReplaceAll(result, "<m>", monoStart)
 	result = strings.ReplaceAll(result, "</M>", monoEnd)
 	result = strings.ReplaceAll(result, "</m>", monoEnd)
-
-	// Handle STRIKE/S -> Strip tags
-	// Strikethrough (\x1E) causes squares/symbols in older clients
-	result = strings.ReplaceAll(result, "<STRIKE>", "")
-	result = strings.ReplaceAll(result, "<strike>", "")
-	result = strings.ReplaceAll(result, "</STRIKE>", "")
-	result = strings.ReplaceAll(result, "</strike>", "")
-
-	result = strings.ReplaceAll(result, "<S>", "")
-	result = strings.ReplaceAll(result, "<s>", "")
-	result = strings.ReplaceAll(result, "</S>", "")
-	result = strings.ReplaceAll(result, "</s>", "")
 
 	return result
 }

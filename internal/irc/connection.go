@@ -206,6 +206,13 @@ func (cm *ConnectionManager) IsConnected() bool {
 	return cm.client.IsConnected()
 }
 
+// TriggerReconnect requests a single reconnect attempt for a detected
+// connection failure. The reconnection manager deduplicates concurrent
+// requests from the event loop, ping monitor, and periodic monitor.
+func (cm *ConnectionManager) TriggerReconnect(reason string) {
+	cm.reconnectManager.TriggerReconnect(reason)
+}
+
 // handleMessage processes incoming IRC messages
 func (cm *ConnectionManager) handleMessage(client *irc.Client, msg *irc.Message) {
 	// Debug: Log all messages during registration

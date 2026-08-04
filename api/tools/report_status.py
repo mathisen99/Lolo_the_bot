@@ -1,7 +1,7 @@
 """
 Report Status tool implementation.
 
-Allows the AI to report its current status/activity to the user during long-running tasks.
+Allows the AI to send one acknowledgement before a long-running task.
 """
 
 from typing import Any, Dict, Optional
@@ -13,7 +13,7 @@ STATUS_UPDATE_MARKER = "<<STATUS_UPDATE>>"
 
 class ReportStatusTool(Tool):
     """
-    Tool for reporting status updates to the user.
+    Tool for acknowledging a long-running task.
     """
     
     @property
@@ -30,13 +30,18 @@ class ReportStatusTool(Tool):
         return {
             "type": "function",
             "name": self.name,
-            "description": "Report your current status or what you are doing to the user. Use this when performing multi-step tasks, research, or when an operation might take time. This keeps the user informed without stopping your work. Example: 'Reading the abstract of the paper...', 'Searching for counter-arguments...', 'Analyzing the code...'",
+            "description": (
+                "Send one concise acknowledgement before beginning a genuinely long, "
+                "multi-step task. Call this at most once per request. Do not use it for "
+                "simple questions, calculations, or a single quick web lookup. Further "
+                "actions are recorded privately and must not be narrated to the channel."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "status_message": {
                         "type": "string",
-                        "description": "The concise status message to show the user (e.g., 'Searching for X', 'Reading file Y')"
+                        "description": "A short acknowledgement (e.g., 'I'll investigate that and report back.')"
                     }
                 },
                 "required": ["status_message"]

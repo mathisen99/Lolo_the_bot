@@ -9,7 +9,8 @@ import json
 from openai import OpenAI
 from .config import AIConfig
 from .usage_tracker import log_usage, extract_usage_from_response
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, ClaudeTechTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation, KnowledgeBaseLearnTool, KnowledgeBaseSearchTool, KnowledgeBaseListTool, KnowledgeBaseForgetTool, ReminderTool, LogAnalyzerTool
+from api.execution_trace import ExecutionTraceStore
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, ClaudeTechTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation, KnowledgeBaseLearnTool, KnowledgeBaseSearchTool, KnowledgeBaseListTool, KnowledgeBaseForgetTool, ReminderTool, LogAnalyzerTool, ExecutionStepsTool
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -21,6 +22,35 @@ OWNER_ONLY_TOOLS = frozenset({
     "execute_shell",  # shell/bash execution
     "source_code",    # source code introspection
 })
+
+
+TOOL_STEP_SUMMARIES = {
+    "web_search": "Searched the web",
+    "code_interpreter": "Ran a code-assisted analysis",
+    "python_exec": "Ran a calculation or data analysis",
+    "flux_create_image": "Generated an image with Flux",
+    "flux_edit_image": "Edited an image with Flux",
+    "gpt_image": "Generated or edited an image with GPT Image",
+    "gemini_image": "Generated an image with Gemini",
+    "analyze_image": "Analyzed the supplied image",
+    "fetch_url": "Read the supplied webpage",
+    "manage_user_rules": "Updated or checked saved user preferences",
+    "query_chat_history": "Searched relevant chat history",
+    "create_paste": "Created a formatted paste",
+    "execute_shell": "Ran an owner-authorized system operation",
+    "bug_report": "Checked or updated the issue tracker",
+    "usage_stats": "Checked usage statistics",
+    "youtube_search": "Searched YouTube",
+    "source_code": "Inspected Lolo's source code",
+    "irc_command": "Ran an authorized IRC operation",
+    "claude_tech": "Ran the coding assistant",
+    "kb_learn": "Saved a source to the knowledge base",
+    "kb_search": "Searched the knowledge base",
+    "kb_list": "Listed knowledge-base sources",
+    "kb_forget": "Removed a source from the knowledge base",
+    "reminder": "Checked or updated reminders",
+    "log_analyzer": "Inspected service logs",
+}
 
 
 class AIClient:
@@ -36,6 +66,11 @@ class AIClient:
         self.config = config or AIConfig()
         self.client = OpenAI(api_key=self.config.openai_api_key)
         self.tools: Dict[str, Any] = {}
+        try:
+            self.trace_store: Optional[ExecutionTraceStore] = ExecutionTraceStore()
+        except Exception as exc:
+            self.trace_store = None
+            log_warning(f"Execution trace storage disabled: {exc}")
         
         # Initialize tools
         self._setup_tools()
@@ -245,6 +280,11 @@ class AIClient:
         report_status = ReportStatusTool()
         self.tools[report_status.name] = report_status
         log_info("Report status tool enabled")
+
+        if self.trace_store is not None:
+            execution_steps = ExecutionStepsTool(self.trace_store)
+            self.tools[execution_steps.name] = execution_steps
+            log_info("Execution steps tool enabled")
         
         # Knowledge Base tools
         if self.config.kb_learn_enabled:
@@ -291,6 +331,38 @@ class AIClient:
         non-owners that only the owner may run them.
         """
         return [tool.get_definition() for tool in self.tools.values()]
+
+    def _record_execution_step(
+        self,
+        request_id: str,
+        tool_name: str,
+        outcome: str = "completed",
+    ) -> None:
+        """Record a fixed, sanitized tool description; never arguments or raw output."""
+        if self.trace_store is None or tool_name in {"report_status", "show_execution_steps", "null_response"}:
+            return
+        summary = TOOL_STEP_SUMMARIES.get(tool_name, "Used an internal tool")
+        try:
+            self.trace_store.append_step(request_id, summary, outcome)
+        except Exception as exc:
+            log_warning(f"[{request_id}] Failed to record execution step: {exc}")
+
+    def _record_native_execution_steps(self, response: Any, request_id: str) -> None:
+        """Record native Responses API tools, which do not pass through execute()."""
+        for item in getattr(response, "output", None) or []:
+            item_type = getattr(item, "type", None)
+            if item_type == "web_search_call":
+                self._record_execution_step(request_id, "web_search")
+            elif item_type == "code_interpreter_call":
+                self._record_execution_step(request_id, "code_interpreter")
+
+    def _finish_execution_trace(self, request_id: str, status: str) -> None:
+        if self.trace_store is None:
+            return
+        try:
+            self.trace_store.finish_run(request_id, status)
+        except Exception as exc:
+            log_warning(f"[{request_id}] Failed to close execution trace: {exc}")
 
     def generate_response(self, user_message: str, request_id: str) -> str:
         """
@@ -373,6 +445,12 @@ class AIClient:
         """
         log_info(f"[{request_id}] Generating AI response with context (permission: {permission_level})" +
                  f" on {network}")
+
+        if self.trace_store is not None:
+            try:
+                self.trace_store.start_run(request_id, nick, network, channel)
+            except Exception as exc:
+                log_warning(f"[{request_id}] Failed to start execution trace: {exc}")
         
         try:
             # Build tool definitions
@@ -408,6 +486,7 @@ class AIClient:
             
             # Check which tools were used
             self._check_tools_used(response, request_id)
+            self._record_native_execution_steps(response, request_id)
             
             # Handle function calls with streaming support
             response_generator = self._handle_function_calls_stream(
@@ -450,6 +529,7 @@ class AIClient:
             # Check if null response triggered
             if null_response_triggered:
                 log_info(f"[{request_id}] Null response triggered - staying silent")
+                self._finish_execution_trace(request_id, "null")
                 yield {
                     "status": "null",
                     "message": ""
@@ -480,6 +560,7 @@ class AIClient:
             
             if not cleaned_text or cleaned_text.strip() == "":
                 log_error(f"[{request_id}] AI returned empty response")
+                self._finish_execution_trace(request_id, "error")
                 yield {
                     "status": "error", 
                     "message": "I couldn't generate a proper response. Please try again."
@@ -487,6 +568,7 @@ class AIClient:
                 return
             
             log_info(f"[{request_id}] AI response generated successfully")
+            self._finish_execution_trace(request_id, "success")
             
             yield {
                 "status": "success",
@@ -495,6 +577,7 @@ class AIClient:
         
         except Exception as e:
             log_error(f"[{request_id}] Error generating AI response: {e}")
+            self._finish_execution_trace(request_id, "error")
             import traceback
             log_error(f"[{request_id}] Traceback: {traceback.format_exc()}")
             yield {
@@ -685,6 +768,7 @@ class AIClient:
                         allowed, rate_limit_msg = check_image_rate_limit(permission_level)
                         if not allowed:
                             log_warning(f"[{request_id}] Image rate limit reached for {func_name}")
+                            self._record_execution_step(request_id, func_name, "blocked by rate limit")
                             function_outputs.append({
                                 "type": "function_call_output",
                                 "call_id": call_id,
@@ -721,6 +805,12 @@ class AIClient:
                         func_args['_nick'] = nick
                         func_args['_network'] = network
                         func_args['_channel'] = channel
+
+                    if func_name == 'show_execution_steps':
+                        func_args['_requesting_user'] = nick
+                        func_args['_current_network'] = network
+                        func_args['_current_channel'] = channel
+                        func_args['_current_request_id'] = request_id
                     
                     # Execute the tool
                     result = tool.execute(**func_args)
@@ -794,6 +884,9 @@ class AIClient:
                             log_error(f"[{request_id}] Vision analysis failed: {e}")
                             result = f"Error analyzing image: {str(e)}"
 
+                    outcome = "failed" if str(result).startswith("Error") else "completed"
+                    self._record_execution_step(request_id, func_name, outcome)
+
                     # Standard function output
                     function_outputs.append({
                         "type": "function_call_output",
@@ -803,6 +896,7 @@ class AIClient:
                     
                 except Exception as e:
                     log_error(f"[{request_id}] Error executing {func_name}: {e}")
+                    self._record_execution_step(request_id, func_name, "failed")
                     function_outputs.append({
                         "type": "function_call_output",
                         "call_id": call_id,
@@ -842,6 +936,7 @@ class AIClient:
                 total_usage["code_interpreter_calls"] += new_counts["code_interpreter"]
                 
                 self._check_tools_used(response, request_id)
+                self._record_native_execution_steps(response, request_id)
             else:
                 yield {
                     "type": "final_result",

@@ -23,11 +23,16 @@ type MentionHandler struct {
 	network                  string
 	permissionResolver       PermissionResolver
 	historyDepth             int
+	workingAckDelay          time.Duration
 }
 
 // defaultMentionHistoryDepth is the number of recent channel messages used for
 // mention context when no depth is configured.
 const defaultMentionHistoryDepth = 20
+
+// workingAcknowledgementDelay prevents a fast request from producing a status
+// message immediately followed by its answer. Only the first status is eligible.
+const workingAcknowledgementDelay = 2500 * time.Millisecond
 
 type PermissionResolver interface {
 	ResolvePermission(nick, hostmask string) (database.PermissionLevel, bool, error)
@@ -62,6 +67,7 @@ func NewMentionHandler(apiClient APIClientInterface, userMgr *user.Manager, db *
 		network:                  defaultNetwork(network),
 		permissionResolver:       permissionResolver,
 		historyDepth:             historyDepth,
+		workingAckDelay:          workingAcknowledgementDelay,
 	}
 }
 
@@ -194,27 +200,73 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 	// Process stream
 	var finalMessage string
 	var lastStatus string
+	var pendingStatus string
+	var statusTimer *time.Timer
+	var statusTimerC <-chan time.Time
+	statusSent := false
+	streamOpen := true
+	ackDelay := h.workingAckDelay
+	if ackDelay <= 0 {
+		ackDelay = workingAcknowledgementDelay
+	}
 
-	for resp := range respChan {
-		fmt.Printf("[MentionHandler] Received chunk at %s: status=%s\n", time.Now().Format(time.RFC3339), resp.Status)
-		lastStatus = resp.Status
+	stopStatusTimer := func() {
+		if statusTimer != nil && !statusTimer.Stop() {
+			select {
+			case <-statusTimer.C:
+			default:
+			}
+		}
+		statusTimer = nil
+		statusTimerC = nil
+		pendingStatus = ""
+	}
+	defer stopStatusTimer()
 
-		switch resp.Status {
-		case "processing":
-			if statusCallback != nil && resp.Message != "" {
-				statusCallback(resp.Message)
+	for streamOpen {
+		select {
+		case resp, ok := <-respChan:
+			if !ok {
+				streamOpen = false
+				continue
 			}
-		case "success":
-			finalMessage = resp.Message
-		case "error":
-			// Record error metric
-			if errRecordErr := h.db.RecordError("mention_api_error"); errRecordErr != nil {
-				fmt.Printf("Warning: Failed to record error metric: %v\n", errRecordErr)
+
+			fmt.Printf("[MentionHandler] Received chunk at %s: status=%s\n", time.Now().Format(time.RFC3339), resp.Status)
+			lastStatus = resp.Status
+
+			switch resp.Status {
+			case "processing":
+				// Buffer only the first acknowledgement. If the final answer arrives
+				// quickly, it is cancelled so short requests remain one-message replies.
+				if !statusSent && pendingStatus == "" && statusCallback != nil && resp.Message != "" {
+					pendingStatus = resp.Message
+					statusTimer = time.NewTimer(ackDelay)
+					statusTimerC = statusTimer.C
+				}
+			case "success":
+				finalMessage = resp.Message
+				stopStatusTimer()
+			case "error":
+				stopStatusTimer()
+				// Record error metric
+				if errRecordErr := h.db.RecordError("mention_api_error"); errRecordErr != nil {
+					fmt.Printf("Warning: Failed to record error metric: %v\n", errRecordErr)
+				}
+				return "", fmt.Errorf("API returned error [%s]: %s", resp.RequestID, resp.Message)
+			case "null":
+				stopStatusTimer()
+				// User requested silence
+				return "", nil
 			}
-			return "", fmt.Errorf("API returned error [%s]: %s", resp.RequestID, resp.Message)
-		case "null":
-			// User requested silence
-			return "", nil
+
+		case <-statusTimerC:
+			if pendingStatus != "" && statusCallback != nil {
+				statusCallback(pendingStatus)
+			}
+			statusSent = true
+			pendingStatus = ""
+			statusTimer = nil
+			statusTimerC = nil
 		}
 	}
 

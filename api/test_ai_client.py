@@ -4,6 +4,35 @@ from api.ai.client import AIClient
 
 
 class AIClientTests(unittest.TestCase):
+    def test_tool_definitions_require_public_audit_reason(self):
+        client = AIClient.__new__(AIClient)
+        client.tools = {
+            "normal": DefinitionTool("normal"),
+            "show_execution_steps": DefinitionTool("show_execution_steps"),
+        }
+
+        normal, trace_lookup = client._get_tool_definitions()
+
+        self.assertIn("audit_reason", normal["parameters"]["properties"])
+        self.assertIn("audit_reason", normal["parameters"]["required"])
+        self.assertNotIn("audit_reason", trace_lookup["parameters"]["properties"])
+
+    def test_trace_sanitizer_preserves_evidence_and_redacts_secrets(self):
+        rendered = AIClient._format_trace_value({
+            "url": "https://example.com/source?id=42",
+            "question": "Check whether the screenshot was edited",
+            "api_key": "sk-this-should-not-appear",
+            "image": "data:image/png;base64,QUJDREVGRw==",
+            "_current_channel": "#internal",
+        })
+
+        self.assertIn("https://example.com/source?id=42", rendered)
+        self.assertIn("Check whether the screenshot was edited", rendered)
+        self.assertIn("[redacted]", rendered)
+        self.assertIn("[embedded image data omitted]", rendered)
+        self.assertNotIn("sk-this-should-not-appear", rendered)
+        self.assertNotIn("_current_channel", rendered)
+
     def test_build_input_image_content_preserves_detail(self):
         content = AIClient._build_input_image_content(
             "data:image/png;base64,abc",
@@ -110,6 +139,23 @@ class RecordingPasteTool:
     def execute(self, **kwargs):
         self.calls.append(kwargs)
         return self.result
+
+
+class DefinitionTool:
+    def __init__(self, name):
+        self.name = name
+
+    def get_definition(self):
+        return {
+            "type": "function",
+            "name": self.name,
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        }
 
 
 if __name__ == "__main__":

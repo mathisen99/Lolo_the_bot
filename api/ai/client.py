@@ -5,7 +5,9 @@ Handles communication with OpenAI API and tool execution.
 """
 
 from typing import List, Dict, Any, Optional
+import copy
 import json
+import re
 from openai import OpenAI
 from .config import AIConfig
 from .usage_tracker import log_usage, extract_usage_from_response
@@ -50,7 +52,20 @@ TOOL_STEP_SUMMARIES = {
     "kb_forget": "Removed a source from the knowledge base",
     "reminder": "Checked or updated reminders",
     "log_analyzer": "Inspected service logs",
+    "report_status": "Set the investigation plan",
 }
+
+TRACE_SENSITIVE_KEYS = frozenset({
+    "api_key", "apikey", "authorization", "cookie", "password", "secret",
+    "access_token", "refresh_token", "private_key",
+})
+
+# These optional Responses API fields make native web/code tools auditable.
+# Without them a web-search call may expose only the fact that a search ran.
+TRACE_RESPONSE_INCLUDES = [
+    "web_search_call.action.sources",
+    "code_interpreter_call.outputs",
+]
 
 
 class AIClient:
@@ -330,37 +345,155 @@ class AIClient:
         execution time and their descriptions instruct the model to explain to
         non-owners that only the owner may run them.
         """
-        return [tool.get_definition() for tool in self.tools.values()]
+        definitions = []
+        for tool in self.tools.values():
+            definition = copy.deepcopy(tool.get_definition())
+            if (
+                definition.get("type") == "function"
+                and definition.get("name")
+                not in {"report_status", "show_execution_steps", "null_response"}
+            ):
+                parameters = definition.get("parameters", {})
+                properties = parameters.get("properties", {})
+                properties["audit_reason"] = {
+                    "type": "string",
+                    "description": (
+                        "One concise, user-facing sentence explaining why this action is "
+                        "relevant to the request. State the purpose, not private reasoning."
+                    ),
+                }
+                required = parameters.setdefault("required", [])
+                if "audit_reason" not in required:
+                    required.append("audit_reason")
+            definitions.append(definition)
+        return definitions
 
     def _record_execution_step(
         self,
         request_id: str,
         tool_name: str,
         outcome: str = "completed",
+        arguments: Any = None,
+        result: Any = None,
     ) -> None:
-        """Record a fixed, sanitized tool description; never arguments or raw output."""
-        if self.trace_store is None or tool_name in {"report_status", "show_execution_steps", "null_response"}:
+        """Record a bounded audit of observable tool inputs and outputs."""
+        if self.trace_store is None or tool_name in {"show_execution_steps", "null_response"}:
             return
         summary = TOOL_STEP_SUMMARIES.get(tool_name, "Used an internal tool")
         try:
-            self.trace_store.append_step(request_id, summary, outcome)
+            self.trace_store.append_step(
+                request_id,
+                summary,
+                outcome,
+                tool_name=tool_name,
+                details=self._format_trace_value(arguments),
+                result_summary=self._format_trace_value(result),
+            )
         except Exception as exc:
             log_warning(f"[{request_id}] Failed to record execution step: {exc}")
 
+    @classmethod
+    def _sanitize_trace_value(cls, value: Any, key: str = "") -> Any:
+        """Remove runtime context, credentials, and embedded binary data from traces."""
+        normalized_key = key.lower().replace("-", "_")
+        if normalized_key in TRACE_SENSITIVE_KEYS or any(
+            marker in normalized_key for marker in ("password", "secret", "private_key")
+        ):
+            return "[redacted]"
+
+        if hasattr(value, "model_dump"):
+            value = value.model_dump(exclude_none=True)
+
+        if isinstance(value, dict):
+            sanitized = {}
+            for child_key, child_value in value.items():
+                child_key_text = str(child_key)
+                if child_key_text.startswith("_"):
+                    continue
+                if child_key_text == "content" and isinstance(child_value, str) and len(child_value) > 1000:
+                    sanitized[child_key_text] = f"[large content omitted; {len(child_value)} characters]"
+                    continue
+                sanitized[child_key_text] = cls._sanitize_trace_value(child_value, child_key_text)
+            return sanitized
+        if isinstance(value, (list, tuple)):
+            return [cls._sanitize_trace_value(item, key) for item in value]
+        if isinstance(value, bytes):
+            return f"[binary data omitted; {len(value)} bytes]"
+        if isinstance(value, str):
+            text = re.sub(
+                r"data:[^;,\s]+;base64,[A-Za-z0-9+/=_-]+",
+                "[embedded image data omitted]",
+                value,
+            )
+            text = re.sub(r"(?i)\b(sk-[A-Za-z0-9_-]{12,})\b", "[redacted API key]", text)
+            text = re.sub(r"(https?://)[^/@\s:]+:[^/@\s]+@", r"\1[redacted]@", text)
+            return text[:8000] + ("\n[trace value truncated]" if len(text) > 8000 else "")
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        return str(value)[:8000]
+
+    @classmethod
+    def _format_trace_value(cls, value: Any) -> str:
+        if value is None or value == "":
+            return ""
+        sanitized = cls._sanitize_trace_value(value)
+        if isinstance(sanitized, str):
+            return sanitized
+        try:
+            return json.dumps(sanitized, ensure_ascii=False, indent=2, sort_keys=True)
+        except (TypeError, ValueError):
+            return str(sanitized)
+
     def _record_native_execution_steps(self, response: Any, request_id: str) -> None:
         """Record native Responses API tools, which do not pass through execute()."""
+        if self.trace_store is None:
+            return
         for item in getattr(response, "output", None) or []:
             item_type = getattr(item, "type", None)
             if item_type == "web_search_call":
-                self._record_execution_step(request_id, "web_search")
+                action = getattr(item, "action", None)
+                action_type = getattr(action, "type", "search")
+                summary = {
+                    "search": "Searched the web",
+                    "open_page": "Opened a web page from search",
+                    "find_in_page": "Searched within a web page",
+                }.get(action_type, "Searched the web")
+                citations = self._extract_citations(response, request_id)
+                result = {"cited_urls": citations} if citations else ""
+                try:
+                    details = self._format_trace_value(action)
+                    self.trace_store.append_step(
+                        request_id,
+                        summary,
+                        getattr(item, "status", "completed"),
+                        tool_name="web_search",
+                        details=details,
+                        result_summary=self._format_trace_value(result),
+                    )
+                except Exception as exc:
+                    log_warning(f"[{request_id}] Failed to record native web search: {exc}")
             elif item_type == "code_interpreter_call":
-                self._record_execution_step(request_id, "code_interpreter")
+                payload = item.model_dump(exclude_none=True) if hasattr(item, "model_dump") else item
+                details = {"code": payload.get("code", "")} if isinstance(payload, dict) else payload
+                result = {"outputs": payload.get("outputs", [])} if isinstance(payload, dict) else ""
+                self._record_execution_step(
+                    request_id,
+                    "code_interpreter",
+                    getattr(item, "status", "completed"),
+                    arguments=details,
+                    result=result,
+                )
 
-    def _finish_execution_trace(self, request_id: str, status: str) -> None:
+    def _finish_execution_trace(
+        self,
+        request_id: str,
+        status: str,
+        final_answer: str = "",
+    ) -> None:
         if self.trace_store is None:
             return
         try:
-            self.trace_store.finish_run(request_id, status)
+            self.trace_store.finish_run(request_id, status, final_answer)
         except Exception as exc:
             log_warning(f"[{request_id}] Failed to close execution trace: {exc}")
 
@@ -448,7 +581,7 @@ class AIClient:
 
         if self.trace_store is not None:
             try:
-                self.trace_store.start_run(request_id, nick, network, channel)
+                self.trace_store.start_run(request_id, nick, network, channel, user_message)
             except Exception as exc:
                 log_warning(f"[{request_id}] Failed to start execution trace: {exc}")
         
@@ -479,6 +612,7 @@ class AIClient:
                 text={"verbosity": self.config.verbosity},
                 max_output_tokens=max_tokens,
                 tools=tool_defs if tool_defs else None,
+                include=TRACE_RESPONSE_INCLUDES,
                 timeout=request_timeout,
                 prompt_cache_retention=self.config.prompt_cache_retention,
                 safety_identifier=safety_id
@@ -568,7 +702,7 @@ class AIClient:
                 return
             
             log_info(f"[{request_id}] AI response generated successfully")
-            self._finish_execution_trace(request_id, "success")
+            self._finish_execution_trace(request_id, "success", cleaned_text)
             
             yield {
                 "status": "success",
@@ -742,6 +876,13 @@ class AIClient:
                         func_args = json.loads(func_args_raw)
                     except json.JSONDecodeError as e:
                         log_warning(f"[{request_id}] Failed to parse tool arguments for {func_name}: {e}")
+                        self._record_execution_step(
+                            request_id,
+                            func_name or "unknown_tool",
+                            "failed",
+                            arguments=func_args_raw,
+                            result=f"Invalid JSON in tool arguments: {e}",
+                        )
                         function_outputs.append({
                             "type": "function_call_output",
                             "call_id": call_id,
@@ -750,8 +891,24 @@ class AIClient:
                         continue
                 else:
                     func_args = func_args_raw
+
+                # Keep only the model-supplied arguments for the user-facing audit.
+                # Permission and request-context fields injected below are internal.
+                audit_reason = ""
+                if isinstance(func_args, dict):
+                    audit_reason = str(func_args.pop("audit_reason", "")).strip()
+                trace_args = dict(func_args) if isinstance(func_args, dict) else func_args
+                if audit_reason and isinstance(trace_args, dict):
+                    trace_args = {"why": audit_reason, **trace_args}
                 
                 if func_name not in self.tools:
+                    self._record_execution_step(
+                        request_id,
+                        func_name or "unknown_tool",
+                        "failed",
+                        arguments=trace_args,
+                        result=f"Unknown tool: {func_name}",
+                    )
                     function_outputs.append({
                         "type": "function_call_output",
                         "call_id": call_id,
@@ -768,7 +925,13 @@ class AIClient:
                         allowed, rate_limit_msg = check_image_rate_limit(permission_level)
                         if not allowed:
                             log_warning(f"[{request_id}] Image rate limit reached for {func_name}")
-                            self._record_execution_step(request_id, func_name, "blocked by rate limit")
+                            self._record_execution_step(
+                                request_id,
+                                func_name,
+                                "blocked by rate limit",
+                                arguments=trace_args,
+                                result=rate_limit_msg,
+                            )
                             function_outputs.append({
                                 "type": "function_call_output",
                                 "call_id": call_id,
@@ -885,7 +1048,13 @@ class AIClient:
                             result = f"Error analyzing image: {str(e)}"
 
                     outcome = "failed" if str(result).startswith("Error") else "completed"
-                    self._record_execution_step(request_id, func_name, outcome)
+                    self._record_execution_step(
+                        request_id,
+                        func_name,
+                        outcome,
+                        arguments=trace_args,
+                        result=result,
+                    )
 
                     # Standard function output
                     function_outputs.append({
@@ -896,7 +1065,13 @@ class AIClient:
                     
                 except Exception as e:
                     log_error(f"[{request_id}] Error executing {func_name}: {e}")
-                    self._record_execution_step(request_id, func_name, "failed")
+                    self._record_execution_step(
+                        request_id,
+                        func_name,
+                        "failed",
+                        arguments=trace_args,
+                        result=f"Error executing tool: {str(e)}",
+                    )
                     function_outputs.append({
                         "type": "function_call_output",
                         "call_id": call_id,
@@ -914,6 +1089,7 @@ class AIClient:
                     input=function_outputs,
                     previous_response_id=response_id,
                     tools=tool_defs if tool_defs else None,
+                    include=TRACE_RESPONSE_INCLUDES,
                     reasoning=self._build_reasoning(),
                     text={"verbosity": self.config.verbosity},
                     max_output_tokens=self.config.max_output_tokens,

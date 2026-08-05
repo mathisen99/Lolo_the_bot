@@ -19,9 +19,11 @@ class ExecutionStepsTool(Tool):
             "type": "function",
             "name": self.name,
             "description": (
-                "Show the sanitized action/tool audit trail for this user's most recent "
-                "completed request in the current channel. Use when they ask how you got "
-                "an answer or ask to see your steps. This does not expose private reasoning."
+                "Show the detailed, sanitized action and evidence audit for this user's "
+                "most recent completed request in the current channel. Use it to explain "
+                "what was done, why each action was relevant, which searches, URLs and "
+                "images were used, what the tools returned, and how that observable "
+                "evidence supports the answer. This does not expose private reasoning."
             ),
             "parameters": {
                 "type": "object",
@@ -49,8 +51,28 @@ class ExecutionStepsTool(Tool):
                 "It was produced as a direct response."
             )
 
-        rendered = []
+        rendered = [
+            "Detailed execution audit (observable actions and evidence; not private chain-of-thought):",
+        ]
+        if trace.get("objective"):
+            rendered.append(f"\nOriginal request:\n{trace['objective']}")
+        rendered.append(f"\nRun status: {trace['status']}")
+
         for index, step in enumerate(steps, start=1):
             suffix = "" if step["outcome"] == "completed" else f" ({step['outcome']})"
-            rendered.append(f"{index}. {step['summary']}{suffix}")
-        return "Sanitized execution steps (not private chain-of-thought): " + " ".join(rendered)
+            tool = f" [{step['tool_name']}]" if step.get("tool_name") else ""
+            rendered.append(f"\n{index}. {step['summary']}{tool}{suffix}")
+            if step.get("details"):
+                rendered.append(f"Input/purpose:\n{step['details']}")
+            if step.get("result_summary"):
+                rendered.append(f"Observed result/evidence:\n{step['result_summary']}")
+
+        if trace.get("final_answer"):
+            rendered.append(f"\nAnswer produced from the above evidence:\n{trace['final_answer']}")
+
+        rendered.append(
+            "\nExplain this audit clearly to the user, including why the actions were "
+            "relevant and how the recorded evidence led to the answer. Preserve direct "
+            "source and image URLs. If it is long, put the complete audit in a paste."
+        )
+        return "\n".join(rendered)

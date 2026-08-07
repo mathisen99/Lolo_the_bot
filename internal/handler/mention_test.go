@@ -130,6 +130,13 @@ func TestWorkingAcknowledgementIsDelayedAndSentAtMostOnce(t *testing.T) {
 			wantStatuses: nil,
 		},
 		{
+			name: "quick completion without processing stays silent",
+			events: []scriptedMentionEvent{
+				{response: &APIResponse{Status: "success", Message: "Done"}},
+			},
+			wantStatuses: nil,
+		},
+		{
 			name: "long task sends only first acknowledgement",
 			events: []scriptedMentionEvent{
 				{response: &APIResponse{Status: "processing", Message: "First update"}},
@@ -137,6 +144,21 @@ func TestWorkingAcknowledgementIsDelayedAndSentAtMostOnce(t *testing.T) {
 				{delay: 40 * time.Millisecond, response: &APIResponse{Status: "success", Message: "Done"}},
 			},
 			wantStatuses: []string{"First update"},
+		},
+		{
+			name: "long task without processing sends fallback acknowledgement",
+			events: []scriptedMentionEvent{
+				{delay: 40 * time.Millisecond, response: &APIResponse{Status: "success", Message: "Done"}},
+			},
+			wantStatuses: []string{fallbackWorkingAcknowledgement},
+		},
+		{
+			name: "late processing after fallback does not send another acknowledgement",
+			events: []scriptedMentionEvent{
+				{delay: 30 * time.Millisecond, response: &APIResponse{Status: "processing", Message: "Late update"}},
+				{delay: 20 * time.Millisecond, response: &APIResponse{Status: "success", Message: "Done"}},
+			},
+			wantStatuses: []string{fallbackWorkingAcknowledgement},
 		},
 	}
 
@@ -153,6 +175,7 @@ func TestWorkingAcknowledgementIsDelayedAndSentAtMostOnce(t *testing.T) {
 				api, user.NewManager(db), db, "Lolo", false, false, "", "libera", nil, 20,
 			)
 			handler.workingAckDelay = 10 * time.Millisecond
+			handler.workingFallbackDelay = 20 * time.Millisecond
 			var statuses []string
 
 			response, err := handler.HandleMention(

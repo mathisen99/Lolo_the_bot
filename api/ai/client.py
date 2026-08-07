@@ -1005,10 +1005,6 @@ class AIClient:
                             result_data = json.loads(result)
                             if result_data.get('status') == 'success' and 'image_data' in result_data:
                                 log_info(f"[{request_id}] Running vision analysis on image...")
-                                yield {
-                                    "type": "status_update",
-                                    "message": "Analyzing image content..."
-                                }
                                 
                                 image_data = result_data['image_data']
                                 detail = image_data.get('detail', 'auto')

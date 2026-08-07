@@ -24,7 +24,6 @@ type MentionHandler struct {
 	permissionResolver       PermissionResolver
 	historyDepth             int
 	workingAckDelay          time.Duration
-	workingFallbackDelay     time.Duration
 }
 
 // defaultMentionHistoryDepth is the number of recent channel messages used for
@@ -34,12 +33,6 @@ const defaultMentionHistoryDepth = 20
 // workingAcknowledgementDelay prevents a fast request from producing a status
 // message immediately followed by its answer. Only the first status is eligible.
 const workingAcknowledgementDelay = 2500 * time.Millisecond
-
-// workingFallbackAcknowledgementDelay guarantees feedback even when the AI
-// does not emit a processing event while a long native tool call is running.
-const workingFallbackAcknowledgementDelay = 10 * time.Second
-
-const fallbackWorkingAcknowledgement = "I'm looking into that and will report back."
 
 type PermissionResolver interface {
 	ResolvePermission(nick, hostmask string) (database.PermissionLevel, bool, error)
@@ -75,7 +68,6 @@ func NewMentionHandler(apiClient APIClientInterface, userMgr *user.Manager, db *
 		permissionResolver:       permissionResolver,
 		historyDepth:             historyDepth,
 		workingAckDelay:          workingAcknowledgementDelay,
-		workingFallbackDelay:     workingFallbackAcknowledgementDelay,
 	}
 }
 
@@ -211,27 +203,12 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 	var pendingStatus string
 	var statusTimer *time.Timer
 	var statusTimerC <-chan time.Time
-	var fallbackTimer *time.Timer
-	var fallbackTimerC <-chan time.Time
 	statusSent := false
 	streamOpen := true
 	ackDelay := h.workingAckDelay
 	if ackDelay <= 0 {
 		ackDelay = workingAcknowledgementDelay
 	}
-	fallbackDelay := h.workingFallbackDelay
-	if fallbackDelay <= 0 {
-		fallbackDelay = workingFallbackAcknowledgementDelay
-	}
-	if statusCallback != nil {
-		remaining := fallbackDelay - time.Since(startTime)
-		if remaining < 0 {
-			remaining = 0
-		}
-		fallbackTimer = time.NewTimer(remaining)
-		fallbackTimerC = fallbackTimer.C
-	}
-
 	stopStatusTimer := func() {
 		if statusTimer != nil && !statusTimer.Stop() {
 			select {
@@ -243,21 +220,7 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 		statusTimerC = nil
 		pendingStatus = ""
 	}
-	stopFallbackTimer := func() {
-		if fallbackTimer != nil && !fallbackTimer.Stop() {
-			select {
-			case <-fallbackTimer.C:
-			default:
-			}
-		}
-		fallbackTimer = nil
-		fallbackTimerC = nil
-	}
-	stopAcknowledgementTimers := func() {
-		stopStatusTimer()
-		stopFallbackTimer()
-	}
-	defer stopAcknowledgementTimers()
+	defer stopStatusTimer()
 
 	for streamOpen {
 		select {
@@ -281,16 +244,16 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 				}
 			case "success":
 				finalMessage = resp.Message
-				stopAcknowledgementTimers()
+				stopStatusTimer()
 			case "error":
-				stopAcknowledgementTimers()
+				stopStatusTimer()
 				// Record error metric
 				if errRecordErr := h.db.RecordError("mention_api_error"); errRecordErr != nil {
 					fmt.Printf("Warning: Failed to record error metric: %v\n", errRecordErr)
 				}
 				return "", fmt.Errorf("API returned error [%s]: %s", resp.RequestID, resp.Message)
 			case "null":
-				stopAcknowledgementTimers()
+				stopStatusTimer()
 				// User requested silence
 				return "", nil
 			}
@@ -303,23 +266,6 @@ func (h *MentionHandler) HandleMention(ctx context.Context, message, nick, hostm
 			pendingStatus = ""
 			statusTimer = nil
 			statusTimerC = nil
-			stopFallbackTimer()
-
-		case <-fallbackTimerC:
-			// Native tools can keep the Python request blocked without yielding a
-			// processing event. Use a pending model acknowledgement when available,
-			// otherwise provide a generic one based on actual elapsed time.
-			message := pendingStatus
-			if message == "" {
-				message = fallbackWorkingAcknowledgement
-			}
-			stopStatusTimer()
-			fallbackTimer = nil
-			fallbackTimerC = nil
-			if !statusSent && statusCallback != nil {
-				statusCallback(message)
-				statusSent = true
-			}
 		}
 	}
 

@@ -215,10 +215,10 @@ Mention the bot to chat:
 <lolo> Here are the latest AI developments I found...
 ```
 
-For a request that is still running after 10 seconds, the bot sends one short
-working acknowledgement so the channel knows it has not stalled. Quick requests
-remain single-message replies, and additional tool/status events do not produce
-more acknowledgements before the final answer.
+For a noticeably long multi-step request, the model may send one short,
+request-specific acknowledgement explaining why the work will take time and what
+it will do next. Quick requests remain single-message replies, and hardcoded timer
+fallbacks or additional tool events do not produce generic channel messages.
 
 ### Available AI Tools
 

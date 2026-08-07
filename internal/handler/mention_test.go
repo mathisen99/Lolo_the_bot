@@ -146,19 +146,19 @@ func TestWorkingAcknowledgementIsDelayedAndSentAtMostOnce(t *testing.T) {
 			wantStatuses: []string{"First update"},
 		},
 		{
-			name: "long task without processing sends fallback acknowledgement",
+			name: "long task without model status stays silent until completion",
 			events: []scriptedMentionEvent{
 				{delay: 40 * time.Millisecond, response: &APIResponse{Status: "success", Message: "Done"}},
 			},
-			wantStatuses: []string{fallbackWorkingAcknowledgement},
+			wantStatuses: nil,
 		},
 		{
-			name: "late processing after fallback does not send another acknowledgement",
+			name: "late model status is still contextual",
 			events: []scriptedMentionEvent{
 				{delay: 30 * time.Millisecond, response: &APIResponse{Status: "processing", Message: "Late update"}},
 				{delay: 20 * time.Millisecond, response: &APIResponse{Status: "success", Message: "Done"}},
 			},
-			wantStatuses: []string{fallbackWorkingAcknowledgement},
+			wantStatuses: []string{"Late update"},
 		},
 	}
 
@@ -175,7 +175,6 @@ func TestWorkingAcknowledgementIsDelayedAndSentAtMostOnce(t *testing.T) {
 				api, user.NewManager(db), db, "Lolo", false, false, "", "libera", nil, 20,
 			)
 			handler.workingAckDelay = 10 * time.Millisecond
-			handler.workingFallbackDelay = 20 * time.Millisecond
 			var statuses []string
 
 			response, err := handler.HandleMention(

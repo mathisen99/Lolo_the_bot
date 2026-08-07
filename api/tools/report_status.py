@@ -31,17 +31,23 @@ class ReportStatusTool(Tool):
             "type": "function",
             "name": self.name,
             "description": (
-                "Send one concise acknowledgement before beginning a genuinely long, "
-                "multi-step task. Call this at most once per request. Do not use it for "
-                "simple questions, calculations, or a single quick web lookup. Further "
-                "actions are recorded privately and must not be narrated to the channel."
+                "Send one concise, request-specific acknowledgement before beginning a "
+                "genuinely long, multi-step task. It must briefly say why this request "
+                "will take time and what concrete checks or actions will happen next. "
+                "Never send generic or reusable boilerplate. Call this at most once per "
+                "request. Do not use it for simple questions, calculations, or a single "
+                "quick web lookup. Further actions are recorded privately and must not "
+                "be narrated to the channel."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "status_message": {
                         "type": "string",
-                        "description": "A short acknowledgement (e.g., 'I'll investigate that and report back.')"
+                        "description": (
+                            "A fresh, short sentence tied to the request that states both "
+                            "why the work may take a while and the concrete next actions."
+                        )
                     }
                 },
                 "required": ["status_message"]

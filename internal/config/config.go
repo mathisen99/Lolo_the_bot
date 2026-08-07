@@ -181,6 +181,14 @@ func DefaultConfig() *Config {
 			Active: false,
 			URL:    "",
 		},
+		CodexResetNotifications: CodexResetNotificationsConfig{
+			Enabled:             false,
+			Network:             DefaultNetworkID,
+			PollIntervalSeconds: 300,
+			QueryTimeoutSeconds: 20,
+			StatePath:           "data/codex_reset_notifications.json",
+			CodexPath:           "codex",
+		},
 	}
 }
 
@@ -235,6 +243,25 @@ func applyDefaults(cfg *Config) {
 	// configs without a [database].path key keep using data/bot.db.
 	if cfg.Database.Path == "" {
 		cfg.Database.Path = DefaultDatabasePath
+	}
+
+	resetNotifications := &cfg.CodexResetNotifications
+	if resetNotifications.Network == "" {
+		resetNotifications.Network = DefaultNetworkID
+	} else {
+		resetNotifications.Network = normalizeNetworkID(resetNotifications.Network)
+	}
+	if resetNotifications.PollIntervalSeconds == 0 {
+		resetNotifications.PollIntervalSeconds = 300
+	}
+	if resetNotifications.QueryTimeoutSeconds == 0 {
+		resetNotifications.QueryTimeoutSeconds = 20
+	}
+	if resetNotifications.StatePath == "" {
+		resetNotifications.StatePath = "data/codex_reset_notifications.json"
+	}
+	if resetNotifications.CodexPath == "" {
+		resetNotifications.CodexPath = "codex"
 	}
 
 	// HTTP transport tunables for the Python API client. Defaults equal the
@@ -427,6 +454,57 @@ func validate(cfg *Config) error {
 	}
 	if cfg.API.HTTP.ResponseHeaderTimeout <= 0 {
 		return fmt.Errorf("api.http.response_header_timeout must be positive, got %d", cfg.API.HTTP.ResponseHeaderTimeout)
+	}
+
+	if cfg.CodexResetNotifications.Enabled {
+		reset := cfg.CodexResetNotifications
+		if len(reset.Channels) == 0 {
+			return fmt.Errorf("codex_reset_notifications.channels must not be empty when enabled")
+		}
+		if reset.PollIntervalSeconds <= 0 {
+			return fmt.Errorf("codex_reset_notifications.poll_interval_seconds must be positive, got %d", reset.PollIntervalSeconds)
+		}
+		if reset.QueryTimeoutSeconds <= 0 {
+			return fmt.Errorf("codex_reset_notifications.query_timeout_seconds must be positive, got %d", reset.QueryTimeoutSeconds)
+		}
+		if strings.TrimSpace(reset.StatePath) == "" {
+			return fmt.Errorf("codex_reset_notifications.state_path must not be empty when enabled")
+		}
+		if strings.TrimSpace(reset.CodexPath) == "" {
+			return fmt.Errorf("codex_reset_notifications.codex_path must not be empty when enabled")
+		}
+		var notificationNetwork *NetworkConfig
+		for _, network := range cfg.Networks {
+			if network.ID == reset.Network {
+				networkCopy := network
+				notificationNetwork = &networkCopy
+				break
+			}
+		}
+		if notificationNetwork == nil {
+			return fmt.Errorf("codex_reset_notifications.network %q is not configured", reset.Network)
+		}
+		seenChannels := make(map[string]struct{}, len(reset.Channels))
+		for _, channel := range reset.Channels {
+			channelKey := strings.ToLower(strings.TrimSpace(channel))
+			if channelKey == "" {
+				return fmt.Errorf("codex_reset_notifications.channels must not contain an empty channel")
+			}
+			if _, duplicate := seenChannels[channelKey]; duplicate {
+				return fmt.Errorf("codex_reset_notifications.channels contains duplicate channel %q", channel)
+			}
+			seenChannels[channelKey] = struct{}{}
+			joined := false
+			for _, configuredChannel := range notificationNetwork.Channels {
+				if strings.EqualFold(configuredChannel, channel) {
+					joined = true
+					break
+				}
+			}
+			if !joined {
+				return fmt.Errorf("codex reset notification channel %q is not configured on network %q", channel, reset.Network)
+			}
+		}
 	}
 
 	return nil

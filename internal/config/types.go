@@ -4,16 +4,17 @@ import "time"
 
 // Config represents the complete bot configuration
 type Config struct {
-	Server             ServerConfig             `toml:"server"`
-	Auth               AuthConfig               `toml:"auth"`
-	Networks           []NetworkConfig          `toml:"networks"`
-	Bot                BotConfig                `toml:"bot"`
-	Limits             LimitsConfig             `toml:"limits"`
-	Database           DatabaseConfig           `toml:"database"`
-	Logging            LoggingConfig            `toml:"logging"`
-	API                APIConfig                `toml:"api"`
-	Images             ImagesConfig             `toml:"images"`
-	PhoneNotifications PhoneNotificationsConfig `toml:"phone_notifications"`
+	Server                  ServerConfig                  `toml:"server"`
+	Auth                    AuthConfig                    `toml:"auth"`
+	Networks                []NetworkConfig               `toml:"networks"`
+	Bot                     BotConfig                     `toml:"bot"`
+	Limits                  LimitsConfig                  `toml:"limits"`
+	Database                DatabaseConfig                `toml:"database"`
+	Logging                 LoggingConfig                 `toml:"logging"`
+	API                     APIConfig                     `toml:"api"`
+	Images                  ImagesConfig                  `toml:"images"`
+	PhoneNotifications      PhoneNotificationsConfig      `toml:"phone_notifications"`
+	CodexResetNotifications CodexResetNotificationsConfig `toml:"codex_reset_notifications"`
 }
 
 const DefaultNetworkID = "libera"
@@ -52,6 +53,18 @@ type ImagesConfig struct {
 type PhoneNotificationsConfig struct {
 	Active bool   `toml:"active"`
 	URL    string `toml:"url"`
+}
+
+// CodexResetNotificationsConfig controls announcements for special Codex
+// rate-limit reset credits. Normal quota-window resets are never announced.
+type CodexResetNotificationsConfig struct {
+	Enabled             bool     `toml:"enabled"`
+	Network             string   `toml:"network"`
+	Channels            []string `toml:"channels"`
+	PollIntervalSeconds int      `toml:"poll_interval_seconds"`
+	QueryTimeoutSeconds int      `toml:"query_timeout_seconds"`
+	StatePath           string   `toml:"state_path"`
+	CodexPath           string   `toml:"codex_path"`
 }
 
 // ServerConfig contains IRC server connection settings
@@ -260,6 +273,16 @@ func (c *HTTPConfig) GetIdleConnTimeoutDuration() time.Duration {
 // GetResponseHeaderTimeoutDuration returns the response header timeout as a time.Duration
 func (c *HTTPConfig) GetResponseHeaderTimeoutDuration() time.Duration {
 	return time.Duration(c.ResponseHeaderTimeout) * time.Second
+}
+
+// GetPollIntervalDuration returns how often Codex reset-credit state is read.
+func (c *CodexResetNotificationsConfig) GetPollIntervalDuration() time.Duration {
+	return time.Duration(c.PollIntervalSeconds) * time.Second
+}
+
+// GetQueryTimeoutDuration returns the per-query Codex app-server timeout.
+func (c *CodexResetNotificationsConfig) GetQueryTimeoutDuration() time.Duration {
+	return time.Duration(c.QueryTimeoutSeconds) * time.Second
 }
 
 // GetMentionHistoryDepth returns the configured mention history depth, falling

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/yourusername/lolo/internal/callback"
+	"github.com/yourusername/lolo/internal/codexreset"
 	"github.com/yourusername/lolo/internal/commands"
 	"github.com/yourusername/lolo/internal/config"
 	"github.com/yourusername/lolo/internal/database"
@@ -294,6 +295,30 @@ func main() {
 		}
 	}
 
+	var codexResetWatcher *codexreset.Watcher
+	if cfg.CodexResetNotifications.Enabled && !cfg.Bot.TestMode {
+		for _, rt := range runtimes {
+			if rt.id != cfg.CodexResetNotifications.Network {
+				continue
+			}
+			codexResetWatcher = codexreset.New(
+				codexreset.Options{
+					CodexPath:    cfg.CodexResetNotifications.CodexPath,
+					StatePath:    cfg.CodexResetNotifications.StatePath,
+					Channels:     append([]string(nil), cfg.CodexResetNotifications.Channels...),
+					PollInterval: cfg.CodexResetNotifications.GetPollIntervalDuration(),
+					QueryTimeout: cfg.CodexResetNotifications.GetQueryTimeoutDuration(),
+				},
+				rt.connManager.GetClient(),
+				logger,
+			)
+			break
+		}
+		if codexResetWatcher == nil {
+			logger.Warning("Codex reset notifications disabled: network %s has no runtime", cfg.CodexResetNotifications.Network)
+		}
+	}
+
 	// Cache command metadata from Python API (Requirement 31.5)
 	if healthResp != nil {
 		logger.Info("Fetching command metadata from Python API...")
@@ -312,6 +337,15 @@ func main() {
 	shutdownHandler := shutdown.NewHandler(logger, 5*time.Second)
 
 	// Register shutdown functions in order
+	// Stop account polling before disconnecting IRC so no notification can race
+	// with connection shutdown.
+	if codexResetWatcher != nil {
+		shutdownHandler.RegisterShutdownFunc(func() error {
+			logger.Info("Stopping Codex reset watcher...")
+			return codexResetWatcher.Stop()
+		})
+	}
+
 	// 1. Send IRC QUIT message (Requirement 10.1)
 	shutdownHandler.RegisterShutdownFunc(func() error {
 		logger.Info("Sending QUIT message to IRC servers...")
@@ -408,6 +442,14 @@ func main() {
 			logger.Warning("Failed to connect optional IRC network %s: %v", rt.id, err)
 			go retryOptionalNetworkRuntime(rt, shutdownHandler, logger, cfg.Limits.GetReconnectDelayMinDuration())
 			continue
+		}
+	}
+
+	if codexResetWatcher != nil {
+		if err := codexResetWatcher.Start(); err != nil {
+			logger.Warning("Failed to start Codex reset watcher: %v", err)
+		} else {
+			logger.Success("Codex reset watcher started for %s", strings.Join(cfg.CodexResetNotifications.Channels, ", "))
 		}
 	}
 

@@ -20,7 +20,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **Shell Execution** - Run system commands (owner only)
 - **IRC Commands** - Execute IRC commands via AI (whois, NickServ, ChanServ, channel queries)
 - **Source Code Introspection** - AI can read and explain its own source code
-- **Agentic Status Reporting** - Real-time status updates for complex tasks
+- **Agentic Status Reporting** - One concise working acknowledgement for long-running tasks, followed by the final answer
 - **Knowledge Base (RAG)** - Learn from PDFs/articles and answer questions about them
 
 ### Bot Management
@@ -30,6 +30,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **Moderation** - Kick, ban, mute, and channel management commands
 - **Audit Logging** - Track all administrative actions
 - **Rate Limiting** - Prevent spam with per-user cooldowns
+- **Codex Reset Notifications** - Announce special OpenAI-issued Codex limit resets without announcing normal scheduled quota resets
 
 ## Quick Start
 
@@ -40,6 +41,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) (Python package manager)
 - KVM access (optional, for Python sandbox - `/dev/kvm`)
 - Docker (optional, for building Python sandbox rootfs)
+- An installed and authenticated Codex CLI (optional, for special reset notifications)
 
 **API Keys Required:**
 - **OpenAI API key** - For AI conversations and reasoning ([platform.openai.com](https://platform.openai.com))
@@ -212,6 +214,11 @@ Mention the bot to chat:
 <you>  lolo: search for latest news about AI
 <lolo> Here are the latest AI developments I found...
 ```
+
+For a request that is still running after 10 seconds, the bot sends one short
+working acknowledgement so the channel knows it has not stalled. Quick requests
+remain single-message replies, and additional tool/status events do not produce
+more acknowledgements before the final answer.
 
 ### Available AI Tools
 
@@ -466,6 +473,15 @@ mention_history_depth = 20      # Recent channel messages sent as mention contex
 [images]
 download_channels = ["#yourchannel"]  # Channels to auto-download images from
 
+[codex_reset_notifications]
+enabled = false
+network = "libera"                     # Network used to send announcements
+channels = ["#yourchannel"]            # Must also be joined in [[networks]].channels
+poll_interval_seconds = 300
+query_timeout_seconds = 20
+state_path = "data/codex_reset_notifications.json"
+codex_path = "codex"                   # Or an absolute path such as /usr/bin/codex
+
 [api]
 circuit_breaker_threshold = 5  # Failures before circuit opens
 max_retries = 3                # Max API retry attempts
@@ -484,6 +500,24 @@ max_retries = 3                # Max API retry attempts
 A legacy top-level `[server]`/`[auth]` form is still supported as a fallback and
 loads as a single `libera` network when `[[networks]]` is absent, but new configs
 should use the `[[networks]]` form shown above.
+
+#### Special Codex Reset Notifications
+
+When `[codex_reset_notifications]` is enabled, the Go bot polls the authenticated
+local Codex CLI for structured reset credits and explicit special-reset workspace
+notices. A new qualifying signal produces one announcement in each configured
+channel. The first successful read only establishes a silent baseline, so starting
+or restarting the bot cannot announce reset data that was already present.
+
+Normal five-hour, weekly, and monthly quota-window data is deliberately not passed
+to the watcher and cannot trigger an announcement. Delivery state is persisted in
+`state_path`, preventing duplicates across restarts and allowing a failed channel
+delivery to be retried without resending to channels that already received it.
+Reading this account state does not consume a reset credit.
+
+The configured network and channels must already exist in `[[networks]]`, and the
+user running the bot must be logged in through the Codex CLI. Keep this feature
+disabled on machines that do not have a suitable local Codex login.
 
 Rizon owner authentication is intentionally stricter than Libera. On Rizon the bot must ignore hostmask, vHost, ident, and nickname-only identity for elevated permissions. Owner is granted only when the sender nick is exactly `Mathisen` and a fresh `NickServ STATUS Mathisen` reply is exactly `Mathisen 3`; statuses `0`, `1`, `2`, malformed replies, timeouts, and service failures are denied.
 
@@ -570,6 +604,12 @@ source_code_enabled = true     # Source code introspection
 - Check Python API is running on port 8000
 - Verify OpenAI API key is valid and has credits
 - Check `api/config/ai_settings.toml` for disabled tools
+
+**Codex reset watcher cannot read account state**
+- Run `codex login` as the same operating-system user that runs the bot
+- Verify `codex_path` points to the installed Codex executable
+- Check that every notification channel is listed on the selected `[[networks]]` entry
+- Review the bot log for `Codex reset watcher` warnings
 
 **Permission denied errors**
 - Use `!verify PASSWORD` via PM (not in channel)

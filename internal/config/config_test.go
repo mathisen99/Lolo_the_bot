@@ -100,6 +100,72 @@ func TestLoadMultiNetworkConfig(t *testing.T) {
 	}
 }
 
+func TestLoadCodexResetNotificationConfig(t *testing.T) {
+	network := strings.Replace(
+		networkBlock("libera", "irc.libera.chat"),
+		`channels = ["#mathizen"]`,
+		`channels = ["#mathizen", "#mathizen.net", "##llm"]`,
+		1,
+	)
+	path := writeConfig(t, multiNetworkConfig(network)+`
+
+[codex_reset_notifications]
+enabled = true
+network = "libera"
+channels = ["#mathizen", "#mathizen.net", "##llm"]
+poll_interval_seconds = 300
+query_timeout_seconds = 20
+state_path = "data/codex_reset_notifications.json"
+codex_path = "/usr/bin/codex"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load config failed: %v", err)
+	}
+
+	reset := cfg.CodexResetNotifications
+	if !reset.Enabled {
+		t.Fatal("Codex reset notifications are not enabled")
+	}
+	if reset.Network != "libera" {
+		t.Fatalf("reset notification network = %q, want libera", reset.Network)
+	}
+	wantChannels := []string{"#mathizen", "#mathizen.net", "##llm"}
+	if len(reset.Channels) != len(wantChannels) {
+		t.Fatalf("reset channels = %#v, want %#v", reset.Channels, wantChannels)
+	}
+	for index := range wantChannels {
+		if reset.Channels[index] != wantChannels[index] {
+			t.Fatalf("reset channels = %#v, want %#v", reset.Channels, wantChannels)
+		}
+	}
+	if reset.PollIntervalSeconds != 300 || reset.QueryTimeoutSeconds != 20 {
+		t.Fatalf("unexpected reset watcher timing: poll=%d timeout=%d", reset.PollIntervalSeconds, reset.QueryTimeoutSeconds)
+	}
+}
+
+func TestDefaultConfigKeepsCodexResetNotificationsDisabled(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.CodexResetNotifications.Enabled {
+		t.Fatal("default config should not opt into Codex reset announcements")
+	}
+}
+
+func TestLoadRejectsCodexResetNotificationChannelOutsideNetwork(t *testing.T) {
+	path := writeConfig(t, multiNetworkConfig(networkBlock("libera", "irc.libera.chat"))+`
+
+[codex_reset_notifications]
+enabled = true
+network = "libera"
+channels = ["#not-joined"]
+`)
+
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "is not configured on network") {
+		t.Fatalf("error = %v, want unconfigured notification channel error", err)
+	}
+}
+
 func TestLoadAppliesHTTPAndHistoryDefaults(t *testing.T) {
 	// A config that omits [api.http] and limits.mention_history_depth should
 	// still load and fall back to the documented defaults (Requirement 4.2).

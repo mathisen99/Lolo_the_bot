@@ -62,15 +62,13 @@ func (discardLogger) Success(string, ...interface{}) {}
 func (discardLogger) Warning(string, ...interface{}) {}
 
 func TestWatcherBaselinesThenAnnouncesNewResetOnceAcrossRestart(t *testing.T) {
-	now := time.Now().Unix()
-	existing := ResetCredit{ID: "existing", ResetType: "codexRateLimits", Status: "available", GrantedAt: now - 3600}
-	newCredit := ResetCredit{ID: "new", ResetType: "codexRateLimits", Status: "available", GrantedAt: now}
+	now := time.Now()
 	statePath := filepath.Join(t.TempDir(), "codex-reset-state.json")
 	channels := []string{"#mathizen", "#mathizen.net", "##llm"}
 	sender := &recordingSender{}
 	source := &queuedSource{snapshots: []Snapshot{
-		resetSnapshot(1, existing),
-		resetSnapshot(2, existing, newCredit),
+		rateLimitSnapshot(76, 64, now.Add(4*time.Hour), now.Add(4*24*time.Hour)),
+		rateLimitSnapshot(0, 0, now.Add(5*time.Hour), now.Add(7*24*time.Hour)),
 	}}
 	watcher := newWithSource(testOptions(statePath, channels), sender, discardLogger{}, source)
 
@@ -96,7 +94,9 @@ func TestWatcherBaselinesThenAnnouncesNewResetOnceAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadState: %v", err)
 	}
-	restartSource := &queuedSource{snapshots: []Snapshot{resetSnapshot(2, existing, newCredit)}}
+	restartSource := &queuedSource{snapshots: []Snapshot{
+		rateLimitSnapshot(0, 0, now.Add(5*time.Hour), now.Add(7*24*time.Hour)),
+	}}
 	restarted := newWithSource(testOptions(statePath, channels), sender, discardLogger{}, restartSource)
 	restarted.check(context.Background(), &reloaded)
 	for _, channel := range channels {
@@ -106,61 +106,81 @@ func TestWatcherBaselinesThenAnnouncesNewResetOnceAcrossRestart(t *testing.T) {
 	}
 }
 
-func TestUnchangedAndDecreasedResetCreditCountsStaySilent(t *testing.T) {
-	state := persistedState{
-		Version:                       stateVersion,
-		ResetCreditsInitialized:       true,
-		LastAvailableResetCreditCount: 2,
-		LastCheckedAt:                 time.Now().Add(-time.Minute).Unix(),
-	}
+func TestScheduledRateLimitResetStaysSilent(t *testing.T) {
 	now := time.Now()
+	state := persistedState{
+		Version:               stateVersion,
+		RateLimitsInitialized: true,
+		RateLimitWindows: map[string]persistedRateLimitWindow{
+			"codex:primary": {UsedPercent: 80, ResetsAt: now.Add(-time.Minute).Unix()},
+		},
+	}
 
 	watcher := newWithSource(testOptions(filepath.Join(t.TempDir(), "state.json"), []string{"#mathizen"}), &recordingSender{}, discardLogger{}, &queuedSource{})
-	watcher.applySnapshot(&state, Snapshot{ResetCredits: &ResetCreditsSummary{AvailableCount: 2}}, now)
-	watcher.applySnapshot(&state, Snapshot{ResetCredits: &ResetCreditsSummary{AvailableCount: 0}}, now.Add(time.Minute))
+	watcher.applySnapshot(&state, rateLimitSnapshot(0, 0, now.Add(5*time.Hour), now.Add(7*24*time.Hour)), now)
 
 	if len(state.Pending) != 0 {
-		t.Fatalf("ordinary or decreasing state created announcement: %#v", state.Pending)
+		t.Fatalf("scheduled reset created announcement: %#v", state.Pending)
 	}
 }
 
-func TestOldCreditDetailRotationDoesNotAnnounce(t *testing.T) {
+func TestRateLimitUsageIncreaseStaysSilent(t *testing.T) {
 	now := time.Now()
-	oldCredit := ResetCredit{
-		ID:        "old-but-previously-hidden",
-		ResetType: "codexRateLimits",
-		Status:    "available",
-		GrantedAt: now.Add(-24 * time.Hour).Unix(),
-	}
 	state := persistedState{
-		Version:                       stateVersion,
-		ResetCreditsInitialized:       true,
-		LastAvailableResetCreditCount: 1,
-		LastCheckedAt:                 now.Add(-time.Minute).Unix(),
+		Version:               stateVersion,
+		RateLimitsInitialized: true,
+		RateLimitWindows: map[string]persistedRateLimitWindow{
+			"codex:primary":   {UsedPercent: 20, ResetsAt: now.Add(4 * time.Hour).Unix()},
+			"codex:secondary": {UsedPercent: 30, ResetsAt: now.Add(4 * 24 * time.Hour).Unix()},
+		},
 	}
 	watcher := newWithSource(testOptions(filepath.Join(t.TempDir(), "state.json"), []string{"#mathizen"}), &recordingSender{}, discardLogger{}, &queuedSource{})
 
-	watcher.applySnapshot(&state, resetSnapshot(1, oldCredit), now)
+	watcher.applySnapshot(&state, rateLimitSnapshot(21, 31, now.Add(4*time.Hour), now.Add(4*24*time.Hour)), now)
 
 	if len(state.Pending) != 0 {
-		t.Fatalf("old rotated credit detail created announcement: %#v", state.Pending)
+		t.Fatalf("ordinary usage increase created announcement: %#v", state.Pending)
 	}
 }
 
-func TestCountOnlyResetCreditIncreaseAnnounces(t *testing.T) {
+func TestEarlyRateLimitResetAnnounces(t *testing.T) {
 	now := time.Now()
 	state := persistedState{
-		Version:                       stateVersion,
-		ResetCreditsInitialized:       true,
-		LastAvailableResetCreditCount: 1,
-		LastCheckedAt:                 now.Add(-time.Minute).Unix(),
+		Version:               stateVersion,
+		RateLimitsInitialized: true,
+		RateLimitWindows: map[string]persistedRateLimitWindow{
+			"codex:primary":   {UsedPercent: 72, ResetsAt: now.Add(4 * time.Hour).Unix()},
+			"codex:secondary": {UsedPercent: 81, ResetsAt: now.Add(4 * 24 * time.Hour).Unix()},
+		},
 	}
 	watcher := newWithSource(testOptions(filepath.Join(t.TempDir(), "state.json"), []string{"#mathizen"}), &recordingSender{}, discardLogger{}, &queuedSource{})
 
-	watcher.applySnapshot(&state, Snapshot{ResetCredits: &ResetCreditsSummary{AvailableCount: 2}}, now)
+	watcher.applySnapshot(&state, rateLimitSnapshot(0, 0, now.Add(5*time.Hour), now.Add(7*24*time.Hour)), now)
 
 	if len(state.Pending) != 1 || state.Pending[0].Message != announcementText {
-		t.Fatalf("pending = %#v, want one special-reset announcement", state.Pending)
+		t.Fatalf("pending = %#v, want one early-reset announcement", state.Pending)
+	}
+}
+
+func TestRedeemedResetCreditStaysSilent(t *testing.T) {
+	now := time.Now()
+	state := persistedState{
+		Version:                       stateVersion,
+		RateLimitsInitialized:         true,
+		ResetCreditsInitialized:       true,
+		LastAvailableResetCreditCount: 1,
+		RateLimitWindows: map[string]persistedRateLimitWindow{
+			"codex:primary": {UsedPercent: 72, ResetsAt: now.Add(4 * time.Hour).Unix()},
+		},
+	}
+	watcher := newWithSource(testOptions(filepath.Join(t.TempDir(), "state.json"), []string{"#mathizen"}), &recordingSender{}, discardLogger{}, &queuedSource{})
+	snapshot := rateLimitSnapshot(0, 0, now.Add(5*time.Hour), now.Add(7*24*time.Hour))
+	snapshot.ResetCredits = &ResetCreditsSummary{AvailableCount: 0}
+
+	watcher.applySnapshot(&state, snapshot, now)
+
+	if len(state.Pending) != 0 {
+		t.Fatalf("redeemed reset credit created announcement: %#v", state.Pending)
 	}
 }
 
@@ -173,8 +193,9 @@ func TestWorkspaceMessageFilterRejectsRoutineResets(t *testing.T) {
 		{"Your Codex five-hour limit resets at 15:00.", false},
 		{"Your monthly Codex usage limit was reset.", false},
 		{"OpenAI issued a special reset for Codex limits.", true},
-		{"A Codex rate-limit reset credit is now available.", true},
+		{"A Codex rate-limit reset credit is now available.", false},
 		{"Codex limits have been reset for everyone.", true},
+		{"Usage limits have been reset for all paid ChatGPT Work and Codex users.", true},
 		{"General workspace maintenance is complete.", false},
 	}
 
@@ -232,11 +253,25 @@ func TestWatcherStartAndStop(t *testing.T) {
 	}
 }
 
-func resetSnapshot(count int64, credits ...ResetCredit) Snapshot {
-	copyOfCredits := append([]ResetCredit(nil), credits...)
-	return Snapshot{ResetCredits: &ResetCreditsSummary{
-		AvailableCount: count,
-		Credits:        &copyOfCredits,
+func rateLimitSnapshot(primaryUsed, secondaryUsed int, primaryReset, secondaryReset time.Time) Snapshot {
+	primaryDuration := int64(300)
+	secondaryDuration := int64(7 * 24 * 60)
+	primaryResetAt := primaryReset.Unix()
+	secondaryResetAt := secondaryReset.Unix()
+	return Snapshot{RateLimits: map[string]RateLimitSnapshot{
+		"codex": {
+			LimitID: "codex",
+			Primary: &RateLimitWindow{
+				UsedPercent:        primaryUsed,
+				WindowDurationMins: &primaryDuration,
+				ResetsAt:           &primaryResetAt,
+			},
+			Secondary: &RateLimitWindow{
+				UsedPercent:        secondaryUsed,
+				WindowDurationMins: &secondaryDuration,
+				ResetsAt:           &secondaryResetAt,
+			},
+		},
 	}}
 }
 

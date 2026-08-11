@@ -504,16 +504,17 @@ should use the `[[networks]]` form shown above.
 #### Special Codex Reset Notifications
 
 When `[codex_reset_notifications]` is enabled, the Go bot polls the authenticated
-local Codex CLI for structured reset credits and explicit special-reset workspace
-notices. A new qualifying signal produces one announcement in each configured
-channel. The first successful read only establishes a silent baseline, so starting
-or restarting the bot cannot announce reset data that was already present.
+local Codex CLI and persists each reported rate-limit window. A usage percentage
+drop well before that window's previously advertised reset time is treated as an
+OpenAI-issued early reset and produces one announcement in each configured channel.
+Explicit special-reset workspace notices are accepted as a secondary signal. The
+first successful read only establishes a silent baseline.
 
-Normal five-hour, weekly, and monthly quota-window data is deliberately not passed
-to the watcher and cannot trigger an announcement. Delivery state is persisted in
+A normal five-hour, weekly, or monthly reset occurs at the previously advertised
+timestamp and remains silent. Banked reset credits are also ignored because they
+have not reset a window until a user redeems one. Delivery state is persisted in
 `state_path`, preventing duplicates across restarts and allowing a failed channel
 delivery to be retried without resending to channels that already received it.
-Reading this account state does not consume a reset credit.
 
 The configured network and channels must already exist in `[[networks]]`, and the
 user running the bot must be logged in through the Codex CLI. Keep this feature

@@ -12,27 +12,27 @@ import (
 	"strings"
 )
 
-// Snapshot is the subset of Codex account state used by the watcher. Quota
-// windows are intentionally absent: ordinary scheduled resets must not cause
-// announcements.
+// Snapshot is the subset of Codex account state used by the watcher.
 type Snapshot struct {
+	RateLimits        map[string]RateLimitSnapshot
 	ResetCredits      *ResetCreditsSummary
 	WorkspaceMessages *WorkspaceMessagesSnapshot
 }
 
 type ResetCreditsSummary struct {
-	AvailableCount int64          `json:"availableCount"`
-	Credits        *[]ResetCredit `json:"credits"`
+	AvailableCount int64 `json:"availableCount"`
 }
 
-type ResetCredit struct {
-	ID          string  `json:"id"`
-	ResetType   string  `json:"resetType"`
-	Status      string  `json:"status"`
-	GrantedAt   int64   `json:"grantedAt"`
-	ExpiresAt   *int64  `json:"expiresAt"`
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
+type RateLimitSnapshot struct {
+	LimitID   string           `json:"limitId"`
+	Primary   *RateLimitWindow `json:"primary"`
+	Secondary *RateLimitWindow `json:"secondary"`
+}
+
+type RateLimitWindow struct {
+	UsedPercent        int    `json:"usedPercent"`
+	WindowDurationMins *int64 `json:"windowDurationMins"`
+	ResetsAt           *int64 `json:"resetsAt"`
 }
 
 type WorkspaceMessagesSnapshot struct {
@@ -72,7 +72,9 @@ type rpcError struct {
 }
 
 type rateLimitsResult struct {
-	ResetCredits *ResetCreditsSummary `json:"rateLimitResetCredits"`
+	RateLimits          *RateLimitSnapshot           `json:"rateLimits"`
+	RateLimitsByLimitID map[string]RateLimitSnapshot `json:"rateLimitsByLimitId"`
+	ResetCredits        *ResetCreditsSummary         `json:"rateLimitResetCredits"`
 }
 
 func (s *AppServerSource) Read(ctx context.Context) (Snapshot, error) {
@@ -153,11 +155,12 @@ func (s *AppServerSource) Read(ctx context.Context) (Snapshot, error) {
 			if err := json.Unmarshal(envelope.Result, &result); err != nil {
 				return Snapshot{}, fmt.Errorf("decode Codex rate-limit response: %w", err)
 			}
+			snapshot.RateLimits = normalizeRateLimits(result)
 			snapshot.ResetCredits = result.ResetCredits
 		case 3:
 			gotWorkspaceMessages = true
 			// Workspace messages are optional. An unavailable route must not hide
-			// the stronger structured reset-credit signal.
+			// reset detection from the rate-limit window snapshots.
 			if envelope.Error == nil {
 				var result WorkspaceMessagesSnapshot
 				if err := json.Unmarshal(envelope.Result, &result); err != nil {
@@ -169,6 +172,27 @@ func (s *AppServerSource) Read(ctx context.Context) (Snapshot, error) {
 	}
 
 	return snapshot, nil
+}
+
+func normalizeRateLimits(result rateLimitsResult) map[string]RateLimitSnapshot {
+	if len(result.RateLimitsByLimitID) > 0 {
+		normalized := make(map[string]RateLimitSnapshot, len(result.RateLimitsByLimitID))
+		for key, snapshot := range result.RateLimitsByLimitID {
+			if strings.TrimSpace(snapshot.LimitID) == "" {
+				snapshot.LimitID = key
+			}
+			normalized[key] = snapshot
+		}
+		return normalized
+	}
+	if result.RateLimits == nil {
+		return nil
+	}
+	key := strings.TrimSpace(result.RateLimits.LimitID)
+	if key == "" {
+		key = "codex"
+	}
+	return map[string]RateLimitSnapshot{key: *result.RateLimits}
 }
 
 func readRPCResponse(ctx context.Context, scanner *bufio.Scanner, id int) (rpcEnvelope, error) {

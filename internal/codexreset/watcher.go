@@ -1,5 +1,5 @@
-// Package codexreset announces special Codex rate-limit reset grants without
-// confusing them with normal five-hour, weekly, or monthly quota resets.
+// Package codexreset announces Codex rate-limit windows reset ahead of their
+// advertised schedule without confusing them with normal quota resets.
 package codexreset
 
 import (
@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	announcementText        = "OpenAI has issued a special Codex rate-limit reset. This is separate from normal scheduled limit windows."
-	announcementDedupWindow = time.Hour
-	maximumRememberedIDs    = 500
+	announcementText          = "OpenAI has reset Codex usage limits outside the normal scheduled windows."
+	announcementDedupWindow   = time.Hour
+	scheduledResetGraceWindow = 10 * time.Minute
+	maximumRememberedIDs      = 500
 )
 
 type Sender interface {
@@ -144,8 +145,9 @@ func (w *Watcher) check(ctx context.Context, state *persistedState) {
 
 func (w *Watcher) applySnapshot(state *persistedState, snapshot Snapshot, now time.Time) {
 	signals := make([]string, 0, 2)
-	if snapshot.ResetCredits != nil {
-		signals = append(signals, applyResetCredits(state, *snapshot.ResetCredits, now)...)
+	resetCreditConsumed := observeResetCreditCount(state, snapshot.ResetCredits)
+	if len(snapshot.RateLimits) > 0 {
+		signals = append(signals, applyRateLimits(state, snapshot.RateLimits, now, resetCreditConsumed)...)
 	}
 	if snapshot.WorkspaceMessages != nil && snapshot.WorkspaceMessages.FeatureEnabled {
 		signals = append(signals, applyWorkspaceMessages(state, *snapshot.WorkspaceMessages)...)
@@ -167,52 +169,81 @@ func (w *Watcher) applySnapshot(state *persistedState, snapshot Snapshot, now ti
 	state.LastAnnouncementAt = now.Unix()
 }
 
-func applyResetCredits(state *persistedState, summary ResetCreditsSummary, now time.Time) []string {
-	credits := []ResetCredit(nil)
-	if summary.Credits != nil {
-		credits = *summary.Credits
+func observeResetCreditCount(state *persistedState, summary *ResetCreditsSummary) bool {
+	if summary == nil {
+		return false
 	}
-
 	if !state.ResetCreditsInitialized {
-		for _, credit := range credits {
-			state.KnownCreditIDs = rememberID(state.KnownCreditIDs, credit.ID)
-		}
 		state.LastAvailableResetCreditCount = summary.AvailableCount
 		state.ResetCreditsInitialized = true
+		return false
+	}
+	consumed := summary.AvailableCount < state.LastAvailableResetCreditCount
+	state.LastAvailableResetCreditCount = summary.AvailableCount
+	return consumed
+}
+
+func applyRateLimits(state *persistedState, snapshots map[string]RateLimitSnapshot, now time.Time, resetCreditConsumed bool) []string {
+	current := flattenRateLimitWindows(snapshots)
+	if len(current) == 0 {
+		return nil
+	}
+	if !state.RateLimitsInitialized {
+		state.RateLimitWindows = current
+		state.RateLimitsInitialized = true
 		return nil
 	}
 
-	newGrant := false
-	key := ""
-	for _, credit := range credits {
-		known := containsID(state.KnownCreditIDs, credit.ID)
-		state.KnownCreditIDs = rememberID(state.KnownCreditIDs, credit.ID)
-		if known || credit.ID == "" || credit.ResetType != "codexRateLimits" || credit.Status != "available" {
-			continue
-		}
-		// A previously unseen but old row can appear when the backend rotates a
-		// capped detail list. Only a grant newer than our prior observation is
-		// strong enough to announce.
-		if state.LastCheckedAt > 0 && credit.GrantedAt < state.LastCheckedAt-5 {
-			continue
-		}
-		newGrant = true
-		if key == "" {
-			key = "credit:" + credit.ID
+	resetKey := ""
+	for key, window := range current {
+		previous, known := state.RateLimitWindows[key]
+		if known && isUnexpectedEarlyReset(previous, window, now) && (resetKey == "" || key < resetKey) {
+			resetKey = key
 		}
 	}
-
-	if summary.AvailableCount > state.LastAvailableResetCreditCount {
-		newGrant = true
-		if key == "" {
-			key = fmt.Sprintf("credit-count:%d:%d", now.Unix(), summary.AvailableCount)
-		}
-	}
-	state.LastAvailableResetCreditCount = summary.AvailableCount
-	if newGrant {
-		return []string{key}
+	state.RateLimitWindows = current
+	if resetKey != "" && !resetCreditConsumed {
+		return []string{"rate-limit-window:" + resetKey}
 	}
 	return nil
+}
+
+func flattenRateLimitWindows(snapshots map[string]RateLimitSnapshot) map[string]persistedRateLimitWindow {
+	windows := make(map[string]persistedRateLimitWindow, len(snapshots)*2)
+	for mapKey, snapshot := range snapshots {
+		limitID := strings.TrimSpace(snapshot.LimitID)
+		if limitID == "" {
+			limitID = mapKey
+		}
+		if snapshot.Primary != nil {
+			windows[limitID+":primary"] = persistRateLimitWindow(*snapshot.Primary)
+		}
+		if snapshot.Secondary != nil {
+			windows[limitID+":secondary"] = persistRateLimitWindow(*snapshot.Secondary)
+		}
+	}
+	return windows
+}
+
+func persistRateLimitWindow(window RateLimitWindow) persistedRateLimitWindow {
+	persisted := persistedRateLimitWindow{UsedPercent: window.UsedPercent}
+	if window.WindowDurationMins != nil {
+		persisted.WindowDurationMins = *window.WindowDurationMins
+	}
+	if window.ResetsAt != nil {
+		persisted.ResetsAt = *window.ResetsAt
+	}
+	return persisted
+}
+
+func isUnexpectedEarlyReset(previous, current persistedRateLimitWindow, now time.Time) bool {
+	if current.UsedPercent >= previous.UsedPercent || previous.ResetsAt <= 0 {
+		return false
+	}
+	// A normal reset happens at the previously advertised reset timestamp. Give
+	// polling and clock skew ten minutes of slack; only an earlier drop is the
+	// manual-reset signal.
+	return now.Add(scheduledResetGraceWindow).Unix() < previous.ResetsAt
 }
 
 func applyWorkspaceMessages(state *persistedState, snapshot WorkspaceMessagesSnapshot) []string {
@@ -246,7 +277,6 @@ func isExplicitSpecialResetMessage(body string) bool {
 	}
 	for _, explicit := range []string{
 		"special reset",
-		"reset credit",
 		"limits have been reset for everyone",
 		"limits have been reset for all users",
 		"limit has been reset for everyone",
@@ -255,6 +285,10 @@ func isExplicitSpecialResetMessage(body string) bool {
 		if strings.Contains(text, explicit) {
 			return true
 		}
+	}
+	if strings.Contains(text, "have been reset") &&
+		(strings.Contains(text, "for all") || strings.Contains(text, "across all")) {
+		return true
 	}
 	return false
 }

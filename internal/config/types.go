@@ -55,8 +55,8 @@ type PhoneNotificationsConfig struct {
 	URL    string `toml:"url"`
 }
 
-// CodexResetNotificationsConfig controls announcements for special Codex
-// rate-limit reset credits. Normal quota-window resets are never announced.
+// CodexResetNotificationsConfig controls announcements for Codex rate-limit
+// windows reset before their advertised schedule.
 type CodexResetNotificationsConfig struct {
 	Enabled             bool     `toml:"enabled"`
 	Network             string   `toml:"network"`
@@ -275,7 +275,7 @@ func (c *HTTPConfig) GetResponseHeaderTimeoutDuration() time.Duration {
 	return time.Duration(c.ResponseHeaderTimeout) * time.Second
 }
 
-// GetPollIntervalDuration returns how often Codex reset-credit state is read.
+// GetPollIntervalDuration returns how often Codex rate-limit state is read.
 func (c *CodexResetNotificationsConfig) GetPollIntervalDuration() time.Duration {
 	return time.Duration(c.PollIntervalSeconds) * time.Second
 }

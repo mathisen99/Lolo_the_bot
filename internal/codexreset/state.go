@@ -11,15 +11,22 @@ import (
 const stateVersion = 1
 
 type persistedState struct {
-	Version                       int                   `json:"version"`
-	ResetCreditsInitialized       bool                  `json:"reset_credits_initialized"`
-	LastAvailableResetCreditCount int64                 `json:"last_available_reset_credit_count"`
-	KnownCreditIDs                []string              `json:"known_credit_ids,omitempty"`
-	WorkspaceMessagesInitialized  bool                  `json:"workspace_messages_initialized"`
-	KnownWorkspaceMessageIDs      []string              `json:"known_workspace_message_ids,omitempty"`
-	LastCheckedAt                 int64                 `json:"last_checked_at"`
-	LastAnnouncementAt            int64                 `json:"last_announcement_at"`
-	Pending                       []pendingAnnouncement `json:"pending,omitempty"`
+	Version                       int                                 `json:"version"`
+	RateLimitsInitialized         bool                                `json:"rate_limits_initialized"`
+	RateLimitWindows              map[string]persistedRateLimitWindow `json:"rate_limit_windows,omitempty"`
+	ResetCreditsInitialized       bool                                `json:"reset_credits_initialized"`
+	LastAvailableResetCreditCount int64                               `json:"last_available_reset_credit_count"`
+	WorkspaceMessagesInitialized  bool                                `json:"workspace_messages_initialized"`
+	KnownWorkspaceMessageIDs      []string                            `json:"known_workspace_message_ids,omitempty"`
+	LastCheckedAt                 int64                               `json:"last_checked_at"`
+	LastAnnouncementAt            int64                               `json:"last_announcement_at"`
+	Pending                       []pendingAnnouncement               `json:"pending,omitempty"`
+}
+
+type persistedRateLimitWindow struct {
+	UsedPercent        int   `json:"used_percent"`
+	WindowDurationMins int64 `json:"window_duration_mins,omitempty"`
+	ResetsAt           int64 `json:"resets_at,omitempty"`
 }
 
 type pendingAnnouncement struct {

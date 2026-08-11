@@ -33,6 +33,24 @@ func TestReadRPCResponseReturnsProtocolError(t *testing.T) {
 	}
 }
 
+func TestNormalizeRateLimitsPrefersMultiBucketView(t *testing.T) {
+	resetAt := int64(1234)
+	result := rateLimitsResult{
+		RateLimits: &RateLimitSnapshot{LimitID: "legacy"},
+		RateLimitsByLimitID: map[string]RateLimitSnapshot{
+			"codex": {Primary: &RateLimitWindow{UsedPercent: 42, ResetsAt: &resetAt}},
+		},
+	}
+
+	normalized := normalizeRateLimits(result)
+	if len(normalized) != 1 || normalized["codex"].LimitID != "codex" {
+		t.Fatalf("normalized rate limits = %#v, want codex multi-bucket view", normalized)
+	}
+	if normalized["codex"].Primary == nil || normalized["codex"].Primary.UsedPercent != 42 {
+		t.Fatalf("normalized primary window = %#v, want usedPercent 42", normalized["codex"].Primary)
+	}
+}
+
 func TestLiveAppServerAccountRead(t *testing.T) {
 	if os.Getenv("LOLO_TEST_CODEX_APP_SERVER") != "1" {
 		t.Skip("set LOLO_TEST_CODEX_APP_SERVER=1 to test the local Codex login")
@@ -40,8 +58,12 @@ func TestLiveAppServerAccountRead(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if _, err := (&AppServerSource{CodexPath: "/usr/bin/codex"}).Read(ctx); err != nil {
+	snapshot, err := (&AppServerSource{CodexPath: "/usr/bin/codex"}).Read(ctx)
+	if err != nil {
 		t.Fatalf("live Codex app-server account read failed: %v", err)
+	}
+	if len(snapshot.RateLimits) == 0 {
+		t.Fatal("live Codex app-server account read returned no rate-limit buckets")
 	}
 }
 

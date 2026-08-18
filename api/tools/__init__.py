@@ -1,7 +1,7 @@
 """
 Tools module for AI assistant.
 
-Provides web search, Python execution, image generation/editing, image analysis, URL fetching, user rules, chat history, paste, shell execution, null response, bug reporting, GPT image, Gemini image, usage statistics, source code introspection, IRC command, Claude coding, reminders, and log analysis capabilities.
+Provides web search, Python execution, image generation/editing, image analysis, URL fetching, user rules, community ignore voting, chat history, paste, shell execution, null response, bug reporting, GPT image, Gemini image, usage statistics, source code introspection, IRC command, Codex/Claude coding, reminders, and log analysis capabilities.
 """
 
 from .web_search import WebSearchTool
@@ -29,5 +29,7 @@ from .knowledge_base import KnowledgeBaseLearnTool, KnowledgeBaseSearchTool, Kno
 from .reminder import ReminderTool
 from .log_analyzer import LogAnalyzerTool
 from .execution_steps import ExecutionStepsTool
+from .ignore_vote import IgnoreVoteTool
+from .codex_code import CodexCodeTool
 
-__all__ = ["WebSearchTool", "PythonExecTool", "FluxCreateTool", "FluxEditTool", "ImageAnalysisTool", "FetchUrlTool", "UserRulesTool", "ChatHistoryTool", "PasteTool", "ShellExecTool", "NullResponseTool", "NULL_RESPONSE_MARKER", "BugReportTool", "GPTImageTool", "GeminiImageTool", "UsageStatsTool", "ReportStatusTool", "YouTubeSearchTool", "SourceCodeTool", "IRCCommandTool", "ClaudeTechTool", "STATUS_UPDATE_MARKER", "Tool", "is_image_tool", "check_image_rate_limit", "record_image_generation", "KnowledgeBaseLearnTool", "KnowledgeBaseSearchTool", "KnowledgeBaseListTool", "KnowledgeBaseForgetTool", "ReminderTool", "LogAnalyzerTool", "ExecutionStepsTool"]
+__all__ = ["WebSearchTool", "PythonExecTool", "FluxCreateTool", "FluxEditTool", "ImageAnalysisTool", "FetchUrlTool", "UserRulesTool", "ChatHistoryTool", "PasteTool", "ShellExecTool", "NullResponseTool", "NULL_RESPONSE_MARKER", "BugReportTool", "GPTImageTool", "GeminiImageTool", "UsageStatsTool", "ReportStatusTool", "YouTubeSearchTool", "SourceCodeTool", "IRCCommandTool", "ClaudeTechTool", "CodexCodeTool", "STATUS_UPDATE_MARKER", "Tool", "is_image_tool", "check_image_rate_limit", "record_image_generation", "KnowledgeBaseLearnTool", "KnowledgeBaseSearchTool", "KnowledgeBaseListTool", "KnowledgeBaseForgetTool", "ReminderTool", "LogAnalyzerTool", "ExecutionStepsTool", "IgnoreVoteTool"]

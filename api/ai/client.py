@@ -12,7 +12,7 @@ from openai import OpenAI
 from .config import AIConfig
 from .usage_tracker import log_usage, extract_usage_from_response
 from api.execution_trace import ExecutionTraceStore
-from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, ClaudeTechTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation, KnowledgeBaseLearnTool, KnowledgeBaseSearchTool, KnowledgeBaseListTool, KnowledgeBaseForgetTool, ReminderTool, LogAnalyzerTool, ExecutionStepsTool
+from api.tools import WebSearchTool, PythonExecTool, FluxCreateTool, FluxEditTool, ImageAnalysisTool, FetchUrlTool, UserRulesTool, ChatHistoryTool, PasteTool, ShellExecTool, NullResponseTool, NULL_RESPONSE_MARKER, BugReportTool, GPTImageTool, GeminiImageTool, UsageStatsTool, ReportStatusTool, YouTubeSearchTool, SourceCodeTool, IRCCommandTool, ClaudeTechTool, CodexCodeTool, STATUS_UPDATE_MARKER, is_image_tool, check_image_rate_limit, record_image_generation, KnowledgeBaseLearnTool, KnowledgeBaseSearchTool, KnowledgeBaseListTool, KnowledgeBaseForgetTool, ReminderTool, LogAnalyzerTool, ExecutionStepsTool, IgnoreVoteTool
 from api.utils.output import log_info, log_error, log_debug, log_success, log_warning
 
 
@@ -37,6 +37,7 @@ TOOL_STEP_SUMMARIES = {
     "analyze_image": "Analyzed the supplied image",
     "fetch_url": "Read the supplied webpage",
     "manage_user_rules": "Updated or checked saved user preferences",
+    "vote_to_ignore": "Recorded a community ignore vote",
     "query_chat_history": "Searched relevant chat history",
     "create_paste": "Created a formatted paste",
     "execute_shell": "Ran an owner-authorized system operation",
@@ -46,6 +47,7 @@ TOOL_STEP_SUMMARIES = {
     "source_code": "Inspected Lolo's source code",
     "irc_command": "Ran an authorized IRC operation",
     "claude_tech": "Ran the coding assistant",
+    "codex_code": "Asked Codex for programming help",
     "kb_learn": "Saved a source to the knowledge base",
     "kb_search": "Searched the knowledge base",
     "kb_list": "Listed knowledge-base sources",
@@ -160,6 +162,8 @@ class AIClient:
                         tools_used.append('FETCH_URL')
                     elif func_name == 'manage_user_rules':
                         tools_used.append('USER_RULES')
+                    elif func_name == 'vote_to_ignore':
+                        tools_used.append('IGNORE_VOTE')
                     elif func_name == 'query_chat_history':
                         tools_used.append('CHAT_HISTORY')
                     elif func_name == 'create_paste':
@@ -182,6 +186,8 @@ class AIClient:
                         tools_used.append('IRC_COMMAND')
                     elif func_name == 'claude_tech':
                         tools_used.append('CLAUDE_TECH')
+                    elif func_name == 'codex_code':
+                        tools_used.append('CODEX_CODE')
                     elif func_name == 'reminder':
                         tools_used.append('REMINDER')
                     elif func_name == 'log_analyzer':
@@ -230,6 +236,11 @@ class AIClient:
             user_rules = UserRulesTool()
             self.tools[user_rules.name] = user_rules
             log_info("User rules tool enabled")
+
+        if self.config.ignore_vote_enabled:
+            ignore_vote = IgnoreVoteTool()
+            self.tools[ignore_vote.name] = ignore_vote
+            log_info("Community ignore voting tool enabled")
         
         if self.config.chat_history_enabled:
             chat_history = ChatHistoryTool()
@@ -290,6 +301,20 @@ class AIClient:
             claude_tech = ClaudeTechTool()
             self.tools[claude_tech.name] = claude_tech
             log_info("Claude tech tool enabled (Opus via Bedrock)")
+
+        if self.config.codex_code_enabled:
+            codex_code = CodexCodeTool(
+                codex_path=self.config.codex_code_path,
+                model=self.config.codex_code_model,
+                reasoning_effort=self.config.codex_code_reasoning_effort,
+                timeout=self.config.codex_code_timeout,
+                paste_threshold=self.config.codex_code_paste_threshold,
+                max_prompt_chars=self.config.codex_code_max_prompt_chars,
+                max_concurrent=self.config.codex_code_max_concurrent,
+                paste_tool=self.tools.get("create_paste"),
+            )
+            self.tools[codex_code.name] = codex_code
+            log_info("Codex code tool enabled (isolated non-interactive CLI)")
             
         # Report Status tool is always enabled as it's a core feature for long-running tasks
         report_status = ReportStatusTool()
@@ -540,6 +565,7 @@ class AIClient:
             # JSON is layout-sensitive code and must never be flattened into
             # inline IRC messages. Paste it before IRC cleanup removes newlines.
             output_text = self._paste_json_for_irc(output_text, request_id)
+            output_text = self._ensure_botbin_formatted_urls(output_text)
             
             # Clean response for IRC (remove newlines, strip markdown links, append sources)
             cleaned_text = self._clean_for_irc(output_text, citations)
@@ -567,7 +593,8 @@ class AIClient:
         permission_level: str,
         command_prefix: str,
         request_id: str,
-        network: str = "libera"
+        network: str = "libera",
+        hostmask: str = "",
     ):
         """
         Generate AI response with conversation context, streaming updates.
@@ -584,6 +611,45 @@ class AIClient:
                 self.trace_store.start_run(request_id, nick, network, channel, user_message)
             except Exception as exc:
                 log_warning(f"[{request_id}] Failed to start execution trace: {exc}")
+
+        # Obvious programming requests bypass the Responses API entirely. This
+        # uses the local authenticated Codex subscription for the answer and
+        # keeps the API tool router as a fallback for ambiguous/mixed requests.
+        codex_tool = self.tools.get("codex_code")
+        if codex_tool is not None and codex_tool.should_route_directly(user_message):
+            context_lines = []
+            for item in (conversation_history or [])[-8:]:
+                timestamp = str(getattr(item, "timestamp", ""))[:40]
+                speaker = str(getattr(item, "nick", ""))[:80]
+                content = str(getattr(item, "content", ""))[:2000]
+                context_lines.append(f"[{timestamp}] {speaker}: {content}")
+            user_rules = self._get_user_rules(nick)
+            if user_rules:
+                context_lines.append(f"Saved preferences for {nick}: {user_rules[:2000]}")
+            codex_context = "\n".join(context_lines)[-8000:]
+            codex_args = {
+                "question": user_message,
+                "context": codex_context,
+            }
+            log_info(f"[{request_id}] Routing obvious programming request directly to Codex")
+            try:
+                codex_result = codex_tool.execute(**codex_args)
+            except Exception as exc:
+                codex_result = f"Error: Direct Codex route failed: {exc}"
+            outcome = "failed" if str(codex_result).startswith("Error:") else "completed"
+            self._record_execution_step(
+                request_id,
+                "codex_code",
+                outcome,
+                arguments=codex_args,
+                result=codex_result,
+            )
+            if outcome == "completed":
+                codex_result = self._ensure_botbin_formatted_urls(codex_result)
+                self._finish_execution_trace(request_id, "success", codex_result)
+                yield {"status": "success", "message": codex_result}
+                return
+            log_warning(f"[{request_id}] Direct Codex route failed; falling back to API router: {codex_result}")
         
         try:
             # Build tool definitions
@@ -624,7 +690,7 @@ class AIClient:
             
             # Handle function calls with streaming support
             response_generator = self._handle_function_calls_stream(
-                response, full_input, request_id, permission_level, nick, network, channel
+                response, full_input, request_id, permission_level, nick, network, channel, hostmask
             )
             
             final_response = None
@@ -676,6 +742,7 @@ class AIClient:
             # JSON is layout-sensitive code and must never be flattened into
             # inline IRC messages. Paste it before IRC cleanup removes newlines.
             output_text = self._paste_json_for_irc(output_text, request_id)
+            output_text = self._ensure_botbin_formatted_urls(output_text)
             
             # Use accumulated citations from all iterations, plus any from final response
             final_citations = self._extract_citations(final_response, request_id)
@@ -728,14 +795,16 @@ class AIClient:
         permission_level: str,
         command_prefix: str,
         request_id: str,
-        network: str = "libera"
+        network: str = "libera",
+        hostmask: str = "",
     ) -> str:
         """
         Legacy blocking method for backward compatibility.
         Wraps the streaming method and just returns the final result.
         """
         generator = self.generate_response_with_context_stream(
-            user_message, nick, channel, conversation_history, permission_level, command_prefix, request_id, network
+            user_message, nick, channel, conversation_history, permission_level,
+            command_prefix, request_id, network, hostmask
         )
         
         final_message = "I couldn't generate a proper response."
@@ -764,7 +833,7 @@ class AIClient:
         
         return final_response, null_triggered, total_usage
 
-    def _handle_function_calls_stream(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal", nick: str = "", network: str = "libera", channel: str = ""):
+    def _handle_function_calls_stream(self, response: Any, original_input: str, request_id: str, permission_level: str = "normal", nick: str = "", network: str = "libera", channel: str = "", hostmask: str = ""):
         """
         Handle function calls in the response using multi-turn tool calling.
         Yields status events during execution.
@@ -940,8 +1009,13 @@ class AIClient:
                             continue
                     
                     # Inject permission_level/context for specific tools
-                    if func_name in ('manage_user_rules', 'execute_shell', 'source_code', 'bug_report', 'irc_command', 'reminder', 'log_analyzer', 'usage_stats'):
+                    if func_name in ('manage_user_rules', 'execute_shell', 'source_code', 'bug_report', 'irc_command', 'reminder', 'log_analyzer', 'usage_stats', 'vote_to_ignore'):
                         func_args['permission_level'] = permission_level
+                        if func_name == 'vote_to_ignore':
+                            func_args['requesting_user'] = nick
+                            func_args['_voter_identity'] = hostmask or f"nick:{nick}"
+                            func_args['_current_network'] = network
+                            func_args['_current_channel'] = channel
                         if func_name == 'bug_report':
                             func_args['requesting_user'] = nick
                             func_args['channel'] = channel
@@ -1357,6 +1431,30 @@ class AIClient:
         except (json.JSONDecodeError, TypeError):
             return False
         return isinstance(value, (dict, list))
+
+    @staticmethod
+    def _ensure_botbin_formatted_urls(text: str) -> str:
+        """Ensure every raw Botbin URL has a formatted-view companion URL."""
+        if not text:
+            return text
+
+        pattern = re.compile(
+            r"https?://botbin\.net/(?!paste/)([A-Za-z0-9][A-Za-z0-9._~-]*)",
+            re.IGNORECASE,
+        )
+        original = text
+        added = set()
+
+        def add_formatted(match: Any) -> str:
+            raw_url = match.group(0)
+            paste_id = match.group(1)
+            formatted_url = f"https://botbin.net/paste/{paste_id}"
+            if formatted_url in original or formatted_url in added:
+                return raw_url
+            added.add(formatted_url)
+            return f"{raw_url} | Formatted: {formatted_url}"
+
+        return pattern.sub(add_formatted, text)
 
     def _upload_json_paste(self, content: str, request_id: str) -> Optional[str]:
         """Upload JSON code through the configured paste tool."""

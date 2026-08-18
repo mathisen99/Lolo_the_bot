@@ -16,12 +16,14 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - **Image Archiving** - Auto-download images from configured channels to local `img/` folder
 - **Python Sandbox** - Secure Python execution in Firecracker microVM (matplotlib, numpy, pandas, etc.)
 - **Text Pasting** - Create pastes for long code/text (botbin.net integration)
+- **Codex Coding Assistant** - Route programming questions and code generation through the local non-interactive Codex CLI, with automatic Botbin pastes for multi-line code
 - **Chat History** - Access conversation context and history
 - **Shell Execution** - Run system commands (owner only)
 - **IRC Commands** - Execute IRC commands via AI (whois, NickServ, ChanServ, channel queries)
 - **Source Code Introspection** - AI can read and explain its own source code
 - **Agentic Status Reporting** - One concise working acknowledgement for long-running tasks, followed by the final answer
 - **Knowledge Base (RAG)** - Learn from PDFs/articles and answer questions about them
+- **Community Ignore Voting** - Three distinct users voting within 24 hours can place a normal user on the bot ignore list
 
 ### Bot Management
 - **User Memories** - Per-user memories and custom personas that persist across conversations
@@ -41,7 +43,7 @@ A modular IRC bot with AI-powered conversations, image generation, and extensibl
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) (Python package manager)
 - KVM access (optional, for Python sandbox - `/dev/kvm`)
 - Docker (optional, for building Python sandbox rootfs)
-- An installed and authenticated Codex CLI (optional, for special reset notifications)
+- An installed and authenticated Codex CLI (optional, for programming assistance and special reset notifications)
 
 **API Keys Required:**
 - **OpenAI API key** - For AI conversations and reasoning ([platform.openai.com](https://platform.openai.com))
@@ -233,7 +235,9 @@ The bot has access to these tools when mentioned:
 | **Image Analysis** | Analyze, describe, or extract text from images | "what's in this image?" |
 | **Python Sandbox** | Run Python code in secure Firecracker VM | "plot sin(x)", "calculate factorial(100)" |
 | **Text Pasting** | Create pastes for long content | "paste this code snippet" |
+| **Codex Coding** | Generate, explain, review, debug, fix, or translate code through the local Codex CLI; multi-line code is pasted automatically | "write a Go HTTP server" |
 | **User Memories** | Store personal facts and preferences | "remember I like cats" |
+| **Ignore Voting** | Vote to prevent a normal user from using the bot; requires 3 distinct voters in 24 hours | "vote to ignore SomeNick" |
 | **Shell Execution** | Run system commands (owner only) | "check disk space" |
 | **YouTube Search** | Search videos and comments | "search youtube for funny cats" |
 | **GPT Image 2** | High-quality image generation and editing with strong text rendering | "generate with GPT: a sign saying HELLO" |
@@ -565,7 +569,9 @@ gemini_image_enabled = true    # Nano Banana Pro image generation (Gemini)
 image_analysis_enabled = true  # Image analysis/OCR
 python_exec_enabled = true     # Python code execution
 paste_enabled = true           # Text pasting to botbin.net
+codex_code_enabled = true      # Programming help via the authenticated Codex CLI
 user_rules_enabled = true      # Per-user memories and rules
+ignore_vote_enabled = true     # Community voting for the bot ignore list
 chat_history_enabled = true    # Conversation history access
 shell_exec_enabled = true      # Shell command execution (owner only)
 youtube_search_enabled = true  # YouTube search and stats
@@ -576,6 +582,16 @@ bug_report_enabled = true      # User bug reporting system
 irc_command_enabled = true     # IRC commands and channel queries
 source_code_enabled = true     # Source code introspection
 ```
+
+Codex coding requests use `codex exec` in ephemeral, non-interactive mode. Run
+`codex login` as the same operating-system user that runs the Python API. The
+default `[codex_code]` settings use `/usr/bin/codex`, allow two concurrent
+requests, pin `gpt-5.6-sol` with `high` reasoning, and automatically send
+multi-line code to Botbin with both raw and formatted-view URLs. Codex receives a
+scrubbed environment and an isolated empty workspace; it does not receive the
+Lolo repository as context. Obvious programming requests bypass the Responses
+API entirely; mixed or ambiguous requests stay on the normal tool router, which
+can fetch required context before delegating the code work to Codex.
 
 **Note:** Tools requiring missing API keys will be automatically disabled.
 
@@ -611,6 +627,11 @@ source_code_enabled = true     # Source code introspection
 - Verify `codex_path` points to the installed Codex executable
 - Check that every notification channel is listed on the selected `[[networks]]` entry
 - Review the bot log for `Codex reset watcher` warnings
+
+**Codex coding requests fail**
+- Run `codex login status` as the same operating-system user that runs the Python API
+- Verify `[codex_code].path` in `api/config/ai_settings.toml`
+- Verify `BOTBIN_API_KEY` if generated multi-line code cannot be uploaded
 
 **Permission denied errors**
 - Use `!verify PASSWORD` via PM (not in channel)

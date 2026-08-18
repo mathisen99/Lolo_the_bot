@@ -4,6 +4,46 @@ from api.ai.client import AIClient
 
 
 class AIClientTests(unittest.TestCase):
+    def test_raw_botbin_url_gets_formatted_view_companion(self):
+        result = AIClient._ensure_botbin_formatted_urls(
+            "Code: https://botbin.net/abc123"
+        )
+
+        self.assertEqual(
+            result,
+            "Code: https://botbin.net/abc123 | "
+            "Formatted: https://botbin.net/paste/abc123",
+        )
+
+    def test_existing_formatted_botbin_url_is_not_duplicated(self):
+        text = (
+            "Code: https://botbin.net/abc123 | "
+            "Formatted: https://botbin.net/paste/abc123"
+        )
+
+        self.assertEqual(AIClient._ensure_botbin_formatted_urls(text), text)
+
+    def test_obvious_code_request_bypasses_responses_api(self):
+        client = AIClient.__new__(AIClient)
+        client.tools = {"codex_code": RecordingCodexTool("Codex answer")}
+        client.trace_store = None
+
+        events = list(client.generate_response_with_context_stream(
+            user_message="write me a Python function",
+            nick="alice",
+            channel="#code",
+            conversation_history=[],
+            permission_level="normal",
+            command_prefix="!",
+            request_id="direct-codex",
+        ))
+
+        self.assertEqual(events, [{"status": "success", "message": "Codex answer"}])
+        self.assertEqual(
+            client.tools["codex_code"].calls,
+            [{"question": "write me a Python function", "context": ""}],
+        )
+
     def test_tool_definitions_require_public_audit_reason(self):
         client = AIClient.__new__(AIClient)
         client.tools = {
@@ -135,6 +175,20 @@ class RecordingPasteTool:
     def __init__(self, result):
         self.result = result
         self.calls = []
+
+    def execute(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.result
+
+
+class RecordingCodexTool:
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    @staticmethod
+    def should_route_directly(message):
+        return True
 
     def execute(self, **kwargs):
         self.calls.append(kwargs)

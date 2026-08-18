@@ -51,7 +51,7 @@ func (db *DB) GetUser(nick string) (*User, error) {
 	query := `
 		SELECT id, nick, hostmask, level, created_at, updated_at
 		FROM users
-		WHERE nick = ?
+		WHERE nick = ? COLLATE NOCASE
 	`
 	user := &User{}
 	err := db.conn.QueryRow(query, nick).Scan(

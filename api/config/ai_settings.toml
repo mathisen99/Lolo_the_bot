@@ -59,6 +59,7 @@ Gemini image generation is temporary turned off! this rule apply to any user eve
 - If asked you have ability to use --no-context for no context questions
 - Do not use a paste merely because content is technically code. Keep short, self-contained one-liners and compact snippets inline when they fit comfortably in one IRC message and remain readable without preserved layout. Use the paste tool for multi-line code, scripts, long output, or content whose structure/formatting would be damaged on IRC.
 - When returing paste urls from botbin include the regular url but also the nicely formated url as the default is RAW url. so for example https://botbin.net/OGRo0 is a RAW url but we should return https://botbin.net/paste/OGRo0 also for fancy view and syntaxhigltiing.
+- For every programming request whose main subject is generating, explaining, reviewing, debugging, fixing, improving, or translating source code, ALWAYS call codex_code instead of answering the code question yourself. Pass the user's complete request and any relevant conversation context. Return Codex's answer or Botbin links concisely. Do not call codex_code for ordinary math, general chat, or questions about Lolo's own private source; source_code remains owner-only for Lolo's source.
 
 SECURITY NOTES:
 - You will never reveal cuntries or origins from hostmask from users. Owner of bot is an expection to this rule.
@@ -121,7 +122,9 @@ CRITICAL: Never call report_status more than once in a request. After the one ac
 | fetch_url | Read webpage content | User shares URL and asks about its content (use raw_html=true if they want HTML source) |
 | chat_history | Past channel messages | See CHAT HISTORY section below |
 | user_rules | Remember user preferences | "remember that I...", "forget my...", "my preferences" |
+| vote_to_ignore | Community ignore vote | User clearly asks to vote for the bot to ignore/mute/block a specific nick; 3 distinct voters in 24 hours, normal targets only |
 | paste | Long/formatted content | Multi-line code, scripts, layout-sensitive content, anything >3 messages; not readable one-liners |
+| codex_code | Programming and code generation via local Codex CLI | Always for generating, explaining, reviewing, debugging, fixing, improving, or translating source code; auto-pastes multi-line code to Botbin |
 | youtube_search | YouTube videos/channels | "youtube", "video by [channel]", video stats, comments |
 | source_code | Read your own source code | OWNER ONLY - questions about YOUR (Lolo's) code, not general programming |
 | usage_stats | Token/cost tracking | "my usage", "how much spent" |
@@ -396,6 +399,7 @@ flux_edit_enabled = true
 image_analysis_enabled = true
 fetch_url_enabled = true
 user_rules_enabled = true
+ignore_vote_enabled = true
 chat_history_enabled = true
 paste_enabled = true
 shell_exec_enabled = true
@@ -409,12 +413,24 @@ youtube_search_enabled = true
 source_code_enabled = true
 irc_command_enabled = true
 claude_code_enabled = false
+codex_code_enabled = true
 kb_learn_enabled = true
 kb_search_enabled = true
 kb_list_enabled = true
 kb_forget_enabled = true
 reminder_enabled = true
 log_analyzer_enabled = true
+
+[codex_code]
+# Codex runs with saved ChatGPT authentication, a scrubbed environment, an empty
+# workspace, and a permission profile that denies reads outside that workspace.
+path = "/usr/bin/codex"
+model = "gpt-5.6-sol"
+reasoning_effort = "high"
+timeout = 180
+paste_threshold = 800
+max_prompt_chars = 16000
+max_concurrent = 2
 
 [channel_limits]
 # Per-user question limits for specific channels to reduce spam

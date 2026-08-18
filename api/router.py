@@ -418,7 +418,8 @@ async def handle_mention_stream(request: MentionRequest):
                     conversation_history=request.history if request.history else [],
                     permission_level=request.permission_level,
                     command_prefix=request.command_prefix,
-                    request_id=request.request_id
+                    request_id=request.request_id,
+                    hostmask=request.hostmask or ""
                 )
                 
                 for event in generator:

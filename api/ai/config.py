@@ -63,6 +63,7 @@ class AIConfig:
         self.image_analysis_enabled: bool = config["tools"]["image_analysis_enabled"]
         self.fetch_url_enabled: bool = config["tools"].get("fetch_url_enabled", True)
         self.user_rules_enabled: bool = config["tools"].get("user_rules_enabled", True)
+        self.ignore_vote_enabled: bool = config["tools"].get("ignore_vote_enabled", True)
         
         self.chat_history_enabled: bool = config["tools"].get("chat_history_enabled", True)
         self.paste_enabled: bool = config["tools"].get("paste_enabled", True)
@@ -76,6 +77,7 @@ class AIConfig:
         self.source_code_enabled: bool = config["tools"].get("source_code_enabled", True)
         self.irc_command_enabled: bool = config["tools"].get("irc_command_enabled", True)
         self.claude_code_enabled: bool = config["tools"].get("claude_code_enabled", True)
+        self.codex_code_enabled: bool = config["tools"].get("codex_code_enabled", True)
         
         # Knowledge Base tools
         self.kb_learn_enabled: bool = config["tools"].get("kb_learn_enabled", True)
@@ -94,6 +96,16 @@ class AIConfig:
         
         # IRC command settings
         self.irc_command_timeout: int = config.get("irc_command", {}).get("timeout", 30)
+
+        # Non-interactive Codex coding assistant settings
+        codex_config = config.get("codex_code", {})
+        self.codex_code_path: str = codex_config.get("path", "codex")
+        self.codex_code_model: str = codex_config.get("model", "gpt-5.6-sol")
+        self.codex_code_reasoning_effort: str = codex_config.get("reasoning_effort", "high")
+        self.codex_code_timeout: int = codex_config.get("timeout", 180)
+        self.codex_code_paste_threshold: int = codex_config.get("paste_threshold", 800)
+        self.codex_code_max_prompt_chars: int = codex_config.get("max_prompt_chars", 16000)
+        self.codex_code_max_concurrent: int = codex_config.get("max_concurrent", 2)
         
         # Web search settings
         self.web_search_external_access: bool = config["web_search"]["external_web_access"]
@@ -124,6 +136,8 @@ class AIConfig:
             tools.append("fetch_url")
         if self.user_rules_enabled:
             tools.append("manage_user_rules")
+        if self.ignore_vote_enabled:
+            tools.append("vote_to_ignore")
         if self.chat_history_enabled:
             tools.append("query_chat_history")
         if self.paste_enabled:
@@ -146,6 +160,8 @@ class AIConfig:
             tools.append("irc_command")
         if self.claude_code_enabled:
             tools.append("claude_tech")
+        if self.codex_code_enabled:
+            tools.append("codex_code")
         if self.reminder_enabled:
             tools.append("reminder")
         if self.log_analyzer_enabled:
